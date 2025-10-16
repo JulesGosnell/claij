@@ -1,0 +1,38 @@
+# Clojure
+/target
+/classes
+/checkouts
+profiles.clj
+pom.xml
+pom.xml.asc
+*.jar
+*.class
+/.lein-*
+/.nrepl-port
+/.nrepl-history
+.hgignore
+.hg/
+
+# Environment & secrets
+.env
+
+# deps.edn
+.cpcache/
+.clj-kondo/
+.clojure-mcp/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.calva/
+.lsp/
+
+# OS
+.DS_Store
+*~
+*.swp
+*.swo
+
+# Logs
+*.log
