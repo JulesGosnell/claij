@@ -40,4 +40,7 @@
         :extra-deps {nrepl/nrepl {:mvn/version "1.5.0"}
                      com.bhauman/clojure-mcp {:mvn/version "0.1.6-SNAPSHOT"
                                               :exclusions [org.slf4j/slf4j-nop]}}
-        :main-opts ["-m" "claij.clojure-mcp"]}}}
+        :main-opts ["-m" "claij.clojure-mcp"]}
+
+  :speech {:extra-deps {org.slf4j/slf4j-simple {:mvn/version "2.0.16"}}
+           :main-opts ["-m" "claij.speech.core"]}}}
