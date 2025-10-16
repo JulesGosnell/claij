@@ -1,7 +1,7 @@
-(ns agent-test
+(ns claij.agent.agent-test
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.core.async :refer [chan go-loop <! >!! <!! timeout]]
-            [claij.agent.agent :refer [start-mcp-agent]]))
+            [claij.agent.bridge :refer [start-mcp-bridge]]))
 
 (deftest test-mcp-agent
   (testing "MCP agent read and echo sequence"
@@ -9,7 +9,7 @@
           input-chan (chan)
           output-chan (chan)
           outputs (atom [])
-          stop (start-mcp-agent config input-chan output-chan)]
+          stop (start-mcp-bridge config input-chan output-chan)]
       (go-loop []
         (when-some [msg (<! output-chan)]
           (swap! outputs conj msg)
@@ -27,11 +27,11 @@
       (stop)))
 
   (testing "MCP agent invalid config"
-    (is (thrown? IllegalArgumentException (start-mcp-agent {:command "" :args [] :transport "stdio"} (chan) (chan)))
+    (is (thrown? IllegalArgumentException (start-mcp-bridge {:command "" :args [] :transport "stdio"} (chan) (chan)))
         "Empty command should throw")
-    (is (thrown? IllegalArgumentException (start-mcp-agent {:command "bash" :args "not-a-vector" :transport "stdio"} (chan) (chan)))
+    (is (thrown? IllegalArgumentException (start-mcp-bridge {:command "bash" :args "not-a-vector" :transport "stdio"} (chan) (chan)))
         "Non-vector args should throw")
-    (is (thrown? IllegalArgumentException (start-mcp-agent {:command "bash" :args [] :transport nil} (chan) (chan)))
+    (is (thrown? IllegalArgumentException (start-mcp-bridge {:command "bash" :args [] :transport nil} (chan) (chan)))
         "Nil transport should throw"))
 
   (testing "MCP agent empty input"
@@ -39,7 +39,7 @@
           input-chan (chan)
           output-chan (chan)
           outputs (atom [])
-          stop (start-mcp-agent config input-chan output-chan)]
+          stop (start-mcp-bridge config input-chan output-chan)]
       (go-loop []
         (when-some [msg (<! output-chan)]
           (swap! outputs conj msg)
@@ -54,7 +54,7 @@
     (let [config {:command "bash" :args [] :transport "stdio"}
           input-chan (chan)
           output-chan (chan)
-          stop (start-mcp-agent config input-chan output-chan)]
+          stop (start-mcp-bridge config input-chan output-chan)]
       (stop)
       (is (nil? (<!! (timeout 200))) "Stop should clean up without errors")))
 
@@ -63,7 +63,7 @@
           input-chan (chan)
           output-chan (chan)
           outputs (atom [])
-          stop (start-mcp-agent config input-chan output-chan)]
+          stop (start-mcp-bridge config input-chan output-chan)]
       (go-loop []
         (when-some [msg (<! output-chan)]
           (swap! outputs conj msg)

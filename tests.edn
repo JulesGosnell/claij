@@ -1,0 +1,7 @@
+#kaocha/v1
+ {:tests [{:id :unit
+           :test-paths ["test"]
+           :source-paths ["src"]}]
+  :plugins [:kaocha.plugin/profiling]
+  :color? true
+  :randomize? false}
