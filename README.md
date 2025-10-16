@@ -48,6 +48,62 @@ Think of it as a **"Clojure AI conductor"** - leveraging Clojure's strengths in 
 ./bin/test.sh
 ```
 
+## Setup
+
+### Clojure Components
+
+Requires:
+- Java 21+
+- Clojure CLI tools
+
+Install dependencies:
+```bash
+clojure -P  # Download all dependencies
+```
+
+### Speech-to-Text Service (Python)
+
+The Whisper service provides speech-to-text transcription.
+
+**Requirements:**
+- Python 3.8+
+- CUDA-capable NVIDIA GPU with CUDA and cuDNN (recommended for production)
+- CPU fallback available (slower, suitable for development)
+
+**Install Python dependencies:**
+```bash
+pip install -r src/py/requirements.txt
+```
+
+**Run the service:**
+```bash
+./bin/whisper.sh
+```
+
+The service will start on `http://0.0.0.0:8000` and auto-download the Whisper model on first run (~500MB for "small" model).
+
+**Model options** (edit `src/py/whisper_service.py`):
+- `tiny` - Fastest, least accurate (~75MB)
+- `small` - Good balance (~500MB) **[default]**
+- `medium` - Better accuracy (~1.5GB)
+- `large-v3` - Best accuracy (~3GB)
+
+### Speech Client (Clojure)
+
+Record and transcribe speech:
+```bash
+./bin/speech.sh                                    # Use default service URL
+./bin/speech.sh http://custom-host:8000/transcribe # Custom service URL
+WHISPER_URL=http://host:8000/transcribe ./bin/speech.sh # Via environment
+```
+
+The client will:
+1. Listen for speech (detected by audio level)
+2. Record until 1 second of silence
+3. Send audio to Whisper service
+4. Display transcribed text
+5. Repeat
+
 ### Project Status
 
 **claij** is currently a proof-of-concept playground. It's actively evolving as different integration patterns and orchestration strategies are explored.
@@ -72,7 +128,7 @@ Clojure is ideal for this kind of integration work:
 
 ## License
 
-[To be determined]
+Apache License 2.0 - See [LICENSE](LICENSE) file for details.
 
 ---
 
