@@ -16,8 +16,7 @@
    Dependencies:
    - Requires libpython-clj and Python libraries (numpy, soundfile)
    - Use with :whisper alias: clojure -M:whisper"
-  (:require [clojure.tools.logging :as log]
-            [claij.whisper.python :as whisper-py]))
+  (:require [claij.whisper.python :as whisper-py]))
 
 (set! *warn-on-reflection* true)
 
