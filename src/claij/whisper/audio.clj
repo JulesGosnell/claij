@@ -4,63 +4,53 @@
    
    NOTE: Requires libpython-clj and Python with numpy, soundfile
    To run: clojure -M:whisper"
-  (:require [clojure.tools.logging :as log])
+  (:require [clojure.tools.logging :as log]
+            [libpython-clj2.python :as py]
+            [libpython-clj2.require :refer [require-python]])
   (:import [java.io ByteArrayInputStream]))
 
 (defonce ^:private modules-loaded? (atom false))
-(defonce ^:private python-available? (atom nil))
-
-(defn- check-python-available []
-  (when (nil? @python-available?)
-    (reset! python-available?
-            (try
-              (require '[libpython-clj2.python :as py])
-              (require '[libpython-clj2.require :refer [require-python]])
-              true
-              (catch Exception e
-                (log/error "libpython-clj not available")
-                false))))
-  @python-available?)
 
 (defn- load-python-modules!
   "Load required Python modules (lazy, only once)."
   []
   (when-not @modules-loaded?
-    (when (check-python-available?)
-      (let [require-python (requiring-resolve 'libpython-clj2.require/require-python)]
-        (require-python '[numpy :as np]
-                        '[soundfile :as sf]
-                        '[io :as pyio])
-        (reset! modules-loaded? true)))))
+    (require-python 'numpy)
+    (require-python 'soundfile)
+    (require-python 'io)
+    (reset! modules-loaded? true)))
 
 (defn wav-bytes->audio-array
   "Convert WAV format bytes to numpy float32 array suitable for Whisper.
    Processes audio entirely in memory using Python's BytesIO.
    Returns numpy array of audio samples at 16kHz."
   [wav-bytes]
-  (if-not (check-python-available?)
-    (throw (ex-info "Python environment not available"
-                    {:reason "libpython-clj not loaded"
-                     :help "Run with: clojure -M:whisper"}))
-    (do
-      (load-python-modules!)
-      (let [py (requiring-resolve 'libpython-clj2.python)
-            pyio (resolve 'pyio)
-            sf (resolve 'sf)
-            np (resolve 'np)
-            ;; Create Python BytesIO from Java bytes
-            bytes-io (@py :call-attr @pyio :BytesIO (@py :->py-bytes wav-bytes))
-            ;; Read audio using soundfile (returns [data, samplerate])
-            [audio-data sample-rate] (@py :call-attr @sf :read bytes-io)]
+  (load-python-modules!)
+  (let [;; Get Python modules
+        np (py/import-module "numpy")
+        sf (py/import-module "soundfile")
+        pyio (py/import-module "io")
+        builtins (py/import-module "builtins")
+        ;; Convert Java signed bytes to unsigned (0-255 range)
+        ;; Java bytes are -128 to 127, but Python bytes needs 0-255
+        unsigned-bytes (mapv #(bit-and (int %) 0xFF) wav-bytes)
+        ;; Convert to Python bytes using bytes() constructor
+        py-bytes (py/call-attr builtins "bytes" unsigned-bytes)
+        ;; Create Python BytesIO from bytes
+        bytes-io (py/call-attr pyio "BytesIO" py-bytes)
+        ;; Read audio using soundfile (returns [data, samplerate])
+        result (py/call-attr sf "read" bytes-io)
+        audio-data (py/get-item result 0)
+        sample-rate (py/get-item result 1)]
 
-        ;; Validate sample rate
-        (when (not= sample-rate 16000)
-          (throw (ex-info "Audio must be 16kHz"
-                          {:sample-rate sample-rate
-                           :expected 16000})))
+    ;; Validate sample rate
+    (when (not= sample-rate 16000)
+      (throw (ex-info "Audio must be 16kHz"
+                      {:sample-rate sample-rate
+                       :expected 16000})))
 
-        ;; Convert to float32 for Whisper
-        (@py :call-attr audio-data :astype (@py :get-attr @np :float32))))))
+    ;; Convert to float32 for Whisper
+    (py/call-attr audio-data "astype" (py/get-attr np "float32"))))
 
 (defn validate-audio
   "Validate audio byte array. Returns true if valid, throws exception otherwise."

@@ -3,17 +3,36 @@
   (:require [claij.whisper.audio :as audio]
             [claij.whisper.python :as whisper]
             [clojure.tools.logging :as log]
-            [clojure.data.json :as json]))
+            [clojure.data.json :as json]
+            [clojure.java.io :as io])
+  (:import [java.io ByteArrayOutputStream]))
 
 (defn- bytes-from-multipart
   "Extract bytes from a multipart file upload."
   [file-part]
   (cond
-    (bytes? file-part) file-part
-    (map? file-part) (or (:bytes file-part)
-                         (:tempfile file-part)
-                         (throw (ex-info "Invalid file part format" {:part file-part})))
-    :else (throw (ex-info "Unexpected file part type" {:type (type file-part)}))))
+    (bytes? file-part)
+    file-part
+
+    (map? file-part)
+    (cond
+      ;; Check for :bytes key (in-memory upload)
+      (:bytes file-part)
+      (:bytes file-part)
+
+      ;; Check for :tempfile key (file-based upload)
+      (:tempfile file-part)
+      (let [temp-file (:tempfile file-part)]
+        (with-open [in (io/input-stream temp-file)]
+          (let [baos (ByteArrayOutputStream.)]
+            (io/copy in baos)
+            (.toByteArray baos))))
+
+      :else
+      (throw (ex-info "Invalid file part format - no :bytes or :tempfile" {:part file-part})))
+
+    :else
+    (throw (ex-info "Unexpected file part type" {:type (type file-part)}))))
 
 (defn transcribe-handler
   "Ring handler for POST /transcribe endpoint.
