@@ -1,10 +1,9 @@
 (ns claij.speech.core
-  (:require [clojure.java.io :as io]
-            [clj-http.client :as http]
+  (:require [clj-http.client :as http]
             [clojure.tools.logging :as log]
             [clojure.data.json :refer [read-str]])
   (:import [javax.sound.sampled AudioFormat AudioSystem DataLine$Info TargetDataLine AudioFileFormat$Type]
-           [java.io ByteArrayOutputStream File]
+           [java.io ByteArrayOutputStream]
            [java.nio ByteBuffer ByteOrder]))
 
 ;; Audio configuration
@@ -69,22 +68,26 @@
    (and audio-data
         (>= (alength audio-data) min-audio-bytes))))
 
-(defn save-audio
-  "Save audio data to a temporary WAV file. Returns filename."
+(defn audio-data->wav-bytes
+  "Convert raw PCM audio data to WAV format bytes (in memory)."
   [audio-data]
-  (let [file (File/createTempFile "claij-speech-" ".wav")]
-    (with-open [audio-in (java.io.ByteArrayInputStream. audio-data)]
-      (javax.sound.sampled.AudioSystem/write
-       (javax.sound.sampled.AudioInputStream. audio-in audio-format (/ (alength audio-data) 2))
-       AudioFileFormat$Type/WAVE file))
-    (.getAbsolutePath file)))
+  (with-open [baos (ByteArrayOutputStream.)
+              audio-in (java.io.ByteArrayInputStream. audio-data)]
+    (let [audio-stream (javax.sound.sampled.AudioInputStream.
+                        audio-in
+                        audio-format
+                        (/ (alength audio-data) 2))]
+      (javax.sound.sampled.AudioSystem/write audio-stream AudioFileFormat$Type/WAVE baos))
+    (.toByteArray baos)))
 
 (defn post-to-whisper
-  "Post audio file to Whisper service. Returns transcription text or nil."
-  [filename whisper-url]
+  "Post audio data to Whisper service. Returns transcription text or nil."
+  [wav-bytes whisper-url]
   (try
     (let [response (http/post whisper-url
-                              {:multipart [{:name "audio" :content (io/file filename)}]
+                              {:multipart [{:name "audio"
+                                            :content wav-bytes
+                                            :filename "audio.wav"}]
                                :throw-exceptions false})]
       (if (= (:status response) 200)
         (:text (read-str (:body response) :key-fn keyword))
@@ -95,34 +98,27 @@
       (log/error "Failed to post to Whisper:" (.getMessage e))
       nil)))
 
-(defn cleanup-file
-  "Delete a file, returns nil. Safe to call with nil."
-  [filename]
-  (when filename
-    (io/delete-file filename true))
-  nil)
-
 ;; Transducers for the audio processing pipeline
 
-(defn save-audio-xf
-  "Transducer that saves audio data to file and adds :filename to context."
+(defn prepare-audio-xf
+  "Transducer that converts raw audio data to WAV format bytes."
   [rf]
   (fn
     ([] (rf))
     ([result] (rf result))
     ([result ctx]
-     (let [filename (save-audio (:audio-data ctx))]
-       (rf result (assoc ctx :filename filename))))))
+     (let [wav-bytes (audio-data->wav-bytes (:audio-data ctx))]
+       (rf result (assoc ctx :wav-bytes wav-bytes))))))
 
 (defn transcribe-xf
-  "Transducer that transcribes audio file and adds :text to context."
+  "Transducer that transcribes audio data and adds :text to context."
   [whisper-url]
   (fn [rf]
     (fn
       ([] (rf))
       ([result] (rf result))
       ([result ctx]
-       (let [text (post-to-whisper (:filename ctx) whisper-url)]
+       (let [text (post-to-whisper (:wav-bytes ctx) whisper-url)]
          (rf result (assoc ctx :text text)))))))
 
 (defn log-result-xf
@@ -137,27 +133,16 @@
        (log/error "Transcription failed"))
      (rf result ctx))))
 
-(defn cleanup-xf
-  "Transducer that cleans up temporary files."
-  [rf]
-  (fn
-    ([] (rf))
-    ([result] (rf result))
-    ([result ctx]
-     (cleanup-file (:filename ctx))
-     (rf result ctx))))
-
 ;; Pipeline composition
 
 (defn process-audio-xf
-  "Complete audio processing pipeline."
+  "Complete audio processing pipeline (all in-memory, no file I/O)."
   [whisper-url]
   (comp
    (filter (comp has-audio? :audio-data))
-   save-audio-xf
+   prepare-audio-xf
    (transcribe-xf whisper-url)
-   log-result-xf
-   cleanup-xf))
+   log-result-xf))
 
 ;; Lazy sequence of recordings
 
