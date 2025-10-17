@@ -35,7 +35,7 @@
    Returns:
      Python bytes object suitable for BytesIO."
   [^bytes java-bytes]
-  (let [builtins (whisper-py/py-import-module "builtins")
+  (let [builtins (whisper-py/get-python-module :builtins)
         unsigned-bytes (map #(bit-and (long %) 0xFF) java-bytes)]
     (whisper-py/py-call-attr builtins "bytes" unsigned-bytes)))
 
@@ -45,9 +45,9 @@
    Returns numpy array of audio samples at 16kHz."
   [^bytes wav-bytes]
   (whisper-py/ensure-modules-loaded!)
-  (let [np (whisper-py/py-import-module "numpy")
-        sf (whisper-py/py-import-module "soundfile")
-        pyio (whisper-py/py-import-module "io")
+  (let [np (whisper-py/get-python-module :numpy)
+        sf (whisper-py/get-python-module :soundfile)
+        pyio (whisper-py/get-python-module :io)
         ;; Convert to Python bytes and create BytesIO
         py-bytes (java-bytes->python-bytes wav-bytes)
         bytes-io (whisper-py/py-call-attr pyio "BytesIO" py-bytes)

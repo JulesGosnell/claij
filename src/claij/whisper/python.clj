@@ -11,8 +11,11 @@
    To run: clojure -M:whisper"
   (:require [clojure.tools.logging :as log]))
 
+(set! *warn-on-reflection* true)
+
 (defonce ^:private model-state (atom nil))
-(defonce ^:private modules-loaded? (atom #{}))
+(defonce ^:private modules-loaded? (atom false))
+(defonce ^:private module-cache (atom {}))
 
 (defn- python-available?
   "Check if libpython-clj2 is available on classpath."
@@ -31,12 +34,6 @@
             "Python support not available. Run with: clojure -M:whisper"
             {:type :python-not-available
              :help "Add :whisper alias to include libpython-clj2 dependencies"}))))
-
-(defn py-import-module
-  "Dynamically resolve and call py/import-module."
-  [module-name]
-  (let [import-fn (requiring-resolve 'libpython-clj2.python/import-module)]
-    (import-fn module-name)))
 
 (defn py-get-attr
   "Dynamically resolve and call py/get-attr."
@@ -58,25 +55,37 @@
 
 (defn ensure-modules-loaded!
   "Ensure all required Python modules are loaded (lazy, only once).
-   Loads: whisper, torch, numpy, soundfile, io, builtins"
+   Loads and caches: whisper, torch, numpy, soundfile, io, builtins.
+   All modules are stored in module-cache for reuse."
   []
-  (when (empty? @modules-loaded?)
+  (when-not @modules-loaded?
     (log/info "Loading Python modules for Whisper...")
-    (let [require-python (requiring-resolve 'libpython-clj2.require/require-python)]
-      (require-python '[whisper :as whisper])
-      (require-python '[torch :as torch])
-      (require-python '[numpy :as np])
-      (require-python '[soundfile :as sf])
-      (require-python '[io :as pyio])
-      (require-python '[builtins :as builtins]))
-    (reset! modules-loaded? #{:whisper :torch :numpy :soundfile :io :builtins})
+    (require-python-or-throw!)
+    (let [py-import (requiring-resolve 'libpython-clj2.python/import-module)]
+      (reset! module-cache
+              {:whisper (py-import "whisper")
+               :torch (py-import "torch")
+               :numpy (py-import "numpy")
+               :soundfile (py-import "soundfile")
+               :io (py-import "io")
+               :builtins (py-import "builtins")}))
+    (reset! modules-loaded? true)
     (log/info "Python modules loaded successfully")))
+
+(defn get-python-module
+  "Get a cached Python module by keyword.
+   Ensures modules are loaded first.
+   
+   Available modules: :whisper, :torch, :numpy, :soundfile, :io, :builtins"
+  [module-key]
+  (ensure-modules-loaded!)
+  (get @module-cache module-key))
 
 (defn detect-device
   "Detect available compute device (cuda or cpu).
-   Assumes Python modules are already loaded."
+   Uses cached torch module."
   []
-  (let [torch (py-import-module "torch")
+  (let [torch (get-python-module :torch)
         cuda (py-get-attr torch "cuda")
         is-available (py-call-attr cuda "is_available")]
     (if is-available
@@ -84,13 +93,13 @@
       "cpu")))
 
 (defn load-model!
-  "Load Whisper model and all required Python modules.
+  "Load Whisper model using cached Python modules.
    Model size options: tiny, small, medium, large-v3.
    Returns the loaded model."
   ([] (load-model! "small"))
   ([model-size]
    (ensure-modules-loaded!)
-   (let [whisper (py-import-module "whisper")
+   (let [whisper (get-python-module :whisper)
          device (detect-device)
          model (py-call-attr whisper "load_model" model-size device)]
      (log/info "Loaded Whisper model" model-size "on device" device)
