@@ -38,7 +38,7 @@
 
 (defn- build-error-response
   "Build error response from exception."
-  [exception]
+  [^Exception exception]
   (log/error exception "Transcription failed")
   {:status 500
    :headers {"Content-Type" "application/json"}
