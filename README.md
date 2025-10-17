@@ -57,8 +57,18 @@ While we're currently focused on building a complete Clojure development environ
 ### Running Tests
 
 ```bash
-./bin/test.sh
+# Unit tests (no Python required) - runs everywhere including CI
+clojure -M:test --skip integration
+
+# All tests including integration tests (requires Python environment)
+clojure -M:whisper:test
 ```
+
+The project uses a two-tier testing strategy:
+- **Unit tests** - Fast, no external dependencies, run on any machine
+- **Integration tests** - Require Python ML stack, test Whisper service with libpython-clj
+
+This allows the project to build and test in environments lacking Python/GPU (like CI runners) while still having comprehensive tests for the full system.
 
 ## Setup
 
@@ -73,32 +83,74 @@ Install dependencies:
 clojure -P  # Download all dependencies
 ```
 
-### Speech-to-Text Service (Python)
+### Speech-to-Text Services
 
-The Whisper service provides speech-to-text transcription.
+**claij** includes two implementations of the Whisper speech-to-text service:
 
-**Requirements:**
-- Python 3.8+
-- CUDA-capable NVIDIA GPU with CUDA and cuDNN (recommended for production)
-- CPU fallback available (slower, suitable for development)
+#### 1. Python Implementation (FastAPI)
 
-**Install Python dependencies:**
+Simple Python service using FastAPI - good for quick setup:
+
 ```bash
 pip install -r src/py/requirements.txt
+./bin/whisper.sh  # Starts on http://0.0.0.0:8000
 ```
 
-**Run the service:**
+**Model options** (edit `src/py/whisper_service.py`): `tiny`, `small` (default), `medium`, `large-v3`
+
+#### 2. Clojure Implementation (Pure Clojure + libpython-clj) ⭐
+
+**Showcases Clojure/Python interop** - A pure Clojure implementation that calls Python's Whisper library via `libpython-clj`.
+
+**Features:**
+- **All in-memory processing** - No temporary files (unlike Python version)
+- **Pure Clojure** - Ring/Jetty HTTP server with functional composition
+- **Optional Python dependency** - Project builds and tests without Python environment
+- **Clean architecture** - Decomposed into testable modules
+
+**Architecture:**
+- `claij.whisper.python` - Python interop layer (model loading, transcription)
+- `claij.whisper.audio` - Audio processing utilities (WAV conversion, validation)
+- `claij.whisper.handler` - Ring HTTP handlers (routing, request/response)
+- `claij.whisper.server` - Server lifecycle management
+
+**Requirements:**
+
+*Development (no Python needed):*
+- Java 21+ and Clojure CLI tools
+- Unit tests run without Python environment
+
+*Production (Python required):*
+- Python 3.8+ with: `openai-whisper`, `torch`, `numpy`, `soundfile`
+- NVIDIA GPU with CUDA (recommended) or CPU fallback
+
+**Setup and Run:**
+
 ```bash
-./bin/whisper.sh
+# Install Python dependencies (production only)
+pip install openai-whisper torch numpy soundfile
+
+# Download Clojure dependencies
+clojure -P -M:whisper
+
+# Run the service
+./bin/whisper-clj.sh                    # defaults: port 8000, host 0.0.0.0, model small
+./bin/whisper-clj.sh 9000               # custom port
+./bin/whisper-clj.sh 8000 localhost     # custom host
+./bin/whisper-clj.sh 8000 0.0.0.0 tiny  # tiny model (faster, less accurate)
 ```
 
-The service will start on `http://0.0.0.0:8000` and auto-download the Whisper model on first run (~500MB for "small" model).
+**API Endpoints:**
+- `POST /transcribe` - multipart/form-data with `audio` field (WAV, 16kHz) → `{"text": "..."}`
+- `GET /health` - `{"status": "healthy", "service": "whisper-clojure"}`
 
-**Model options** (edit `src/py/whisper_service.py`):
-- `tiny` - Fastest, least accurate (~75MB)
-- `small` - Good balance (~500MB) **[default]**
-- `medium` - Better accuracy (~1.5GB)
-- `large-v3` - Best accuracy (~3GB)
+**Why Two Implementations?**
+
+The Python version is simpler for quick prototyping. The Clojure version demonstrates:
+- How Clojure can leverage Python's ML ecosystem via libpython-clj
+- Functional composition and clean architecture principles
+- In-memory processing for better performance
+- Graceful degradation (builds/tests everywhere, runs where Python is available)
 
 ### Speech Client (Clojure)
 
@@ -137,8 +189,9 @@ Clojure is ideal for this kind of integration work:
 - **REPL-driven** - Interactive development matches interactive AI workflows
 - **JVM and ClojureScript** - Can run anywhere (backend, frontend, mobile)
 - **Rich ecosystem** - Great libraries for HTTP, async, JSON, WebSockets, etc.
+- **Python interop** - Via libpython-clj, can leverage Python's ML ecosystem while maintaining Clojure's functional elegance
 
-**Showcasing Clojure**: Ultimately, claij should demonstrate Clojure's exceptional suitability for AI orchestration and coordination tasks. While much of the current codebase is AI-generated (and thus not yet as elegant as hand-crafted Clojure), the project aims to evolve into a showcase of idiomatic Clojure's expressiveness and power in the AI domain.
+**Showcasing Clojure**: Ultimately, claij should demonstrate Clojure's exceptional suitability for AI orchestration and coordination tasks. The Clojure Whisper service is a prime example - leveraging Python's ML libraries while providing better architecture, in-memory processing, and graceful degradation. While much of the current codebase is AI-generated (and thus not yet as elegant as hand-crafted Clojure), the project aims to evolve into a showcase of idiomatic Clojure's expressiveness and power in the AI domain.
 
 ## Contributing
 

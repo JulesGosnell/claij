@@ -43,4 +43,9 @@
         :main-opts ["-m" "claij.clojure-mcp"]}
 
   :speech {:extra-deps {org.slf4j/slf4j-simple {:mvn/version "2.0.16"}}
-           :main-opts ["-m" "claij.speech.core"]}}}
+           :main-opts ["-m" "claij.speech.core"]}
+
+  :whisper {:extra-deps {org.slf4j/slf4j-simple {:mvn/version "2.0.16"}
+                         ;; Python interop - only needed to run whisper service
+                         clj-python/libpython-clj {:mvn/version "2.025"}}
+            :main-opts ["-m" "claij.whisper.server"]}}}
