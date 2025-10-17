@@ -8,6 +8,8 @@
             [claij.whisper.python :as whisper])
   (:gen-class))
 
+(set! *warn-on-reflection* true)
+
 (defonce ^:private server-state (atom nil))
 
 (defn- wrap-logging

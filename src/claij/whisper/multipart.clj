@@ -11,6 +11,8 @@
   (:require [clojure.java.io :as io])
   (:import [java.io ByteArrayOutputStream]))
 
+(set! *warn-on-reflection* true)
+
 (defn extract-bytes
   "Extract bytes from a multipart file upload.
    Handles both in-memory uploads (:bytes) and file-based uploads (:tempfile).
