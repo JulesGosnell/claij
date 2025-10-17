@@ -21,11 +21,17 @@
 
 (set! *warn-on-reflection* true)
 
+(defn- unsigned-byte
+  "Convert a Java signed byte to unsigned (0-255).
+   Java bytes are signed (-128 to 127), so we mask with 0xFF."
+  [b]
+  (bit-and (long b) 0xFF))
+
 (defn- java-bytes->python-bytes
   "Convert Java byte array to Python bytes object.
    
    Java bytes are signed (-128 to 127), Python bytes are unsigned (0-255).
-   This function handles the conversion by masking with 0xFF to get unsigned values.
+   This function converts by mapping each byte to unsigned representation.
    
    Example: Java byte -1 (0xFF) becomes Python byte 255
    
@@ -36,8 +42,37 @@
      Python bytes object suitable for BytesIO."
   [^bytes java-bytes]
   (let [builtins (whisper-py/get-python-module :builtins)
-        unsigned-bytes (map #(bit-and (long %) 0xFF) java-bytes)]
+        unsigned-bytes (map unsigned-byte java-bytes)]
     (whisper-py/py-call-attr builtins "bytes" unsigned-bytes)))
+
+(defn- create-bytes-io
+  "Create Python BytesIO from Java byte array."
+  [^bytes java-bytes]
+  (let [pyio (whisper-py/get-python-module :io)
+        py-bytes (java-bytes->python-bytes java-bytes)]
+    (whisper-py/py-call-attr pyio "BytesIO" py-bytes)))
+
+(defn- read-wav-from-bytesio
+  "Read audio data and sample rate from BytesIO using soundfile.
+   Returns [audio-data sample-rate]."
+  [bytes-io]
+  (let [sf (whisper-py/get-python-module :soundfile)]
+    (whisper-py/py-call-attr sf "read" bytes-io)))
+
+(defn- validate-sample-rate!
+  "Validate that audio is at 16kHz. Throws exception if not."
+  [sample-rate]
+  (when (not= sample-rate 16000)
+    (throw (ex-info "Audio must be 16kHz"
+                    {:sample-rate sample-rate
+                     :expected 16000}))))
+
+(defn- to-float32
+  "Convert numpy array to float32 type for Whisper."
+  [audio-data]
+  (let [np (whisper-py/get-python-module :numpy)]
+    (whisper-py/py-call-attr audio-data "astype"
+                             (whisper-py/py-get-attr np "float32"))))
 
 (defn wav-bytes->audio-array
   "Convert WAV format bytes to numpy float32 array suitable for Whisper.
@@ -45,22 +80,9 @@
    Returns numpy array of audio samples at 16kHz."
   [^bytes wav-bytes]
   (whisper-py/ensure-modules-loaded!)
-  (let [np (whisper-py/get-python-module :numpy)
-        sf (whisper-py/get-python-module :soundfile)
-        pyio (whisper-py/get-python-module :io)
-        ;; Convert to Python bytes and create BytesIO
-        py-bytes (java-bytes->python-bytes wav-bytes)
-        bytes-io (whisper-py/py-call-attr pyio "BytesIO" py-bytes)
-        ;; Read audio using soundfile (returns [data, samplerate])
-        [audio-data sample-rate] (whisper-py/py-call-attr sf "read" bytes-io)]
-
-    ;; Validate sample rate
-    (when (not= sample-rate 16000)
-      (throw (ex-info "Audio must be 16kHz"
-                      {:sample-rate sample-rate
-                       :expected 16000})))
-
-    ;; Convert to float32 for Whisper
-    (whisper-py/py-call-attr audio-data "astype" (whisper-py/py-get-attr np "float32"))))
+  (let [bytes-io (create-bytes-io wav-bytes)
+        [audio-data sample-rate] (read-wav-from-bytesio bytes-io)]
+    (validate-sample-rate! sample-rate)
+    (to-float32 audio-data)))
 
 
