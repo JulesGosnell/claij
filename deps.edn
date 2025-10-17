@@ -36,6 +36,18 @@
          :extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}}
          :main-opts ["-m" "kaocha.runner"]}
 
+  :coverage {:extra-paths ["test"]
+             :extra-deps {cloverage/cloverage {:mvn/version "1.2.4"}}
+             :main-opts ["-m" "cloverage.coverage"
+                         "--src-ns-path" "src"
+                         "--test-ns-path" "test"
+                         "--ns-exclude-regex" "claij.agent.*"
+                         "--ns-exclude-regex" "claij.clojure-mcp"
+                         "--ns-exclude-regex" "claij.core"
+                         "--test-ns-regex" "claij.(speech|whisper).*"
+                         "--exclude-call" "clojure.tools.logging"
+                         "--exclude-call" "taoensso.timbre"]}
+
   :mcp {:extra-paths ["test"]
         :extra-deps {nrepl/nrepl {:mvn/version "1.5.0"}
                      com.bhauman/clojure-mcp {:mvn/version "0.1.6-SNAPSHOT"
