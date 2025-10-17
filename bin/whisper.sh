@@ -1,19 +1,25 @@
 #!/bin/sh
 
-# Whisper speech-to-text service
+# Whisper speech-to-text service (Clojure implementation)
+# Uses libpython-clj to call Python's Whisper library
 # Requires: CUDA-capable GPU with CUDA and cuDNN installed
 # 
 # First-time setup:
-#   pip install -r src/py/requirements.txt
+#   pip install openai-whisper torch numpy soundfile
 #
 # Usage:
-#   ./bin/whisper.sh
+#   ./bin/whisper.sh [port] [host] [model-size]
+#
+# Examples:
+#   ./bin/whisper.sh                    # defaults: 8000, 0.0.0.0, small
+#   ./bin/whisper.sh 9000               # custom port
+#   ./bin/whisper.sh 8000 localhost     # custom host
+#   ./bin/whisper.sh 8000 0.0.0.0 tiny  # tiny model (faster, less accurate)
 
 cd "$(dirname "$0")/.."
 
-echo "Starting Whisper speech-to-text service on port 8000..."
+echo "Starting Whisper speech-to-text service (Clojure + libpython-clj)..."
 echo "Requires CUDA-capable GPU for best performance"
 echo ""
 
-cd src/py
-uvicorn whisper_service:app --host 0.0.0.0 --port 8000 --reload
+clojure -M:whisper "$@"
