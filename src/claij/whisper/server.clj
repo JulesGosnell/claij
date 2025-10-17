@@ -1,11 +1,11 @@
 (ns claij.whisper.server
-  "HTTP server for Whisper transcription service.
+  "HTTP server for Whisper transcription service using Jetty.
    Clojure implementation using libpython-clj to call Python's Whisper library."
-  (:require [claij.whisper.handler :as handler]
-            [claij.whisper.python :as whisper]
+  (:require [clojure.tools.logging :as log]
             [ring.adapter.jetty :as jetty]
             [ring.middleware.multipart-params :refer [wrap-multipart-params]]
-            [clojure.tools.logging :as log])
+            [claij.whisper.handler :as handler]
+            [claij.whisper.python :as whisper])
   (:gen-class))
 
 (defonce ^:private server-state (atom nil))
@@ -40,7 +40,7 @@
 
    (log/info "Initializing Whisper service...")
 
-   ;; Pre-load the model
+   ;; Pre-load model (which also loads Python modules)
    (whisper/load-model! model-size)
 
    (log/info "Starting HTTP server on" (str host ":" port))
@@ -57,7 +57,7 @@
 (defn stop-server!
   "Stop the Whisper HTTP server."
   []
-  (when-let [server @server-state]
+  (when-let [^org.eclipse.jetty.server.Server server @server-state]
     (log/info "Stopping Whisper service...")
     (.stop server)
     (reset! server-state nil)

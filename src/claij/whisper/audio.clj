@@ -1,47 +1,57 @@
 (ns claij.whisper.audio
   "Audio processing utilities for Whisper service.
-   All operations are performed in-memory without temporary files.
    
-   NOTE: Requires libpython-clj and Python with numpy, soundfile
-   To run: clojure -M:whisper"
+   This namespace provides in-memory audio processing functions for the Whisper
+   transcription service. Key features:
+   
+   - Converts WAV format bytes to numpy arrays for Whisper
+   - All operations performed in-memory (no temporary files)
+   - Handles Java/Python byte representation differences
+   - Validates audio format and sample rate
+   
+   Public API:
+   - wav-bytes->audio-array: Convert WAV bytes to numpy float32 array
+   - validate-audio: Validate audio byte array
+   
+   Dependencies:
+   - Requires libpython-clj and Python libraries (numpy, soundfile)
+   - Use with :whisper alias: clojure -M:whisper"
   (:require [clojure.tools.logging :as log]
-            [libpython-clj2.python :as py]
-            [libpython-clj2.require :refer [require-python]])
+            [claij.whisper.python :as whisper-py])
   (:import [java.io ByteArrayInputStream]))
 
-(defonce ^:private modules-loaded? (atom false))
-
-(defn- load-python-modules!
-  "Load required Python modules (lazy, only once)."
-  []
-  (when-not @modules-loaded?
-    (require-python 'numpy)
-    (require-python 'soundfile)
-    (require-python 'io)
-    (reset! modules-loaded? true)))
+(defn- java-bytes->python-bytes
+  "Convert Java byte array to Python bytes object.
+   
+   Java bytes are signed (-128 to 127), Python bytes are unsigned (0-255).
+   This function handles the conversion by masking with 0xFF to get unsigned values.
+   
+   Example: Java byte -1 (0xFF) becomes Python byte 255
+   
+   Args:
+     java-bytes - Java byte array
+   
+   Returns:
+     Python bytes object suitable for BytesIO."
+  [^bytes java-bytes]
+  (let [builtins (whisper-py/py-import-module "builtins")
+        unsigned-bytes (map #(bit-and (long %) 0xFF) java-bytes)]
+    (whisper-py/py-call-attr builtins "bytes" unsigned-bytes)))
 
 (defn wav-bytes->audio-array
   "Convert WAV format bytes to numpy float32 array suitable for Whisper.
    Processes audio entirely in memory using Python's BytesIO.
    Returns numpy array of audio samples at 16kHz."
-  [wav-bytes]
-  (load-python-modules!)
-  (let [;; Get Python modules
-        np (py/import-module "numpy")
-        sf (py/import-module "soundfile")
-        pyio (py/import-module "io")
-        builtins (py/import-module "builtins")
-        ;; Convert Java signed bytes to unsigned (0-255 range)
-        ;; Java bytes are -128 to 127, but Python bytes needs 0-255
-        unsigned-bytes (mapv #(bit-and (int %) 0xFF) wav-bytes)
-        ;; Convert to Python bytes using bytes() constructor
-        py-bytes (py/call-attr builtins "bytes" unsigned-bytes)
-        ;; Create Python BytesIO from bytes
-        bytes-io (py/call-attr pyio "BytesIO" py-bytes)
+  [^bytes wav-bytes]
+  (whisper-py/ensure-modules-loaded!)
+  (let [np (whisper-py/py-import-module "numpy")
+        sf (whisper-py/py-import-module "soundfile")
+        pyio (whisper-py/py-import-module "io")
+        ;; Convert to Python bytes and create BytesIO
+        py-bytes (java-bytes->python-bytes wav-bytes)
+        bytes-io (whisper-py/py-call-attr pyio "BytesIO" py-bytes)
         ;; Read audio using soundfile (returns [data, samplerate])
-        result (py/call-attr sf "read" bytes-io)
-        audio-data (py/get-item result 0)
-        sample-rate (py/get-item result 1)]
+        [audio-data sample-rate] (whisper-py/py-call-attr sf "read" bytes-io)]
 
     ;; Validate sample rate
     (when (not= sample-rate 16000)
@@ -50,15 +60,6 @@
                        :expected 16000})))
 
     ;; Convert to float32 for Whisper
-    (py/call-attr audio-data "astype" (py/get-attr np "float32"))))
+    (whisper-py/py-call-attr audio-data "astype" (whisper-py/py-get-attr np "float32"))))
 
-(defn validate-audio
-  "Validate audio byte array. Returns true if valid, throws exception otherwise."
-  [wav-bytes]
-  (when (nil? wav-bytes)
-    (throw (ex-info "Audio data is nil" {})))
 
-  (when (zero? (alength wav-bytes))
-    (throw (ex-info "Audio data is empty" {})))
-
-  true)
