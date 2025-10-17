@@ -6,6 +6,8 @@
            [java.io ByteArrayOutputStream ByteArrayInputStream]
            [java.nio ByteBuffer ByteOrder]))
 
+(set! *warn-on-reflection* true)
+
 ;; Audio configuration
 (def audio-format
   (AudioFormat. 16000 16 1 true false)) ; 16kHz, 16-bit, mono, signed PCM, little-endian
@@ -63,14 +65,14 @@
 
 (defn has-audio?
   "Check if audio data contains meaningful content."
-  [audio-data]
+  [^bytes audio-data]
   (boolean
    (and audio-data
         (>= (alength audio-data) min-audio-bytes))))
 
 (defn audio-data->wav-bytes
   "Convert raw PCM audio data to WAV format bytes (in memory)."
-  [audio-data]
+  [^bytes audio-data]
   (with-open [baos (ByteArrayOutputStream.)
               audio-in (ByteArrayInputStream. audio-data)]
     (let [audio-stream (AudioInputStream. audio-in audio-format (/ (alength audio-data) 2))]

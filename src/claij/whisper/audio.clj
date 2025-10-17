@@ -17,8 +17,9 @@
    - Requires libpython-clj and Python libraries (numpy, soundfile)
    - Use with :whisper alias: clojure -M:whisper"
   (:require [clojure.tools.logging :as log]
-            [claij.whisper.python :as whisper-py])
-  (:import [java.io ByteArrayInputStream]))
+            [claij.whisper.python :as whisper-py]))
+
+(set! *warn-on-reflection* true)
 
 (defn- java-bytes->python-bytes
   "Convert Java byte array to Python bytes object.
