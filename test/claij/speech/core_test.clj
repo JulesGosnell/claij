@@ -1,8 +1,6 @@
 (ns claij.speech.core-test
   (:require [clojure.test :refer [deftest is testing]]
-            [claij.speech.core :as speech]
-            [clojure.java.io :as io])
-  (:import [java.io File]))
+            [claij.speech.core :as speech]))
 
 (deftest test-has-audio?
   (testing "has-audio? validates audio data"
@@ -21,67 +19,46 @@
     (testing "more than sufficient audio data"
       (is (true? (speech/has-audio? (byte-array 64000)))))))
 
-(deftest test-save-audio
-  (testing "save-audio creates a WAV file"
+(deftest test-audio-data->wav-bytes
+  (testing "audio-data->wav-bytes creates WAV format in memory"
     (let [audio-data (byte-array 32000)
-          filename (speech/save-audio audio-data)
-          file (io/file filename)]
+          wav-bytes (speech/audio-data->wav-bytes audio-data)]
 
-      (testing "returns a filename"
-        (is (string? filename))
-        (is (not (empty? filename))))
+      (testing "returns byte array"
+        (is (bytes? wav-bytes)))
 
-      (testing "creates a file that exists"
-        (is (.exists file)))
+      (testing "result is not empty"
+        (is (pos? (alength wav-bytes))))
 
-      (testing "creates a file with .wav extension"
-        (is (.endsWith filename ".wav")))
+      (testing "result is larger than input (due to WAV headers)"
+        (is (> (alength wav-bytes) (alength audio-data))))
 
-      (testing "creates a file in temp directory"
-        (is (.startsWith filename (System/getProperty "java.io.tmpdir"))))
+      (testing "starts with RIFF header"
+        (let [header (String. (java.util.Arrays/copyOfRange wav-bytes 0 4) "UTF-8")]
+          (is (= "RIFF" header))))
 
-      (testing "creates a file with claij-speech prefix"
-        (is (.contains (.getName file) "claij-speech-")))
+      (testing "contains WAVE format identifier"
+        (let [wave-id (String. (java.util.Arrays/copyOfRange wav-bytes 8 12) "UTF-8")]
+          (is (= "WAVE" wave-id)))))))
 
-      ;; Cleanup
-      (io/delete-file file true))))
-
-(deftest test-cleanup-file
-  (testing "cleanup-file deletes files safely"
-    (testing "with nil filename"
-      (is (nil? (speech/cleanup-file nil))))
-
-    (testing "with existing file"
-      (let [temp-file (File/createTempFile "test-" ".tmp")
-            filename (.getAbsolutePath temp-file)]
-        (is (.exists temp-file))
-        (speech/cleanup-file filename)
-        (is (not (.exists temp-file)))))
-
-    (testing "with non-existent file"
-      (is (nil? (speech/cleanup-file "/tmp/does-not-exist-12345.wav"))))))
-
-(deftest test-save-audio-xf
-  (testing "save-audio-xf transducer"
+(deftest test-prepare-audio-xf
+  (testing "prepare-audio-xf transducer"
     (let [audio-data (byte-array 32000)
           ctx {:audio-data audio-data}
-          xf speech/save-audio-xf
+          xf speech/prepare-audio-xf
           result (into [] xf [ctx])]
 
       (testing "returns one result"
         (is (= 1 (count result))))
 
-      (testing "adds :filename to context"
-        (is (contains? (first result) :filename)))
+      (testing "adds :wav-bytes to context"
+        (is (contains? (first result) :wav-bytes)))
 
-      (testing "filename is a string"
-        (is (string? (:filename (first result)))))
+      (testing "wav-bytes is a byte array"
+        (is (bytes? (:wav-bytes (first result)))))
 
       (testing "preserves original context"
-        (is (= audio-data (:audio-data (first result)))))
-
-      ;; Cleanup
-      (speech/cleanup-file (:filename (first result))))))
+        (is (= audio-data (:audio-data (first result))))))))
 
 (deftest test-log-result-xf
   (testing "log-result-xf transducer"
@@ -101,27 +78,8 @@
         (is (= 1 (count result)))
         (is (= ctx (first result)))))))
 
-(deftest test-cleanup-xf
-  (testing "cleanup-xf transducer"
-    (let [temp-file (File/createTempFile "test-" ".wav")
-          filename (.getAbsolutePath temp-file)
-          ctx {:filename filename :text "test"}
-          xf speech/cleanup-xf]
-
-      (testing "file exists before cleanup"
-        (is (.exists temp-file)))
-
-      (testing "transducer processes context"
-        (let [result (into [] xf [ctx])]
-          (is (= 1 (count result)))
-          (is (= ctx (first result)))))
-
-      (testing "file is deleted after cleanup"
-        (into [] xf [ctx])
-        (is (not (.exists temp-file)))))))
-
 (deftest test-process-audio-xf-pipeline
-  (testing "complete audio processing pipeline (without HTTP)"
+  (testing "complete in-memory audio processing pipeline"
     (testing "filters out empty audio"
       (let [xf (speech/process-audio-xf "http://test:8000")
             contexts [{:audio-data (byte-array 100)} ; Too small
