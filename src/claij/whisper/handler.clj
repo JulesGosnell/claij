@@ -15,27 +15,51 @@
             [claij.whisper.multipart :as multipart]
             [claij.whisper.python :as whisper]))
 
+(set! *warn-on-reflection* true)
+
+(defn- log-audio-info
+  "Log audio file information and return audio-part unchanged."
+  [audio-part]
+  (log/info "Received audio file:" (:filename audio-part))
+  audio-part)
+
+(defn- log-audio-size
+  "Log audio byte size and return bytes unchanged."
+  [audio-bytes]
+  (log/debug "Audio size:" (count audio-bytes) "bytes")
+  audio-bytes)
+
+(defn- build-success-response
+  "Build successful transcription response."
+  [result]
+  {:status 200
+   :headers {"Content-Type" "application/json"}
+   :body (json/write-str {:text (:text result)})})
+
+(defn- build-error-response
+  "Build error response from exception."
+  [exception]
+  (log/error exception "Transcription failed")
+  {:status 500
+   :headers {"Content-Type" "application/json"}
+   :body (json/write-str {:error (.getMessage exception)})})
+
 (defn transcribe-handler
   "Ring handler for POST /transcribe endpoint.
    Expects multipart form data with an 'audio' field containing WAV bytes."
   [request]
   (try
-    (let [audio-part (get-in request [:multipart-params "audio"])
-          _ (log/info "Received audio file:" (:filename audio-part))
-          audio-bytes (multipart/extract-bytes audio-part)
-          _ (log/debug "Audio size:" (count audio-bytes) "bytes")
-          _ (multipart/validate-audio audio-bytes)
-          result (-> audio-bytes
-                     audio/wav-bytes->audio-array
-                     whisper/transcribe-audio)]
-      {:status 200
-       :headers {"Content-Type" "application/json"}
-       :body (json/write-str {:text (:text result)})})
+    (-> request
+        (get-in [:multipart-params "audio"])
+        log-audio-info
+        multipart/extract-bytes
+        log-audio-size
+        (doto multipart/validate-audio)
+        audio/wav-bytes->audio-array
+        whisper/transcribe-audio
+        build-success-response)
     (catch Exception e
-      (log/error e "Transcription failed")
-      {:status 500
-       :headers {"Content-Type" "application/json"}
-       :body (json/write-str {:error (.getMessage e)})})))
+      (build-error-response e))))
 
 (defn health-handler
   "Simple health check endpoint."
@@ -52,17 +76,27 @@
    :headers {"Content-Type" "application/json"}
    :body (json/write-str {:error "Not found"})})
 
+(defn- match-route
+  "Match request to handler based on URI and method."
+  [uri method]
+  (cond
+    (and (= uri "/transcribe") (= method :post)) :transcribe
+    (and (= uri "/health") (= method :get)) :health
+    :else :not-found))
+
+(defn- dispatch-handler
+  "Dispatch to the appropriate handler based on route."
+  [route request]
+  (case route
+    :transcribe (transcribe-handler request)
+    :health (health-handler request)
+    :not-found (not-found-handler request)))
+
 (defn app
-  "Main Ring application handler."
+  "Main Ring application handler.
+   Routes requests to appropriate handlers based on URI and method."
   [request]
   (let [uri (:uri request)
-        method (:request-method request)]
-    (cond
-      (and (= uri "/transcribe") (= method :post))
-      (transcribe-handler request)
-
-      (and (= uri "/health") (= method :get))
-      (health-handler request)
-
-      :else
-      (not-found-handler request))))
+        method (:request-method request)
+        route (match-route uri method)]
+    (dispatch-handler route request)))
