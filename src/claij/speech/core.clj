@@ -2,8 +2,8 @@
   (:require [clj-http.client :as http]
             [clojure.tools.logging :as log]
             [clojure.data.json :refer [read-str]])
-  (:import [javax.sound.sampled AudioFormat AudioSystem DataLine$Info TargetDataLine AudioFileFormat$Type]
-           [java.io ByteArrayOutputStream]
+  (:import [javax.sound.sampled AudioFormat AudioSystem DataLine$Info TargetDataLine AudioFileFormat$Type AudioInputStream]
+           [java.io ByteArrayOutputStream ByteArrayInputStream]
            [java.nio ByteBuffer ByteOrder]))
 
 ;; Audio configuration
@@ -72,12 +72,9 @@
   "Convert raw PCM audio data to WAV format bytes (in memory)."
   [audio-data]
   (with-open [baos (ByteArrayOutputStream.)
-              audio-in (java.io.ByteArrayInputStream. audio-data)]
-    (let [audio-stream (javax.sound.sampled.AudioInputStream.
-                        audio-in
-                        audio-format
-                        (/ (alength audio-data) 2))]
-      (javax.sound.sampled.AudioSystem/write audio-stream AudioFileFormat$Type/WAVE baos))
+              audio-in (ByteArrayInputStream. audio-data)]
+    (let [audio-stream (AudioInputStream. audio-in audio-format (/ (alength audio-data) 2))]
+      (AudioSystem/write audio-stream AudioFileFormat$Type/WAVE baos))
     (.toByteArray baos)))
 
 (defn post-to-whisper
