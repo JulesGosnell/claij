@@ -1,38 +1,19 @@
 (ns claij.whisper.handler
-  "Ring HTTP handler for Whisper transcription service."
-  (:require [claij.whisper.audio :as audio]
-            [claij.whisper.python :as whisper]
+  "Ring HTTP handlers for Whisper transcription service.
+   
+   Provides HTTP endpoints for the Whisper service:
+   - POST /transcribe: Transcribe audio file to text
+   - GET /health: Health check endpoint
+   
+   Handlers accept multipart form data with audio files and return JSON responses.
+   
+   Public API:
+   - app: Main Ring application handler with routing"
+  (:require [clojure.data.json :as json]
             [clojure.tools.logging :as log]
-            [clojure.data.json :as json]
-            [clojure.java.io :as io])
-  (:import [java.io ByteArrayOutputStream]))
-
-(defn- bytes-from-multipart
-  "Extract bytes from a multipart file upload."
-  [file-part]
-  (cond
-    (bytes? file-part)
-    file-part
-
-    (map? file-part)
-    (cond
-      ;; Check for :bytes key (in-memory upload)
-      (:bytes file-part)
-      (:bytes file-part)
-
-      ;; Check for :tempfile key (file-based upload)
-      (:tempfile file-part)
-      (let [temp-file (:tempfile file-part)]
-        (with-open [in (io/input-stream temp-file)]
-          (let [baos (ByteArrayOutputStream.)]
-            (io/copy in baos)
-            (.toByteArray baos))))
-
-      :else
-      (throw (ex-info "Invalid file part format - no :bytes or :tempfile" {:part file-part})))
-
-    :else
-    (throw (ex-info "Unexpected file part type" {:type (type file-part)}))))
+            [claij.whisper.audio :as audio]
+            [claij.whisper.multipart :as multipart]
+            [claij.whisper.python :as whisper]))
 
 (defn transcribe-handler
   "Ring handler for POST /transcribe endpoint.
@@ -40,29 +21,16 @@
   [request]
   (try
     (let [audio-part (get-in request [:multipart-params "audio"])
-          _ (log/info "Received audio file for transcription:" (:filename audio-part))
-
-          ;; Extract bytes from multipart upload
-          audio-bytes (bytes-from-multipart audio-part)
-          _ (log/debug "Audio file size:" (alength audio-bytes) "bytes")
-
-          ;; Validate audio
-          _ (audio/validate-audio audio-bytes)
-
-          ;; Convert WAV bytes to numpy array (in memory)
-          audio-array (audio/wav-bytes->audio-array audio-bytes)
-          _ (log/debug "Converted to audio array")
-
-          ;; Transcribe
-          result (whisper/transcribe-audio audio-array)
-
-          ;; Return JSON response
-          response-body (json/write-str {:text (:text result)})]
-
+          _ (log/info "Received audio file:" (:filename audio-part))
+          audio-bytes (multipart/extract-bytes audio-part)
+          _ (log/debug "Audio size:" (count audio-bytes) "bytes")
+          _ (multipart/validate-audio audio-bytes)
+          result (-> audio-bytes
+                     audio/wav-bytes->audio-array
+                     whisper/transcribe-audio)]
       {:status 200
        :headers {"Content-Type" "application/json"}
-       :body response-body})
-
+       :body (json/write-str {:text (:text result)})})
     (catch Exception e
       (log/error e "Transcription failed")
       {:status 500
