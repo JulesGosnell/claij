@@ -83,27 +83,12 @@ Install dependencies:
 clojure -P  # Download all dependencies
 ```
 
-### Speech-to-Text Services
+### Speech-to-Text Service
 
-**claij** includes two implementations of the Whisper speech-to-text service:
-
-#### 1. Python Implementation (FastAPI)
-
-Simple Python service using FastAPI - good for quick setup:
-
-```bash
-pip install -r src/py/requirements.txt
-./bin/whisper.sh  # Starts on http://0.0.0.0:8000
-```
-
-**Model options** (edit `src/py/whisper_service.py`): `tiny`, `small` (default), `medium`, `large-v3`
-
-#### 2. Clojure Implementation (Pure Clojure + libpython-clj) ⭐
-
-**Showcases Clojure/Python interop** - A pure Clojure implementation that calls Python's Whisper library via `libpython-clj`.
+**claij** includes a Whisper speech-to-text service implemented in pure Clojure using `libpython-clj` to call Python's Whisper library.
 
 **Features:**
-- **All in-memory processing** - No temporary files (unlike Python version)
+- **All in-memory processing** - No temporary files for better performance
 - **Pure Clojure** - Ring/Jetty HTTP server with functional composition
 - **Optional Python dependency** - Project builds and tests without Python environment
 - **Clean architecture** - Decomposed into testable modules
@@ -134,19 +119,17 @@ pip install openai-whisper torch numpy soundfile
 clojure -P -M:whisper
 
 # Run the service
-./bin/whisper-clj.sh                    # defaults: port 8000, host 0.0.0.0, model small
-./bin/whisper-clj.sh 9000               # custom port
-./bin/whisper-clj.sh 8000 localhost     # custom host
-./bin/whisper-clj.sh 8000 0.0.0.0 tiny  # tiny model (faster, less accurate)
+./bin/whisper.sh                    # defaults: port 8000, host 0.0.0.0, model small
+./bin/whisper.sh 9000               # custom port
+./bin/whisper.sh 8000 localhost     # custom host
+./bin/whisper.sh 8000 0.0.0.0 tiny  # tiny model (faster, less accurate)
 ```
 
 **API Endpoints:**
 - `POST /transcribe` - multipart/form-data with `audio` field (WAV, 16kHz) → `{"text": "..."}`
 - `GET /health` - `{"status": "healthy", "service": "whisper-clojure"}`
 
-**Why Two Implementations?**
-
-The Python version is simpler for quick prototyping. The Clojure version demonstrates:
+**Key Benefits:**
 - How Clojure can leverage Python's ML ecosystem via libpython-clj
 - Functional composition and clean architecture principles
 - In-memory processing for better performance
