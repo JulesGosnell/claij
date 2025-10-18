@@ -106,23 +106,25 @@
   (let [wave-module (:wave module-cache)
         io-module (:io module-cache)
         ;; Create BytesIO for in-memory WAV
-        bytes-io-class (py-get-attr io-module "BytesIO")
-        bytes-io (py-call-attr bytes-io-class)
+        bytes-io (py-call-attr io-module "BytesIO")
         ;; Open WAV writer
         wav-writer (py-call-attr wave-module "open" bytes-io "wb")
         _ (py-call-attr wav-writer "setnchannels" 1) ; Mono
         _ (py-call-attr wav-writer "setsampwidth" 2) ; 16-bit
-        sample-rate (py-get-attr voice "sample_rate")
+        config (py-get-attr voice "config")
+        sample-rate (py-get-attr config "sample_rate")
         _ (py-call-attr wav-writer "setframerate" sample-rate)
-        ;; Synthesize audio
+        ;; Synthesize audio - returns iterator of audio chunks
         audio-generator (py-call-attr voice "synthesize" text)
-        ;; Write all frames
+        ;; Write all frames - AudioChunk is a bytes-like object itself
         _ (doseq [audio-chunk audio-generator]
-            (py-call-attr wav-writer "writeframes" audio-chunk))
+            ;; AudioChunk has audio_int16_bytes attribute with the raw PCM data
+            (let [audio-bytes (py-get-attr audio-chunk "audio_int16_bytes")]
+              (py-call-attr wav-writer "writeframes" audio-bytes)))
         _ (py-call-attr wav-writer "close")
         ;; Get bytes
         wav-bytes (py-call-attr bytes-io "getvalue")]
-    {:audio-bytes (py->jvm wav-bytes)
+    {:audio-bytes (byte-array (py->jvm wav-bytes))
      :sample-rate sample-rate}))
 
 ;;; Backend Implementation
@@ -138,7 +140,8 @@
     (when-not @voice-atom
       (let [modules (load-modules! modules-loaded?-atom module-cache-atom)
             voice (load-piper-voice! modules voice-path)
-            sample-rate (py-get-attr voice "sample_rate")]
+            config (py-get-attr voice "config")
+            sample-rate (py-get-attr config "sample_rate")]
         (reset! voice-atom voice)
         (reset! sample-rate-atom sample-rate)))
     this)
