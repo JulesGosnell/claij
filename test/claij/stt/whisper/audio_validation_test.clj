@@ -1,8 +1,8 @@
-(ns claij.whisper.audio-validation-test
+(ns claij.stt.whisper.audio-validation-test
   "Unit tests for audio validation (no Python required).
    These tests can run without libpython-clj or Python dependencies."
   (:require [clojure.test :refer [deftest is testing]]
-            [claij.whisper.multipart :as multipart]))
+            [claij.stt.whisper.multipart :as multipart]))
 
 (deftest test-validate-audio-with-valid-bytes
   (testing "Validation passes with valid byte array"
