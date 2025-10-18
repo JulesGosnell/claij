@@ -1,0 +1,57 @@
+# ISSUES / TODO
+
+## Infrastructure
+
+### Git Push Authentication on Prognathodon
+- **Issue**: Git push requires password on prognathodon but not on megalodon
+- **Cause**: Repository uses SSH (git@github.com) but prognathodon doesn't have SSH keys configured
+- **Solutions**:
+  1. Set up SSH keys on prognathodon and add to GitHub
+  2. Switch to HTTPS with credential caching
+  3. Only push from megalodon (current workaround)
+- **Priority**: Medium
+- **Status**: Using workaround (push from megalodon)
+
+### GitHub MCP Integration
+- **Issue**: Need to integrate Claude with GitHub Issues tracker
+- **Goal**: Enable Claude to read/create/update GitHub issues directly
+- **Benefits**:
+  - Track issues programmatically
+  - Convert ISSUES.txt items to proper GitHub issues
+  - Better project management integration
+- **Requirements**:
+  - GitHub MCP server setup
+  - Configure Claude Desktop to use GitHub MCP
+  - API token with appropriate permissions
+- **Priority**: Low
+- **Status**: Not started
+
+## Code Quality
+
+### Reflection Warnings in Tests
+- **Issue**: Coverage tool shows reflection warnings in test files (speech/core_test.clj)
+- **Impact**: Tests work but could be slightly slower
+- **Solution**: Add type hints to test helper functions
+- **Priority**: Low
+- **Status**: Not started
+
+## Documentation
+
+### Architecture Documentation
+- **Issue**: Could add comprehensive README in src/claij/whisper/ explaining the architecture
+- **Priority**: Low
+- **Status**: Not started
+
+## Testing
+
+### Property-Based Testing (2.4)
+- **Issue**: Add property-based tests for audio validation using test.check
+- **Benefits**: Better coverage of edge cases
+- **Priority**: Low
+- **Status**: Deferred
+
+### Mock Python Interop (2.3)
+- **Issue**: Mock Python interop for faster unit tests
+- **Benefits**: Faster test execution, can test without Python
+- **Priority**: Low
+- **Status**: Deferred
