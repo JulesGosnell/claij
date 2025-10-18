@@ -18,13 +18,15 @@
 (def min-audio-bytes 32000) ; ~1 second at 16kHz, 16-bit
 
 ;; Core recording function (not easily testable - hardware dependent)
-(defn detect-speech [buffer]
-  (let [bb (ByteBuffer/wrap buffer)
+(defn detect-speech
+  "Detect speech in audio buffer based on amplitude threshold."
+  [buffer]
+  (let [^ByteBuffer bb (ByteBuffer/wrap buffer)
         _ (.order bb ByteOrder/LITTLE_ENDIAN)
-        shorts (.asShortBuffer bb)
-        max-amplitude (loop [i 0 max-amp 0]
+        ^java.nio.ShortBuffer shorts (.asShortBuffer bb)
+        max-amplitude (loop [i 0 max-amp (long 0)]
                         (if (< i (.remaining shorts))
-                          (recur (inc i) (max max-amp (abs (.get shorts i))))
+                          (recur (inc i) (max max-amp (Math/abs (long (.get shorts (int i))))))
                           max-amp))]
     (> max-amplitude silence-threshold)))
 

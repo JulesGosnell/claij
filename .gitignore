@@ -36,3 +36,11 @@ pom.xml.asc
 
 # Logs
 *.log
+
+# Documentation drafts
+docs/
+
+# Runtime files
+*.pid
+whisper-start.sh
+NOTES.txt
