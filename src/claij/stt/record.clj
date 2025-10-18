@@ -1,4 +1,25 @@
-(ns claij.speech.core
+(ns claij.stt.record
+  "Audio recording and speech-to-text client.
+   
+   This namespace provides functionality for recording audio from the microphone
+   and sending it to a Whisper STT service for transcription.
+   
+   Features:
+   - Voice activity detection (VAD) to start/stop recording automatically
+   - In-memory WAV conversion (no temporary files)
+   - Transducer-based processing pipeline
+   - Lazy sequence of transcriptions
+   
+   Usage:
+   ;; Start recording loop (blocks until interrupted)
+   (start-recording-loop \"http://localhost:8000/transcribe\")
+   
+   ;; Or get a lazy sequence of transcriptions
+   (take 5 (transcription-seq \"http://localhost:8000/transcribe\"))
+   
+   Related namespaces:
+   - claij.stt.server - Whisper STT service
+   - claij.tts.playback - Audio playback (opposite of recording)"
   (:require [clj-http.client :as http]
             [clojure.tools.logging :as log]
             [clojure.data.json :refer [read-str]])
