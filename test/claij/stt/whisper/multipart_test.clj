@@ -1,7 +1,7 @@
-(ns claij.whisper.multipart-test
+(ns claij.stt.whisper.multipart-test
   "Tests for multipart file handling utilities."
   (:require [clojure.test :refer [deftest is testing]]
-            [claij.whisper.multipart :as multipart])
+            [claij.stt.whisper.multipart :as multipart])
   (:import [java.io File ByteArrayOutputStream]
            [java.nio.file Files]))
 

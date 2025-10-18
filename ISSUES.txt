@@ -2,6 +2,23 @@
 
 ## Infrastructure
 
+### MCP Service Confusion (Multiple Project MCP Servers)
+- **Issue**: Claude frequently confuses `m3-clojure-tools:*` vs `claij-clojure-tools:*` services
+- **Impact**: Wasted time and tokens trying to access wrong directories, confusion about available tools
+- **Current Setup**:
+  - `m3-clojure-tools` → works in `/home/jules/src/m3`
+  - `claij-clojure-tools` → works in `/home/jules/src/claij`
+  - Both have identical tool sets but different working directories
+- **Potential Solutions**:
+  1. **Unified MCP Service**: Single service that can work across all project directories
+  2. **Better Naming**: More distinctive names (e.g., `m3:bash` vs `claij:bash`)
+  3. **Context Awareness**: Add project identifier to tool responses
+  4. **Workflow Improvement**: Always check `pwd` before using tools
+  5. **Claude Desktop Config**: Better organization of MCP services in config
+  6. **Project-Specific Prompts**: Add project context to conversation start
+- **Priority**: High (wastes significant time/tokens)
+- **Status**: Not started - needs discussion on best approach
+
 ### Git Push Authentication on Prognathodon
 - **Issue**: Git push requires password on prognathodon but not on megalodon
 - **Cause**: Repository uses SSH (git@github.com) but prognathodon doesn't have SSH keys configured

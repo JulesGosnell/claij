@@ -1,5 +1,5 @@
-(ns claij.whisper.multipart
-  "Multipart file handling and validation utilities for Whisper service.
+(ns claij.stt.whisper.multipart
+  "Multipart file handling and validation utilities for Whisper backend.
    
    Provides utilities for working with Ring multipart file uploads:
    - Byte extraction from different upload formats (in-memory or file-based)
