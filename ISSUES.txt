@@ -2,6 +2,27 @@
 
 ## Infrastructure
 
+### Enhance stt.sh with Daemon Management
+- **Issue**: stt.sh should support daemon operations (start/stop/restart)
+- **Current Behavior**: Only runs in foreground (blocks terminal)
+- **Desired Behavior**:
+  - `./bin/stt.sh` - Run in foreground (current behavior)
+  - `./bin/stt.sh start [port] [host] [model]` - Start as background daemon
+  - `./bin/stt.sh stop` - Stop running daemon
+  - `./bin/stt.sh restart [port] [host] [model]` - Restart daemon
+  - `./bin/stt.sh status` - Check if daemon is running
+- **Implementation Notes**:
+  - Use PID file (e.g., `stt.pid`) to track daemon process
+  - Redirect output to log file (e.g., `stt.log`) in daemon mode
+  - Proper signal handling for graceful shutdown
+  - Validate daemon isn't already running before starting
+- **Benefits**:
+  - Single script for all operations (no separate stt-start.sh needed)
+  - Production-ready daemon management
+  - Easier to run persistently on servers
+- **Priority**: Low (use foreground mode for now)
+- **Status**: Not started
+
 ### MCP Service Confusion (Multiple Project MCP Servers)
 - **Issue**: Claude frequently confuses `m3-clojure-tools:*` vs `claij-clojure-tools:*` services
 - **Impact**: Wasted time and tokens trying to access wrong directories, confusion about available tools
