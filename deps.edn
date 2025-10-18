@@ -60,4 +60,9 @@
   :whisper {:extra-deps {org.slf4j/slf4j-simple {:mvn/version "2.0.16"}
                          ;; Python interop - only needed to run STT services
                          clj-python/libpython-clj {:mvn/version "2.025"}}
-            :main-opts ["-m" "claij.stt.server"]}}}
+            :main-opts ["-m" "claij.stt.server"]}
+
+  :piper {:extra-deps {org.slf4j/slf4j-simple {:mvn/version "2.0.16"}
+                       ;; Python interop - only needed to run TTS services
+                       clj-python/libpython-clj {:mvn/version "2.025"}}
+          :main-opts ["-m" "claij.tts.server"]}}}
