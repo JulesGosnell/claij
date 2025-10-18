@@ -83,57 +83,136 @@ Install dependencies:
 clojure -P  # Download all dependencies
 ```
 
-### Speech-to-Text Service
+## Backend Setup
 
-**claij** includes a Whisper speech-to-text service implemented in pure Clojure using `libpython-clj` to call Python's Whisper library.
+**claij** uses a protocol-based architecture for AI backends, making it easy to swap between different implementations. Each backend type (STT, TTS, etc.) defines a protocol that all implementations must satisfy.
 
-**Features:**
-- **All in-memory processing** - No temporary files for better performance
-- **Pure Clojure** - Ring/Jetty HTTP server with functional composition
-- **Optional Python dependency** - Project builds and tests without Python environment
-- **Clean architecture** - Decomposed into testable modules
+### Speech-to-Text Backends (STT)
 
-**Architecture:**
-- `claij.whisper.python` - Python interop layer (model loading, transcription)
-- `claij.whisper.audio` - Audio processing utilities (WAV conversion, validation)
-- `claij.whisper.handler` - Ring HTTP handlers (routing, request/response)
-- `claij.whisper.server` - Server lifecycle management
+#### Whisper (OpenAI)
 
-**Requirements:**
+**Overview:**
+- State-of-the-art speech recognition
+- Runs locally (no API costs)
+- Supports 99 languages
+- Requires CUDA GPU (recommended) or CPU
 
-*Development (no Python needed):*
-- Java 21+ and Clojure CLI tools
-- Unit tests run without Python environment
-
-*Production (Python required):*
-- Python 3.8+ with: `openai-whisper`, `torch`, `numpy`, `soundfile`
-- NVIDIA GPU with CUDA (recommended) or CPU fallback
-
-**Setup and Run:**
+**Installation:**
 
 ```bash
-# Install Python dependencies (production only)
+# 1. Install Python dependencies
 pip install openai-whisper torch numpy soundfile
 
-# Download Clojure dependencies
+# 2. Test installation (optional)
+python3 -c "import whisper; print('Whisper installed successfully')"
+
+# 3. Download Clojure dependencies
 clojure -P -M:whisper
 
-# Run the service
-./bin/whisper.sh                    # defaults: port 8000, host 0.0.0.0, model small
-./bin/whisper.sh 9000               # custom port
-./bin/whisper.sh 8000 localhost     # custom host
-./bin/whisper.sh 8000 0.0.0.0 tiny  # tiny model (faster, less accurate)
+# 4. Start the service
+./bin/stt.sh                    # defaults: port 8000, host 0.0.0.0, model small
+./bin/stt.sh 9000               # custom port
+./bin/stt.sh 8000 localhost     # custom host  
+./bin/stt.sh 8000 0.0.0.0 tiny  # tiny model (faster, less accurate)
 ```
 
-**API Endpoints:**
-- `POST /transcribe` - multipart/form-data with `audio` field (WAV, 16kHz) → `{"text": "..."}`
-- `GET /health` - `{"status": "healthy", "service": "whisper-clojure"}`
+**Model Sizes:**
+- `tiny` - Fastest, least accurate (~1GB VRAM)
+- `small` - Good balance (default) (~2GB VRAM)
+- `medium` - Better accuracy (~5GB VRAM)
+- `large-v3` - Best accuracy (~10GB VRAM)
 
-**Key Benefits:**
-- How Clojure can leverage Python's ML ecosystem via libpython-clj
-- Functional composition and clean architecture principles
-- In-memory processing for better performance
-- Graceful degradation (builds/tests everywhere, runs where Python is available)
+**API Endpoints:**
+- `POST /transcribe` - multipart/form-data with `audio` field (WAV, 16kHz) → `{"text": "...", "language": "en"}`
+- `GET /health` - Service health check
+
+**Troubleshooting:**
+- **No GPU detected**: Whisper will fall back to CPU (much slower but works)
+- **CUDA out of memory**: Try a smaller model size
+- **Import errors**: Ensure all Python packages are installed in the same environment
+
+### Text-to-Speech Backends (TTS)
+
+#### Piper (Rhasspy)
+
+**Overview:**
+- Fast, local text-to-speech
+- High-quality neural voices
+- **No GPU required** - runs on CPU
+- Multiple languages and voice styles
+- Small model files (~100MB per voice)
+
+**Installation:**
+
+```bash
+# 1. Install Python dependencies
+pip install piper-tts
+
+# 2. Create voice models directory
+mkdir -p ~/piper-voices
+cd ~/piper-voices
+
+# 3. Download a voice model (example: US English, medium quality)
+# See https://github.com/rhasspy/piper/releases for all available voices
+curl -L -o en_US-lessac-medium.onnx \
+  'https://github.com/rhasspy/piper/releases/download/v1.2.0/en_US-lessac-medium.onnx'
+
+# Optional: Download voice config file
+curl -L -o en_US-lessac-medium.onnx.json \
+  'https://github.com/rhasspy/piper/releases/download/v1.2.0/en_US-lessac-medium.onnx.json'
+
+# 4. Test installation
+python3 -c "import piper; print('Piper installed successfully')"
+
+# 5. Download Clojure dependencies
+clojure -P -M:piper
+
+# 6. Start the service
+export PIPER_VOICE_PATH=~/piper-voices/en_US-lessac-medium.onnx
+./bin/tts.sh                    # defaults: port 8001, host 0.0.0.0
+
+# Or specify voice path inline:
+./bin/tts.sh 8001 0.0.0.0 ~/piper-voices/en_US-lessac-medium.onnx
+```
+
+**Available Voices:**
+
+Popular English voices:
+- `en_US-lessac-medium` - Clear US English (recommended)
+- `en_GB-alan-medium` - British English
+- `en_US-amy-medium` - US English (female)
+- `en_US-ryan-high` - US English (high quality, larger file)
+
+Find all voices at: https://github.com/rhasspy/piper/blob/master/VOICES.md
+
+**API Endpoints:**
+- `POST /synthesize` - Accepts text (JSON: `{"text": "..."}` or plain text) → Returns WAV audio
+- `GET /health` - Service health check
+
+**Testing the Service:**
+
+```bash
+# Test with curl (saves to output.wav)
+echo "Hello from Piper" | curl -X POST http://localhost:8001/synthesize \
+  -H "Content-Type: text/plain" \
+  --data-binary @- \
+  -o output.wav
+
+# Play the audio
+aplay output.wav  # or paplay output.wav on PulseAudio systems
+
+# Test with JSON
+curl -X POST http://localhost:8001/synthesize \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Hello from Piper"}' \
+  -o output.wav
+```
+
+**Troubleshooting:**
+- **"voice-path is required"**: Set `PIPER_VOICE_PATH` environment variable or pass as argument
+- **Import error**: Ensure `piper-tts` is installed: `pip list | grep piper`
+- **Model not found**: Check the .onnx file path is correct and file exists
+- **No audio output**: Ensure your system has `aplay` (ALSA) or `paplay` (PulseAudio)
 
 ### Speech Client (Clojure)
 
