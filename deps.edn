@@ -44,7 +44,7 @@
                          "--ns-exclude-regex" "claij.agent.*"
                          "--ns-exclude-regex" "claij.clojure-mcp"
                          "--ns-exclude-regex" "claij.core"
-                         "--test-ns-regex" "claij.(speech|whisper).*"
+                         "--test-ns-regex" "claij.(speech|stt).*"
                          "--exclude-call" "clojure.tools.logging"
                          "--exclude-call" "taoensso.timbre"]}
 
@@ -58,6 +58,6 @@
            :main-opts ["-m" "claij.speech.core"]}
 
   :whisper {:extra-deps {org.slf4j/slf4j-simple {:mvn/version "2.0.16"}
-                         ;; Python interop - only needed to run whisper service
+                         ;; Python interop - only needed to run STT services
                          clj-python/libpython-clj {:mvn/version "2.025"}}
-            :main-opts ["-m" "claij.whisper.server"]}}}
+            :main-opts ["-m" "claij.stt.server"]}}}
