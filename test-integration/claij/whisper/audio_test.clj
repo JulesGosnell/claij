@@ -3,22 +3,23 @@
    These tests need: numpy, soundfile, and libpython-clj.
    Run with: clojure -M:whisper:test --focus integration"
   (:require [clojure.test :refer [deftest is testing]]
-            [claij.whisper.audio :as audio])
+            [claij.whisper.audio :as audio]
+            [claij.whisper.multipart :as multipart])
   (:import [javax.sound.sampled AudioFormat AudioSystem AudioFileFormat$Type AudioInputStream]
            [java.io ByteArrayOutputStream ByteArrayInputStream]))
 
 (deftest test-validate-audio
   (testing "validate-audio with valid input"
     (let [valid-bytes (byte-array 1000)]
-      (is (true? (audio/validate-audio valid-bytes)))))
+      (is (true? (multipart/validate-audio valid-bytes)))))
 
   (testing "validate-audio with nil input"
     (is (thrown-with-msg? Exception #"Audio data is nil"
-                          (audio/validate-audio nil))))
+                          (multipart/validate-audio nil))))
 
   (testing "validate-audio with empty array"
     (is (thrown-with-msg? Exception #"Audio data is empty"
-                          (audio/validate-audio (byte-array 0))))))
+                          (multipart/validate-audio (byte-array 0))))))
 
 ;; Helper function to create valid WAV bytes
 (defn- create-test-wav

@@ -49,19 +49,7 @@
             response (handler/app request)]
         (is (= 404 (:status response)))))))
 
-(deftest test-bytes-from-multipart
-  (testing "bytes-from-multipart extraction"
-    (testing "extracts from bytes directly"
-      (let [test-bytes (byte-array [1 2 3 4])]
-        (is (= test-bytes (#'handler/bytes-from-multipart test-bytes)))))
-
-    (testing "extracts from map with :bytes key"
-      (let [test-bytes (byte-array [1 2 3 4])
-            part {:bytes test-bytes :filename "test.wav"}]
-        (is (= test-bytes (#'handler/bytes-from-multipart part)))))
-
-    (testing "throws on invalid format"
-      (is (thrown? Exception (#'handler/bytes-from-multipart "invalid"))))))
-
-;; Note: transcribe-handler tests would require Python environment
-;; and are better suited for integration tests with libpython-clj loaded
+;; Note: transcribe-handler tests require Python environment with Whisper model loaded.
+;; Byte extraction is tested in claij.whisper.multipart-test.
+;; Full end-to-end transcription would require audio files and is better suited
+;; for manual testing or dedicated integration test infrastructure.

@@ -61,6 +61,9 @@
   (when-not @modules-loaded?
     (log/info "Loading Python modules for Whisper...")
     (require-python-or-throw!)
+    ;; Initialize libpython-clj2 before importing modules
+    (let [py-initialize (requiring-resolve 'libpython-clj2.python/initialize!)]
+      (py-initialize))
     (let [py-import (requiring-resolve 'libpython-clj2.python/import-module)]
       (reset! module-cache
               {:whisper (py-import "whisper")
