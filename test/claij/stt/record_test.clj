@@ -42,47 +42,42 @@
         (let [wave-id (String. (java.util.Arrays/copyOfRange wav-bytes 8 12) "UTF-8")]
           (is (= "WAVE" wave-id)))))))
 
-(deftest test-prepare-audio-xf
-  (testing "prepare-audio-xf transducer"
+(deftest test-prepare-audio
+  (testing "prepare-audio function"
     (let [audio-data (byte-array 32000)
           ctx {:audio-data audio-data}
-          xf record/prepare-audio-xf
-          result (into [] xf [ctx])]
-
-      (testing "returns one result"
-        (is (= 1 (count result))))
+          result (record/prepare-audio ctx)]
 
       (testing "adds :wav-bytes to context"
-        (is (contains? (first result) :wav-bytes)))
+        (is (contains? result :wav-bytes)))
 
       (testing "wav-bytes is a byte array"
-        (is (bytes? (:wav-bytes (first result)))))
+        (is (bytes? (:wav-bytes result))))
 
       (testing "preserves original context"
-        (is (= audio-data (:audio-data (first result))))))))
+        (is (= audio-data (:audio-data result)))))))
 
-(deftest test-log-result-xf
-  (testing "log-result-xf transducer"
-    (testing "with successful transcription"
+(deftest test-trace
+  (testing "trace function"
+    (testing "with successful lookup"
       (let [ctx {:text "Hello world"}
-            xf record/log-result-xf
-            result (into [] xf [ctx])]
+            result (record/trace "test" :text ctx)]
+        (is (= ctx result))))
 
-        (is (= 1 (count result)))
-        (is (= ctx (first result)))))
-
-    (testing "with failed transcription"
+    (testing "with failed lookup (nil value)"
       (let [ctx {:text nil}
-            xf record/log-result-xf
-            result (into [] xf [ctx])]
+            result (record/trace "test" :text ctx)]
+        (is (= ctx result))))
 
-        (is (= 1 (count result)))
-        (is (= ctx (first result)))))))
+    (testing "with missing key"
+      (let [ctx {:other "value"}
+            result (record/trace "test" :text ctx)]
+        (is (= ctx result))))))
 
 (deftest test-process-audio-xf-pipeline
   (testing "complete in-memory audio processing pipeline"
     (testing "filters out empty audio"
-      (let [xf (record/process-audio-xf "http://test:8000")
+      (let [xf (record/process-audio-xf "http://test:8000" "http://llms:8001")
             contexts [{:audio-data (byte-array 100)} ; Too small
                       {:audio-data (byte-array 32000)}] ; OK
             ;; Only test filtering, not actual HTTP

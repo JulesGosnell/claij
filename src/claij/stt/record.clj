@@ -152,13 +152,20 @@
 (defn ask-llm [llms-url {text :text llm :llm :as ctx}]
   (assoc ctx :answer (post-to-llms text (str llms-url "/" llm))))
 
-(let [backends
-      {"grok"   (doto (piper/create-backend {:voice-path "/home/jules/piper-voices/cori-med.onnx"}) (tts/initialize!))
-       "claude" (doto (piper/create-backend {:voice-path "/home/jules/piper-voices/en_US-lessac-medium.onnx"}) (tts/initialize!))
-       "gpt"    (doto (piper/create-backend {:voice-path "/home/jules/piper-voices/kristin.onnx"}) (tts/initialize!))
-       "gemini" (doto (piper/create-backend {:voice-path "/home/jules/piper-voices/norman.onnx"}) (tts/initialize!))}]
-  (defn tts [{llm :llm :as ctx}]
-    (assoc ctx :output (:audio-bytes (tts/synthesize (backends llm) (:answer ctx))))))
+(def backends
+  "Lazy map of LLM names to TTS backend factories.
+   Backends are created on first use via delay."
+  {"grok" (delay (doto (piper/create-backend {:voice-path "/home/jules/piper-voices/cori-med.onnx"})
+                   (tts/initialize!)))
+   "claude" (delay (doto (piper/create-backend {:voice-path "/home/jules/piper-voices/en_US-lessac-medium.onnx"})
+                     (tts/initialize!)))
+   "gpt" (delay (doto (piper/create-backend {:voice-path "/home/jules/piper-voices/kristin.onnx"})
+                  (tts/initialize!)))
+   "gemini" (delay (doto (piper/create-backend {:voice-path "/home/jules/piper-voices/norman.onnx"})
+                     (tts/initialize!)))})
+
+(defn tts [{llm :llm :as ctx}]
+  (assoc ctx :output (:audio-bytes (tts/synthesize @(backends llm) (:answer ctx)))))
 
 (defn playback [ctx]
   (play-audio (:output ctx) :paplay)
@@ -185,13 +192,13 @@
       (next-split 0))))
 
 ;; needs more work and integration...
-(let [greetings (sort-by count > [["hey"] ["hi"] ["hello"] ["good" "morning"]["morning"] ["good" "afternoon"]["afternoon"] ["good" "evening"]["evening"] ["so"] [] ["well"]])
+(let [greetings (sort-by count > [["hey"] ["hi"] ["hello"] ["good" "morning"] ["morning"] ["good" "afternoon"] ["afternoon"] ["good" "evening"] ["evening"] ["so"] [] ["well"]])
       llm-ids {"grok" "grok" "claude" "claude" "gpt" "gpt" "gemini" "gemini" "grock" "grok" "grog" "grok" "crook" "grok" "grokk" "grok" "grook" "grok" "gruck" "grok"}
       current-llm (atom "claude")
       max-greeting-len (apply max (map count greetings))]
   (defn select-llm [text]
-    (let [words (map #(clojure.string/replace % #"[^\w]" "") 
-                     (take (inc max-greeting-len) 
+    (let [words (map #(clojure.string/replace % #"[^\w]" "")
+                     (take (inc max-greeting-len)
                            (lazy-split (clojure.string/lower-case text) #"\s+")))
           greeting-len (some (fn [g] (when (= (take (count g) words) g) (count g))) greetings)]
       (if greeting-len
@@ -244,7 +251,6 @@
                      (System/getenv "LLMS_URL")
                      default-llms-url)]
     (start-recording-loop whisper-url llms-url)))
-
 
 ;; lets leave the llm ms remote at the moment so that restarting does not throw away our state,
 ;; we need to extend the ms so that we can control which llm we want to send the message to and this should also select the voice to be used
