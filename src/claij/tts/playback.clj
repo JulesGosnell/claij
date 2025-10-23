@@ -44,6 +44,7 @@
 (defn- play-with-aplay
   "Play audio using aplay (ALSA player)."
   [audio-file]
+  (shell/sh "aplay" "-d" "1" "/dev/zero")
   (let [result (shell/sh "aplay" "-q" (.getAbsolutePath audio-file))]
     (when-not (zero? (:exit result))
       (throw (ex-info "aplay failed"

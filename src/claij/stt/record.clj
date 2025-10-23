@@ -22,7 +22,11 @@
    - claij.tts.playback - Audio playback (opposite of recording)"
   (:require [clj-http.client :as http]
             [clojure.tools.logging :as log]
-            [clojure.data.json :refer [read-str]])
+            [clojure.data.json :refer [read-str]]
+            [clojure.string :refer [blank? trim]]
+            [claij.tts.playback :refer [play-audio]]
+            [claij.tts.core :as tts]
+            [claij.tts.piper.python :as piper])
   (:import [javax.sound.sampled AudioFormat AudioSystem DataLine$Info TargetDataLine AudioFileFormat$Type AudioInputStream]
            [java.io ByteArrayOutputStream ByteArrayInputStream]
            [java.nio ByteBuffer ByteOrder]))
@@ -34,7 +38,8 @@
   (AudioFormat. 16000 16 1 true false)) ; 16kHz, 16-bit, mono, signed PCM, little-endian
 
 (def default-whisper-url "http://prognathodon:8000/transcribe")
-(def silence-threshold 300)
+(def default-llms-url "http://megalodon:8000/chat")
+(def silence-threshold 500)
 (def silence-duration-ms 1000)
 (def min-audio-bytes 32000) ; ~1 second at 16kHz, 16-bit
 
@@ -120,86 +125,127 @@
       (log/error "Failed to post to Whisper:" (.getMessage e))
       nil)))
 
+(defn post-to-llms
+  "Post text to LLMs service. Returns answer text or nil."
+  [question llms-url]
+  (try
+    (let [response (http/post llms-url
+                              {:body question
+                               :throw-exceptions false})]
+      (if (= (:status response) 200)
+        (:body response)
+        (do
+          (log/error "HTTP error from LLMs service:" (:status response))
+          nil)))
+    (catch Exception e
+      (log/error "Failed to post to LLMs:" (.getMessage e))
+      nil)))
+
 ;; Transducers for the audio processing pipeline
 
-(defn prepare-audio-xf
-  "Transducer that converts raw audio data to WAV format bytes."
-  [rf]
-  (fn
-    ([] (rf))
-    ([result] (rf result))
-    ([result ctx]
-     (let [wav-bytes (audio-data->wav-bytes (:audio-data ctx))]
-       (rf result (assoc ctx :wav-bytes wav-bytes))))))
+(defn prepare-audio [ctx]
+  (assoc ctx :wav-bytes (audio-data->wav-bytes (:audio-data ctx))))
 
-(defn transcribe-xf
-  "Transducer that transcribes audio data and adds :text to context."
-  [whisper-url]
-  (fn [rf]
-    (fn
-      ([] (rf))
-      ([result] (rf result))
-      ([result ctx]
-       (let [text (post-to-whisper (:wav-bytes ctx) whisper-url)]
-         (rf result (assoc ctx :text text)))))))
+(defn transcribe [whisper-url ctx]
+  (assoc ctx :text (trim (post-to-whisper (:wav-bytes ctx) whisper-url))))
 
-(defn log-result-xf
-  "Transducer that logs transcription results."
-  [rf]
-  (fn
-    ([] (rf))
-    ([result] (rf result))
-    ([result ctx]
-     (if (:text ctx)
-       (log/info "Transcription:" (:text ctx))
-       (log/error "Transcription failed"))
-     (rf result ctx))))
+(defn ask-llm [llms-url {text :text llm :llm :as ctx}]
+  (assoc ctx :answer (post-to-llms text (str llms-url "/" llm))))
 
+(let [backends
+      {"grok"   (doto (piper/create-backend {:voice-path "/home/jules/piper-voices/cori-med.onnx"}) (tts/initialize!))
+       "claude" (doto (piper/create-backend {:voice-path "/home/jules/piper-voices/en_US-lessac-medium.onnx"}) (tts/initialize!))
+       "gpt"    (doto (piper/create-backend {:voice-path "/home/jules/piper-voices/kristin.onnx"}) (tts/initialize!))
+       "gemini" (doto (piper/create-backend {:voice-path "/home/jules/piper-voices/norman.onnx"}) (tts/initialize!))}]
+  (defn tts [{llm :llm :as ctx}]
+    (assoc ctx :output (:audio-bytes (tts/synthesize (backends llm) (:answer ctx))))))
+
+(defn playback [ctx]
+  (play-audio (:output ctx) :paplay)
+  ctx)
+
+(defn trace [m f ctx]
+  (if-let [v (f ctx)]
+    (log/info m ":" (pr-str v))
+    (log/warn m " failed"))
+  ctx)
+
+;;------------------------------------------------------------------------------
+;; routing
+
+(defn lazy-split [s re]
+  (let [m (re-matcher re s)]
+    (letfn [(next-split [start]
+              (lazy-seq
+               (if (.find m start)
+                 (cons (.substring s start (.start m))
+                       (next-split (.end m)))
+                 (when (< start (.length s))
+                   (list (.substring s start))))))]
+      (next-split 0))))
+
+;; needs more work and integration...
+(let [greetings (sort-by count > [["hey"] ["hi"] ["hello"] ["good" "morning"]["morning"] ["good" "afternoon"]["afternoon"] ["good" "evening"]["evening"] ["so"] [] ["well"]])
+      llm-ids {"grok" "grok" "claude" "claude" "gpt" "gpt" "gemini" "gemini" "grock" "grok" "grog" "grok" "crook" "grok" "grokk" "grok" "grook" "grok" "gruck" "grok"}
+      current-llm (atom "claude")
+      max-greeting-len (apply max (map count greetings))]
+  (defn select-llm [text]
+    (let [words (map #(clojure.string/replace % #"[^\w]" "") 
+                     (take (inc max-greeting-len) 
+                           (lazy-split (clojure.string/lower-case text) #"\s+")))
+          greeting-len (some (fn [g] (when (= (take (count g) words) g) (count g))) greetings)]
+      (if greeting-len
+        (let [candidate (nth words greeting-len "")]
+          (if-let [selected (get llm-ids candidate)]
+            (reset! current-llm selected)
+            @current-llm))
+        @current-llm))))
+
+;;------------------------------------------------------------------------------
 ;; Pipeline composition
 
 (defn process-audio-xf
   "Complete audio processing pipeline (all in-memory, no file I/O)."
-  [whisper-url]
+  [whisper-url llms-url]
   (comp
    (filter (comp has-audio? :audio-data))
-   prepare-audio-xf
-   (transcribe-xf whisper-url)
-   log-result-xf))
-
-;; Lazy sequence of recordings
-
-(defn recording-seq
-  "Lazy sequence of audio recordings. Each element is {:audio-data bytes}."
-  []
-  (repeatedly #(do
-                 (log/info "Waiting for speech...")
-                 {:audio-data (record-audio)})))
-
-(defn transcription-seq
-  "Lazy sequence of transcriptions. Returns a sequence of contexts with :text.
-   Each element represents a processed sound-bite with transcription.
-   
-   Example:
-     (take 5 (transcription-seq))
-     => ({:text \"hello\"} {:text \"world\"} ...)"
-  ([] (transcription-seq default-whisper-url))
-  ([whisper-url]
-   (let [recordings (recording-seq)
-         process-xf (process-audio-xf whisper-url)]
-     (sequence process-xf recordings))))
+   (map prepare-audio)
+   (map (partial trace "recording" :audio-data))
+   (map (partial transcribe whisper-url))
+   (map (partial trace "transcription" :text))
+   (filter (comp not blank? :text))
+   (map (fn [{t :text :as ctx}] (assoc ctx :llm (select-llm t))))
+   (map (partial ask-llm llms-url))
+   (map (partial trace "llm" :answer))
+   (map tts)
+   (map (partial trace "tts" :output))
+   (map playback)))
 
 ;; Main loop
 
 (defn start-recording-loop
-  "Start the speech-to-text recording loop with the given whisper service URL.
-   Eagerly consumes the transcription-seq, logging results as they arrive."
-  ([] (start-recording-loop default-whisper-url))
-  ([whisper-url]
+  "Start the speech-to-text recording loop synchronously."
+  ([] (start-recording-loop default-whisper-url default-llms-url))
+  ([whisper-url llms-url]
    (log/info "Starting speech-to-text client, service URL:" whisper-url)
-   (run! identity (transcription-seq whisper-url))))
+   (let [process (process-audio-xf whisper-url llms-url)]
+     (loop []
+       (log/info "Waiting for speech...")
+       (let [ctx {:audio-data (record-audio)}]
+         (when (has-audio? (:audio-data ctx))
+           (dorun (sequence process [ctx]))))
+       (recur)))))
 
 (defn -main [& args]
   (let [whisper-url (or (first args)
                         (System/getenv "WHISPER_URL")
-                        default-whisper-url)]
-    (start-recording-loop whisper-url)))
+                        default-whisper-url)
+        llms-url (or (second args)
+                     (System/getenv "LLMS_URL")
+                     default-llms-url)]
+    (start-recording-loop whisper-url llms-url)))
+
+
+;; lets leave the llm ms remote at the moment so that restarting does not throw away our state,
+;; we need to extend the ms so that we can control which llm we want to send the message to and this should also select the voice to be used
+;; we need to refactor and simplify the piper stuff - it is a mess
