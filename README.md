@@ -255,18 +255,24 @@ Clojure is ideal for this kind of integration work:
 
 **Showcasing Clojure**: Ultimately, claij should demonstrate Clojure's exceptional suitability for AI orchestration and coordination tasks. The Clojure Whisper service is a prime example - leveraging Python's ML libraries while providing better architecture, in-memory processing, and graceful degradation. While much of the current codebase is AI-generated (and thus not yet as elegant as hand-crafted Clojure), the project aims to evolve into a showcase of idiomatic Clojure's expressiveness and power in the AI domain.
 
-## Contributing
+## Future Directions
 
-**We're looking for talent!** claij is an ambitious project at the intersection of AI, developer tooling, and functional programming. We're particularly interested in contributors who are passionate about:
+- **Structured JSON Responses**: Implement API responses as JSON documents conforming to a dynamic schema provided via system prompts. This ensures parseable, extensible outputs, allowing easy integration of new fields like summaries or tool calls without breaking client code. By starting with a base schema {answer: string, state: string, tools: object}, the system becomes modular, reducing errors in parsing and enabling automated processing.
 
-- **Clojure best practices** - Help us refine AI-generated code into idiomatic Clojure
-- **AI/ML integration** - Experience with LLMs, speech recognition, or AI orchestration
-- **Developer experience** - Building tools that developers love to use
-- **MCP protocol** - Extending our bridges or creating new ones
-- **Testing and reliability** - Making the system robust and production-ready
+- **Interceptor Mechanism**: Develop interceptors as middleware that modify requests and responses on-the-fly, such as altering schemas, adding system rules, or extracting specific fields. For example, a summarizing interceptor could append a 'state' field to the schema, then store its value in a closure for the next request, creating a composable architecture where behaviors like logging or validation can be layered without altering core logic.
 
-Whether you're a Clojure expert who wants to explore AI, or an AI practitioner interested in functional programming, we'd love to have you involved. Check out the issues, join discussions, or just reach out!
+- **Hats as Dynamic Roles**: Introduce 'hats' as assignable roles (e.g., toolsmith, tech lead) that define AI behaviors, allowing multiple instances to collaborate on a shared channel. Hats enable specialized duties, like a toolsmith monitoring for code repetition and refactoring into libraries, fostering team-like dynamics where AIs address each other or respond only when relevant, reducing chaos in multi-agent interactions.
 
+- **Evolving DSL for Efficiency**: Empower the toolsmith hat to extract and build a domain-specific language (DSL) from repeated patterns, minimizing token usage across the team. As AIs collaborate, the DSL evolves into shorthand functions (e.g., dsl.write_file_with_retry), broadcast to others for reuse, transforming verbose exchanges into concise calls and optimizing long-term project efficiency.
+
+- **Finite State Machine Governance**: Overlay a FSM to structure conversations, defining states like planning, coding, and testing, with transitions triggered by JSON flags rather than keywords. This prevents broadcast storms by muting irrelevant hats per state, supports branching for issues like blockers, and allows mid-project team spin-ups, making workflows agile and predictable.
+
+- **Permutation City Forking and Merging**: Inspired by Greg Egan's Permutation City, implement forking of AI instances for parallel problem-solving, using channels and futures to create lazy lists of responses ordered by completion time. When forks complete, a merge process (via a dedicated hat) resolves conflicts and integrates insights back into the main state, enabling speculative execution with rollbacks for failed branches, accelerating development through concurrent exploration.
+
+- **Parallel Versioning of State with Intermediate Summaries**:
+ - Versioning Per LLM: Maintain state versions on a per-LLM basis, using a tree structure (vector of vectors) for nested subversions. Paths like [0 1 2] serialize to 0.1.2, enabling parallel forks from any parent without hashing overhead.
+ - Summary Layering: Generate summaries only at the current level, treating base summaries as shared user-role messages. Clones build sub-summaries from the base, minimizing redundancy.
+ - Merge Detection: Incorporate special merge nodes in the tree structure, flagged with {:type :merge, :base-summary "...", :sub-summaries [...], :merged-summary "..."}. This allows easy identification of merges during traversal or replay.
 ## License
 
 Apache License 2.0 - See [LICENSE](LICENSE) file for details.
