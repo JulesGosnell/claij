@@ -267,6 +267,56 @@ Clojure is ideal for this kind of integration work:
 
 - **Finite State Machine Governance**: Overlay a FSM to structure conversations, defining states like planning, coding, and testing, with transitions triggered by JSON flags rather than keywords. This prevents broadcast storms by muting irrelevant hats per state, supports branching for issues like blockers, and allows mid-project team spin-ups, making workflows agile and predictable.
 
+  **Sub-FSM Patterns for Team Workflows**:
+  
+  - **Vote Sub-FSM**: When the team needs to make a decision about design choices, implementation approaches, or conflicting proposals:
+    - Requires a master-of-ceremonies hat to manage the voting process
+    - States: proposal → discussion → voting → tally → declaration
+    - The MC hat collects votes, prevents vote brigading, and declares the winner
+    - Can be nested within other FSMs (e.g., during code review or refactoring decisions)
+  
+  - **Review Sub-FSM**: After a dev hat produces code, other dev hats should review it:
+    - States: submission → parallel-review → discussion → resolution
+    - Re-entrant: if major issues found, can loop back through revision → review
+    - Typically ends with a vote sub-FSM if reviewers disagree
+    - Review comments are collected and addressed systematically
+    - Only the reviewing hats are unmuted during review phase
+  
+  - **Make-Tool Sub-FSM**: When the toolsmith hat identifies repeated patterns worth extracting into the DSL:
+    - States: pattern-detection → proposal → review → implementation → dsl-update → reindex
+    - Ends with code review (enters review sub-FSM)
+    - Upon approval, updates the DSL and broadcasts the new function signature
+    - Triggers reindexing of the DSL documentation
+    - New DSL index is included with subsequent LLM requests
+    - Reduces token costs across the team by replacing verbose patterns with concise DSL calls
+  
+  - **Refactor Sub-FSM**: For improving existing code structure without changing behavior:
+    - States: identify-target → propose-refactoring → impact-analysis → implementation → testing → vote
+    - Multiple dev hats can propose different refactoring approaches
+    - Impact analysis phase determines which code/tests will be affected
+    - Ends with a vote if multiple approaches are viable
+    - Includes rollback state if tests fail after refactoring
+  
+  - **Debug Sub-FSM**: For reproducing bugs and establishing test cases:
+    - States: reproduce → provide-test → verify-test-fails
+    - Goal: Create a failing test that captures the bug
+    - Transitions into Fix-Test Sub-FSM once test is established
+    - Ensures bugs are captured as tests before attempting fixes
+  
+  - **Fix-Test Sub-FSM**: For systematic bug fixing with test-driven approach:
+    - Entered from Debug Sub-FSM with a failing test in hand
+    - States: hypothesize → instrument → test-hypothesis → (fix | eliminate-hypothesis) → verify-test-passes
+    - Can spawn multiple parallel hypothesis-testing branches
+    - Each hypothesis tested by a different dev hat instance
+    - Reconverges when a fix makes the test pass or all hypotheses eliminated
+    - If all hypotheses fail, may loop back to Debug Sub-FSM to refine the reproduction test
+  
+  - **Feature-Development Sub-FSM**: For implementing new features end-to-end:
+    - States: requirements → design → vote-on-design → implementation → test → review → integration
+    - Can nest other sub-FSMs (vote, review, refactor, make-tool)
+    - Coordinates multiple hats: architect for design, devs for implementation, QA for testing
+    - Maintains feature branch state separate from main development state
+
 - **Permutation City Forking and Merging**: Inspired by Greg Egan's Permutation City, implement forking of AI instances for parallel problem-solving, using channels and futures to create lazy lists of responses ordered by completion time. When forks complete, a merge process (via a dedicated hat) resolves conflicts and integrates insights back into the main state, enabling speculative execution with rollbacks for failed branches, accelerating development through concurrent exploration.
 
 - **Parallel Versioning of State with Intermediate Summaries**:
