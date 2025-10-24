@@ -257,9 +257,18 @@ Clojure is ideal for this kind of integration work:
 
 ## Future Directions
 
-- **Structured JSON Responses**: Implement API responses as JSON documents conforming to a dynamic schema provided via system prompts. This ensures parseable, extensible outputs, allowing easy integration of new fields like summaries or tool calls without breaking client code. By starting with a base schema {answer: string, state: string, tools: object}, the system becomes modular, reducing errors in parsing and enabling automated processing.
-
-- **Interceptor Mechanism**: Develop interceptors as middleware that modify requests and responses on-the-fly, such as altering schemas, adding system rules, or extracting specific fields. For example, a summarizing interceptor could append a 'state' field to the schema, then store its value in a closure for the next request, creating a composable architecture where behaviors like logging or validation can be layered without altering core logic.
+- **Structured Responses with Interceptor Architecture**: A comprehensive redesign of LLM interactions around validated JSON schemas and composable interceptors. See [STRUCTURED_RESPONSES.md](STRUCTURED_RESPONSES.md) for detailed design.
+  
+  **Core concepts:**
+  - Every LLM response must conform to a JSON schema (validated via M3)
+  - Invalid responses trigger a validation-retry loop with detailed error feedback
+  - Interceptors provide three hooks: modify schema, modify prompts, interpret responses
+  - Base schema starts minimal (`{answer, state}`) and grows through interceptor composition
+  - Schema extensions are validated and audited (who, when, what)
+  - Backend adapters handle provider-specific transformations
+  - Designed to support: memory strategies, MCP integration, REPL evaluation, FSM state transitions, and future extensions not yet conceived
+  
+  This architecture enables mid-conversation protocol evolution and provides a foundation for all advanced features like shared memory, tool calling, and multi-agent coordination.
 
 - **Hats as Dynamic Roles**: Introduce 'hats' as assignable roles (e.g., toolsmith, tech lead) that define AI behaviors, allowing multiple instances to collaborate on a shared channel. Hats enable specialized duties, like a toolsmith monitoring for code repetition and refactoring into libraries, fostering team-like dynamics where AIs address each other or respond only when relevant, reducing chaos in multi-agent interactions.
 
