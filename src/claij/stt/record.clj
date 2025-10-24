@@ -39,7 +39,7 @@
 
 (def default-whisper-url "http://prognathodon:8000/transcribe")
 (def default-llms-url "http://megalodon:8000/chat")
-(def silence-threshold 500)
+(def silence-threshold 2000)
 (def silence-duration-ms 1000)
 (def min-audio-bytes 32000) ; ~1 second at 16kHz, 16-bit
 
