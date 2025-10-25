@@ -87,10 +87,18 @@
   (str "You must respond with valid JSON matching this schema:\n\n"
        (schema->json schema)
        "\n\n"
-       "CRITICAL: Return ONLY the raw JSON object. "
-       "Do NOT wrap it in markdown code blocks, backticks, or any other formatting. "
-       "Do NOT include any text before or after the JSON. "
-       "Your entire response must be valid JSON that can be parsed directly."))
+       "CRITICAL INSTRUCTIONS:\n"
+       "- Return ONLY raw JSON - nothing else\n"
+       "- Do NOT wrap in markdown code blocks (no ``` or ```json)\n"
+       "- Do NOT include any explanatory text before or after\n"
+       "- Your ENTIRE response must be parseable JSON\n"
+       "- Start with { and end with }\n"
+       "\n"
+       "Example of CORRECT response:\n"
+       "{\"answer\":\"Hello\",\"state\":\"ready\"}\n"
+       "\n"
+       "Example of INCORRECT response:\n"
+       "```json\n{\"answer\":\"Hello\",\"state\":\"ready\"}```"))
 
 (comment
   ;; Example usage
