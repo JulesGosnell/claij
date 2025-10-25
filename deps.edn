@@ -17,7 +17,6 @@
         org.clojure/core.async {:mvn/version "1.8.741"}
 
         ;; JSON handling
-        metosin/jsonista {:mvn/version "0.3.13"}
         org.clojure/data.json {:mvn/version "2.5.1"}
 
         ;; Logging

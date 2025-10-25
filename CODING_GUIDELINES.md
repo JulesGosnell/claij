@@ -105,7 +105,7 @@
 
 **Common acceptable aliases:**
 - `log` for logging (taoensso.timbre, clojure.tools.logging, etc.)
-- `json` for JSON libraries (clojure.data.json, jsonista, cheshire, etc.)
+- `json` for clojure.data.json specifically
 - `async` for clojure.core.async (idiomatic, many symbols)
 - Otherwise prefer `:refer [...]`
 
@@ -214,11 +214,11 @@
                        base-prompts interceptors)
         response (try
                    (http/post llm-url 
-                             {:body (json/encode prompts)})
+                             {:body (json/write-str prompts)})
                    (catch Exception e
                      (log/error e)
                      (retry-request prompts)))
-        parsed (json/decode (:body response))
+        parsed (json/read-str (:body response) :key-fn keyword)
         validated-response (m3/validate parsed schema)]
     (if (valid? validated-response)
       validated-response
