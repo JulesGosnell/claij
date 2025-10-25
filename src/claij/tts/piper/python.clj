@@ -14,7 +14,7 @@
    (initialize! backend)
    (synthesize backend \"Hello world\")"
   (:require [clojure.tools.logging :as log]
-            [claij.tts.core :as tts])
+            [claij.tts.core :refer [TTSBackend synthesize initialize!]])
   (:import [java.io ByteArrayOutputStream]))
 
 (set! *warn-on-reflection* true)
@@ -134,7 +134,7 @@
                          sample-rate-atom
                          modules-loaded?-atom
                          module-cache-atom]
-  tts/TTSBackend
+  TTSBackend
 
   (initialize! [this]
     (when-not @voice-atom
@@ -147,10 +147,10 @@
     this)
 
   (synthesize [this text]
-    (tts/synthesize this text {}))
+    (synthesize this text {}))
 
   (synthesize [this text _options]
-    (tts/initialize! this)
+    (initialize! this)
     (let [modules @module-cache-atom
           result (synthesize-to-bytes @voice-atom text modules)]
       (log/info "Synthesized" (count text) "characters to audio")

@@ -14,9 +14,9 @@
 ;;   (log/info "Agent started! Visit http://localhost:8080"))
 
 (ns claij.agent.core
-  (:require [ring.adapter.jetty :as jetty]
-            [reitit.ring :as ring]
-            [clj-http.client :as http]
+  (:require [ring.adapter.jetty :refer [run-jetty]]
+            [reitit.ring :refer [ring-handler router]]
+            [clj-http.client :refer [post]]
             [jsonista.core :as json]
             [clojure.core.async :as async :refer [go-loop <! >! >!! <!! alts!]]
             [taoensso.timbre :as log]))
@@ -68,13 +68,12 @@
                       }]
     (log/info "Calling Claude API for context:" context-id)
     (try
-      (let [response (http/post (:anthropic-api-url config)
-                                {:headers {"x-api-key" (:anthropic-api-key config)
-                                           "anthropic-version" "2023-06-01" ;;"2024-01-01"
-                                           "content-type" "application/json"}
-                                 :body (json/write-value-as-string request-body)
-                                 ;;:as :json
-                                 :throw-exceptions false})]
+      (let [response (post (:anthropic-api-url config)
+                           {:headers {"x-api-key" (:anthropic-api-key config)
+                                      "anthropic-version" "2023-06-01"
+                                      "content-type" "application/json"}
+                            :body (json/write-value-as-string request-body)
+                            :throw-exceptions false})]
         (if (= 200 (:status response))
           (do
             (prn response)
@@ -91,14 +90,14 @@
   "Send message back to RocketChat"
   [channel text]
   (try
-    (let [response (http/post (str (:rocketchat-url config) "/api/v1/chat.postMessage")
-                              {:headers {"X-Auth-Token" (:rocketchat-token config)
-                                         "X-User-Id" (:rocketchat-user-id config)
-                                         "Content-Type" "application/json"}
-                               :body (json/write-value-as-string
-                                      {:channel channel
-                                       :text text})
-                               :throw-exceptions false})]
+    (let [response (post (str (:rocketchat-url config) "/api/v1/chat.postMessage")
+                         {:headers {"X-Auth-Token" (:rocketchat-token config)
+                                    "X-User-Id" (:rocketchat-user-id config)
+                                    "Content-Type" "application/json"}
+                          :body (json/write-value-as-string
+                                 {:channel channel
+                                  :text text})
+                          :throw-exceptions false})]
       (log/info "Posted to RocketChat:" (:status response)))
     (catch Exception e
       (log/error e "Failed to send to RocketChat"))))
@@ -163,8 +162,8 @@
 
 ;; Web routes
 (def app
-  (ring/ring-handler
-   (ring/router
+  (ring-handler
+   (router
     [["/webhook" {:post process-rocketchat-webhook}]
      ["/health" {:get (fn [_] {:status 200 :body "OK"})}]
      ["/status" {:get (fn [_] {:status 200
@@ -189,6 +188,6 @@
   (log/info "Task processor started")
 
   ;; Start web server
-  (jetty/run-jetty app {:port (:webhook-port config)
-                        :join? false})
+  (run-jetty app {:port (:webhook-port config)
+                  :join? false})
   (log/info "Webhook server started on port" (:webhook-port config)))

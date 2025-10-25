@@ -20,13 +20,13 @@
    Related namespaces:
    - claij.stt.server - Whisper STT service
    - claij.tts.playback - Audio playback (opposite of recording)"
-  (:require [clj-http.client :as http]
+  (:require [clj-http.client :refer [post]]
             [clojure.tools.logging :as log]
             [clojure.data.json :refer [read-str]]
             [clojure.string :refer [blank? trim]]
             [claij.tts.playback :refer [play-audio]]
-            [claij.tts.core :as tts]
-            [claij.tts.piper.python :as piper])
+            [claij.tts.core :refer [initialize! synthesize]]
+            [claij.tts.piper.python :refer [create-backend]])
   (:import [javax.sound.sampled AudioFormat AudioSystem DataLine$Info TargetDataLine AudioFileFormat$Type AudioInputStream]
            [java.io ByteArrayOutputStream ByteArrayInputStream]
            [java.nio ByteBuffer ByteOrder]))
@@ -111,11 +111,11 @@
   "Post audio data to Whisper service. Returns transcription text or nil."
   [wav-bytes whisper-url]
   (try
-    (let [response (http/post whisper-url
-                              {:multipart [{:name "audio"
-                                            :content wav-bytes
-                                            :filename "audio.wav"}]
-                               :throw-exceptions false})]
+    (let [response (post whisper-url
+                         {:multipart [{:name "audio"
+                                       :content wav-bytes
+                                       :filename "audio.wav"}]
+                          :throw-exceptions false})]
       (if (= (:status response) 200)
         (:text (read-str (:body response) :key-fn keyword))
         (do
@@ -129,9 +129,9 @@
   "Post text to LLMs service. Returns answer text or nil."
   [question llms-url]
   (try
-    (let [response (http/post llms-url
-                              {:body question
-                               :throw-exceptions false})]
+    (let [response (post llms-url
+                         {:body question
+                          :throw-exceptions false})]
       (if (= (:status response) 200)
         (:body response)
         (do
@@ -155,17 +155,17 @@
 (def backends
   "Lazy map of LLM names to TTS backend factories.
    Backends are created on first use via delay."
-  {"grok" (delay (doto (piper/create-backend {:voice-path "/home/jules/piper-voices/cori-med.onnx"})
-                   (tts/initialize!)))
-   "claude" (delay (doto (piper/create-backend {:voice-path "/home/jules/piper-voices/en_US-lessac-medium.onnx"})
-                     (tts/initialize!)))
-   "gpt" (delay (doto (piper/create-backend {:voice-path "/home/jules/piper-voices/kristin.onnx"})
-                  (tts/initialize!)))
-   "gemini" (delay (doto (piper/create-backend {:voice-path "/home/jules/piper-voices/norman.onnx"})
-                     (tts/initialize!)))})
+  {"grok" (delay (doto (create-backend {:voice-path "/home/jules/piper-voices/cori-med.onnx"})
+                   (initialize!)))
+   "claude" (delay (doto (create-backend {:voice-path "/home/jules/piper-voices/en_US-lessac-medium.onnx"})
+                     (initialize!)))
+   "gpt" (delay (doto (create-backend {:voice-path "/home/jules/piper-voices/kristin.onnx"})
+                  (initialize!)))
+   "gemini" (delay (doto (create-backend {:voice-path "/home/jules/piper-voices/norman.onnx"})
+                     (initialize!)))})
 
 (defn tts [{llm :llm :as ctx}]
-  (assoc ctx :output (:audio-bytes (tts/synthesize @(backends llm) (:answer ctx)))))
+  (assoc ctx :output (:audio-bytes (synthesize @(backends llm) (:answer ctx)))))
 
 (defn playback [ctx]
   (play-audio (:output ctx) :paplay)

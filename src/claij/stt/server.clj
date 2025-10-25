@@ -15,11 +15,11 @@
    - start-server!: Start HTTP server with a backend
    - stop-server!: Stop the running server"
   (:require [clojure.tools.logging :as log]
-            [ring.adapter.jetty :as jetty]
+            [ring.adapter.jetty :refer [run-jetty]]
             [ring.middleware.multipart-params :refer [wrap-multipart-params]]
-            [claij.stt.core :as stt]
-            [claij.stt.handler :as handler]
-            [claij.stt.whisper.python :as whisper])
+            [claij.stt.core :refer [backend-info initialize!]]
+            [claij.stt.handler :refer [create-app] :rename {create-app handler-app}]
+            [claij.stt.whisper.python :refer [create-backend get-module-cache]])
   (:gen-class))
 
 (set! *warn-on-reflection* true)
@@ -43,7 +43,7 @@
    backend - STTBackend instance
    module-cache - Backend's Python module cache"
   [backend module-cache]
-  (-> (handler/create-app backend module-cache)
+  (-> (handler-app backend module-cache)
       wrap-multipart-params
       wrap-logging))
 
@@ -69,25 +69,25 @@
                   join? false}}]
 
    (log/info "Initializing STT service...")
-   (let [backend-info (stt/backend-info backend)]
+   (let [backend-info (backend-info backend)]
      (log/info "Backend:" backend-info))
 
    ;; Initialize the backend (load models, connect to services, etc.)
-   (stt/initialize! backend)
+   (initialize! backend)
    (log/info "Backend initialized successfully")
 
    ;; Get module cache from backend for audio processing
    ;; Note: This is Whisper-specific. In the future, we might make audio
    ;; processing more generic or handle it within the backend.
-   (let [module-cache (whisper/get-module-cache backend)]
+   (let [module-cache (get-module-cache backend)]
 
      (log/info "Starting HTTP server on" (str host ":" port))
 
      (let [app (create-app backend module-cache)
-           server (jetty/run-jetty app
-                                   {:port port
-                                    :host host
-                                    :join? join?})]
+           server (run-jetty app
+                             {:port port
+                              :host host
+                              :join? join?})]
        (reset! server-state server)
        (log/info "STT service ready!")
        server))))
@@ -118,7 +118,7 @@
               {:port port :host host :model-size model-size})
 
     ;; Create Whisper backend
-    (let [backend (whisper/create-backend {:model-size model-size})]
+    (let [backend (create-backend {:model-size model-size})]
       (start-server! backend {:port port
                               :host host
                               :join? true}))))

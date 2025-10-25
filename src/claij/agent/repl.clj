@@ -1,7 +1,7 @@
 (ns claij.agent.repl
   (:require
    [clojure.core.async :as async :refer [<!! close! thread]]
-   [clojure.core.server :as server])
+   [clojure.core.server :refer [prepl]])
   (:import
    [java.io PipedReader PipedWriter]
    [clojure.lang LineNumberingPushbackReader]))
@@ -24,7 +24,7 @@
                            (recur))))
         prepl-thread (thread
                        (try
-                         (server/prepl in (fn [event] (async/>!! output-chan event)))
+                         (prepl in (fn [event] (async/>!! output-chan event)))
                          (catch Exception e
                            (println "prepl error:" (.getMessage e))
                            (close! output-chan))

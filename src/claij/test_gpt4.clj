@@ -1,13 +1,13 @@
 (ns claij.test-gpt4
   "Simple test of GPT-4 integration"
-  (:require [claij.new.backend.openrouter :as openrouter]
-            [claij.new.core :as core]
-            [claij.new.interceptor :as interceptor]
-            [clojure.java.io :as io]))
+  (:require [claij.new.backend.openrouter :refer [gpt-4]]
+            [claij.new.core :refer [call-llm]]
+            [claij.new.interceptor :refer [memory-interceptor]]
+            [clojure.java.io :refer [reader]]))
 
 (defn load-env []
   "Load .env file"
-  (doseq [line (line-seq (io/reader ".env"))
+  (doseq [line (line-seq (reader ".env"))
           :let [line (clojure.string/trim line)]
           :when (and (not (clojure.string/blank? line))
                      (clojure.string/starts-with? line "export"))]
@@ -20,13 +20,13 @@
     (load-env)
 
     (println "Creating GPT-4 function...")
-    (def llm-fn (openrouter/gpt-4 {:temperature 0.5 :max-tokens 300}))
+    (def llm-fn (gpt-4 {:temperature 0.5 :max-tokens 300}))
 
     (println "Testing simple call...")
-    (def result (core/call-llm
+    (def result (call-llm
                  llm-fn
                  "My name is Alice. My favorite color is blue."
-                 [interceptor/memory-interceptor]
+                 [memory-interceptor]
                  {}))
 
     (println "\n=== RESULT ===")

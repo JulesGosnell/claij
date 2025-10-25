@@ -105,7 +105,8 @@
 
 **Common acceptable aliases:**
 - `log` for logging (taoensso.timbre, clojure.tools.logging, etc.)
-- `json` for JSON libraries (clojure.data.json, cheshire, etc.)
+- `json` for JSON libraries (clojure.data.json, jsonista, cheshire, etc.)
+- `async` for clojure.core.async (idiomatic, many symbols)
 - Otherwise prefer `:refer [...]`
 
 ## Performance: Avoid Reflection
