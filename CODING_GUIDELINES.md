@@ -641,3 +641,7 @@ If the answer concerns you, refactor.
 **Remember:** These are guidelines, not laws. Use judgment. The goal is maintainable, understandable, robust code that solves real problems.
 
 **Last updated:** 2025-10-25
+
+
+
+run the testsuite before deciding that whatever you have done works
