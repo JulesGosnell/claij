@@ -180,8 +180,8 @@
 ;;------------------------------------------------------------------------------
 ;; routing
 
-(defn lazy-split [s re]
-  (let [m (re-matcher re s)]
+(defn lazy-split [^String s re]
+  (let [^java.util.regex.Matcher m (re-matcher re s)]
     (letfn [(next-split [start]
               (lazy-seq
                (if (.find m start)

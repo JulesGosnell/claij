@@ -1,5 +1,9 @@
 {:paths ["src" "resources"]
+ ;; Note: examples in src/claij/examples/ are already on classpath via src/
  :deps {org.clojure/clojure {:mvn/version "1.12.3"}
+
+        ;; M3 validation
+        org.clojars.jules_gosnell/m3 {:mvn/version "0.1.0-SNAPSHOT"}
 
         ;; Web server & routing
         ring/ring {:mvn/version "1.14.1"} ; 1.15.0-beta1 is available but using stable
@@ -26,6 +30,9 @@
         :extra-deps {nrepl/nrepl {:mvn/version "1.5.0"}
                      cider/cider-nrepl {:mvn/version "0.50.2"}
                      ring/ring-devel {:mvn/version "1.14.1"}
+                     ;; Environment variable management
+                     environ/environ {:mvn/version "1.2.0"}
+                     io.github.cdimascio/dotenv-java {:mvn/version "3.0.0"}
                      ;; MCP dependencies (only in dev, excluded from production builds)
                      com.bhauman/clojure-mcp {:mvn/version "0.1.6-SNAPSHOT"
                                               :exclusions [org.slf4j/slf4j-nop]}}
@@ -51,7 +58,7 @@
                          "--exclude-call" "taoensso.timbre"]}
 
   :llms {:extra-deps {org.slf4j/slf4j-simple {:mvn/version "2.0.16"}}
-           :main-opts ["-m" "claij.server"]}
+         :main-opts ["-m" "claij.server"]}
 
   :mcp {:extra-paths ["test"]
         :extra-deps {nrepl/nrepl {:mvn/version "1.5.0"}

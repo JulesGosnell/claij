@@ -57,6 +57,125 @@
 (defn terminate-server-instance [server-instance] ...)
 ```
 
+## Namespace Requirements
+
+**Prefer individual symbol referrals over namespace aliases:**
+- Use `:refer [symbol1 symbol2 ...]` to explicitly import symbols
+- Makes it clear which symbols are used from external namespaces
+- Avoids namespace prefix clutter throughout the code
+- Exception: logging namespaces can use `:as log` for brevity
+
+**Rationale:**
+- Individual referrals make dependencies explicit and visible at the top of the file
+- Easier to track which external symbols are being used
+- Prevents accidental reliance on undocumented namespace APIs
+- Cleaner code without repeated namespace prefixes
+
+**Handle symbol collisions with `:rename`:**
+- When symbols from different namespaces collide, use `:rename` to disambiguate
+- Choose descriptive rename that indicates source or purpose
+
+**Examples:**
+```clojure
+;; Good - individual referrals
+(ns my.app.core
+  (:require [clojure.string :refer [join split trim]]
+            [clojure.set :refer [difference union]]
+            [clojure.data.json :as json]  ; json is commonly used with prefix
+            [taoensso.timbre :as log]))   ; Exception: logging
+
+;; Avoid - namespace aliases (except logging and json)
+(ns my.app.core
+  (:require [clojure.string :as str]
+            [clojure.set :as set]))
+
+;; Good - handling collisions with :rename
+(ns my.app.core
+  (:require [clojure.set :refer [difference union]]
+            [clojure.data :refer [diff]]
+            [my.utils :refer [difference] :rename {difference my-difference}]))
+
+;; Then in code:
+(defn compare-sets [s1 s2]
+  (difference s1 s2))           ; clojure.set/difference
+
+(defn compare-data [d1 d2]
+  (my-difference d1 d2))        ; my.utils/difference
+```
+
+**Common acceptable aliases:**
+- `log` for logging (taoensso.timbre, clojure.tools.logging, etc.)
+- `json` for JSON libraries (clojure.data.json, cheshire, etc.)
+- Otherwise prefer `:refer [...]`
+
+## Performance: Avoid Reflection
+
+**Always enable reflection warnings:**
+```clojure
+(set! *warn-on-reflection* true)
+```
+
+**Why avoid reflection:**
+- Reflection is **slow** - up to 100x slower than direct method calls
+- Adds up quickly in hot code paths
+- Easy to fix with type hints
+- Should be caught during development, not production
+
+**Use type hints to eliminate reflection:**
+```clojure
+;; Bad - uses reflection (slow)
+(defn get-length [s]
+  (.length s))  ; Compiler doesn't know s is a String
+
+;; Good - no reflection (fast)
+(defn get-length [^String s]
+  (.length s))
+
+;; Common type hints:
+^String          ; java.lang.String
+^Long            ; java.lang.Long
+^Boolean         ; java.lang.Boolean
+^java.util.List  ; Fully qualified Java class
+^objects         ; Array of Objects
+^longs           ; Array of primitive longs
+```
+
+**Examples:**
+```clojure
+;; Bad - reflection warnings
+(defn parse-number [s]
+  (Integer/parseInt s))
+
+;; Good - with type hint
+(defn parse-number [^String s]
+  (Integer/parseInt s))
+
+;; Bad - reflection on Java interop
+(defn get-matcher [s pattern]
+  (let [m (re-matcher pattern s)]
+    (.find m)))
+
+;; Good - type hints on both
+(defn get-matcher [^String s ^java.util.regex.Pattern pattern]
+  (let [^java.util.regex.Matcher m (re-matcher pattern s)]
+    (.find m)))
+
+;; Multiple arguments
+(defn substring [^String s ^long start ^long end]
+  (.substring s start end))
+```
+
+**Where to add type hints:**
+- Function parameters that call Java methods
+- Let bindings that call Java methods
+- Function return types when used by other functions needing hints
+
+**Strategy:**
+1. Enable `*warn-on-reflection*` in your REPL/build
+2. Compile your code and watch for warnings
+3. Add type hints where needed
+4. Zero reflection warnings = zero reflection overhead
+
 ## Code Structure
 
 **Avoid boilerplate:**
