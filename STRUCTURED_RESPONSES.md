@@ -316,6 +316,34 @@ The memory interceptor is our proof that the architecture works. If we can't get
                       (assoc ctx :mcp-results results)))})
 ```
 
+**Design Note: Multi-Project MCP Service Filtering**
+
+When implementing the MCP interceptor, we need a strategy for handling multiple projects with different MCP services:
+
+**Option 1: Project-Aware Service Filtering**
+- Context tracks current project: `(:project ctx)`
+- Filter MCP services to only those relevant to current project
+- Prevents LLM confusion from seeing irrelevant services
+- Requires clear project boundaries
+
+**Option 2: Hat-Based Project Prompting**
+- Each project gets a "hat" (specialized prompt/persona)
+- Hat includes instructions: "You are working on Project X, only use these MCP services: [...]"
+- LLM learns to self-filter based on project context
+- More flexible but relies on LLM following instructions
+
+**Option 3: Hybrid Approach**
+- Hard filter to project-relevant services (Option 1)
+- Add hat prompt for additional context (Option 2)
+- Best of both worlds: technical enforcement + semantic guidance
+
+**Option 4: Dynamic Service Discovery**
+- LLM queries available services based on task context
+- Services self-describe their project scope
+- More complex but potentially more flexible
+
+**Decision pending:** Will be determined during MCP interceptor implementation based on actual multi-project usage patterns.
+
 ### Example 3: REPL Evaluation
 
 ```clojure
