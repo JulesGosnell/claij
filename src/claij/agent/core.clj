@@ -19,7 +19,7 @@
             [clj-http.client :refer [post]]
             [clojure.data.json :as json]
             [clojure.core.async :as async :refer [go-loop <! >! >!! <!! alts!]]
-            [taoensso.timbre :as log]))
+            [clojure.tools.logging :as log]))
 
 ;; Configuration
 (def config
