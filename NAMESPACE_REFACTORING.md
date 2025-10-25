@@ -36,7 +36,8 @@ Added new section "Namespace Requirements" specifying:
   (:require [clojure.string :refer [join split trim]]
             [clojure.set :refer [difference union]]
             [clojure.data.json :as json]        ; Exception
-            [taoensso.timbre :as log]           ; Exception
+            [clojure.tools.logging :as log]     ; Exception
+            [clojure.core.async :as async]      ; Exception
             [my.other.namespace :refer [foo bar]]))
 
 ;; Handling collisions

@@ -34,6 +34,54 @@
 ;; When you actually need options (3rd use case), refactor then
 ```
 
+**Minimize dependencies and code:**
+- **One library when one will do** - If a single library solves the problem, don't add a second
+- **Use stable, proven libraries** - Before writing code yourself, look for mature open-source solutions
+- **Less code is better** - Every line of code is a liability that must be maintained, tested, and understood
+- **Less code we maintain is even better** - Code in dependencies is maintained by others
+- **The best solution uses the least code** - Simplicity and brevity are virtues
+
+When evaluating solutions, prefer in this order:
+1. Standard library solution (clojure.core, clojure.string, etc.)
+2. Well-maintained, stable open-source library
+3. Writing minimal custom code
+4. Complex custom abstractions (avoid unless truly necessary)
+
+**Examples:**
+```clojure
+;; Avoid - multiple libraries for the same thing
+(ns my.app
+  (:require [cheshire.core :as cheshire]
+            [jsonista.core :as jsonista]
+            [clojure.data.json :as json]))
+
+;; Good - pick one and stick with it
+(ns my.app
+  (:require [clojure.data.json :as json]))
+
+;; Avoid - reinventing the wheel
+(defn my-custom-json-parser [s]
+  ;; 200 lines of JSON parsing code
+  ...)
+
+;; Good - use proven library
+(json/read-str s :key-fn keyword)
+
+;; Avoid - writing code when there's a library
+(defn fetch-url [url]
+  ;; Custom HTTP client implementation
+  ...)
+
+;; Good - use clj-http
+(http/get url)
+```
+
+**Ask yourself:**
+- "Is there a standard library function for this?"
+- "Is there a single, well-maintained library that solves this?"
+- "Am I reinventing something that already exists?"
+- "Can I delete this code and use a library instead?"
+
 ## Naming
 
 **Symmetry and consistency:**
@@ -82,7 +130,7 @@
   (:require [clojure.string :refer [join split trim]]
             [clojure.set :refer [difference union]]
             [clojure.data.json :as json]  ; json is commonly used with prefix
-            [taoensso.timbre :as log]))   ; Exception: logging
+            [clojure.tools.logging :as log]))   ; Exception: logging
 
 ;; Avoid - namespace aliases (except logging and json)
 (ns my.app.core
@@ -104,7 +152,7 @@
 ```
 
 **Common acceptable aliases:**
-- `log` for logging (taoensso.timbre, clojure.tools.logging, etc.)
+- `log` for clojure.tools.logging specifically
 - `json` for clojure.data.json specifically
 - `async` for clojure.core.async (idiomatic, many symbols)
 - Otherwise prefer `:refer [...]`
@@ -592,4 +640,4 @@ If the answer concerns you, refactor.
 
 **Remember:** These are guidelines, not laws. Use judgment. The goal is maintainable, understandable, robust code that solves real problems.
 
-**Last updated:** 2025-10-24
+**Last updated:** 2025-10-25
