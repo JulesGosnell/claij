@@ -18,9 +18,9 @@
    - create-app: Create Ring handler for a specific backend"
   (:require [clojure.data.json :as json]
             [clojure.tools.logging :as log]
-            [claij.stt.core :as stt]
-            [claij.stt.whisper.audio :as audio]
-            [claij.stt.whisper.multipart :as multipart]))
+            [claij.stt.core :refer [transcribe health-check backend-info]]
+            [claij.stt.whisper.audio :refer [wav-bytes->audio-array]]
+            [claij.stt.whisper.multipart :refer [extract-bytes validate-audio]]))
 
 (set! *warn-on-reflection* true)
 
@@ -76,13 +76,13 @@
     (let [audio-bytes (-> request
                           (get-in [:multipart-params "audio"])
                           log-audio-info
-                          multipart/extract-bytes
+                          extract-bytes
                           log-audio-size
-                          (doto multipart/validate-audio))
+                          (doto validate-audio))
           ;; Convert WAV bytes to audio array using backend's modules
-          audio-array (audio/wav-bytes->audio-array module-cache audio-bytes)
+          audio-array (wav-bytes->audio-array module-cache audio-bytes)
           ;; Transcribe using the backend
-          result (stt/transcribe backend audio-array)]
+          result (transcribe backend audio-array)]
       (build-success-response result))
     (catch Exception e
       (build-error-response e))))
@@ -91,8 +91,8 @@
   "Health check endpoint.
    Returns backend health status and info."
   [backend _request]
-  (let [health-result (stt/health-check backend)
-        backend-info (stt/backend-info backend)]
+  (let [health-result (health-check backend)
+        backend-info (backend-info backend)]
     (build-health-response health-result backend-info)))
 
 (defn- not-found-handler

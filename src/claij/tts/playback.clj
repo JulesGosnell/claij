@@ -13,8 +13,8 @@
    Or with a specific player:
    (play-audio (:audio-bytes result) {:player :paplay})"
   (:require [clojure.tools.logging :as log]
-            [clojure.java.shell :as shell]
-            [claij.tts.core :as tts])
+            [clojure.java.shell :refer [sh]]
+            [claij.tts.core :refer [synthesize]])
   (:import [java.io File]
            [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]))
@@ -26,7 +26,7 @@
                  {:cmd "paplay" :name :paplay}
                  {:cmd "afplay" :name :afplay}]]
     (some (fn [{:keys [cmd name]}]
-            (let [result (shell/sh "which" cmd)]
+            (let [result (sh "which" cmd)]
               (when (zero? (:exit result))
                 name)))
           players)))
@@ -44,8 +44,8 @@
 (defn- play-with-aplay
   "Play audio using aplay (ALSA player)."
   [audio-file]
-  (shell/sh "aplay" "-d" "1" "/dev/zero")
-  (let [result (shell/sh "aplay" "-q" (.getAbsolutePath audio-file))]
+  (sh "aplay" "-d" "1" "/dev/zero")
+  (let [result (sh "aplay" "-q" (.getAbsolutePath audio-file))]
     (when-not (zero? (:exit result))
       (throw (ex-info "aplay failed"
                       {:exit-code (:exit result)
@@ -54,7 +54,7 @@
 (defn- play-with-paplay
   "Play audio using paplay (PulseAudio player)."
   [audio-file]
-  (let [result (shell/sh "paplay" (.getAbsolutePath audio-file))]
+  (let [result (sh "paplay" (.getAbsolutePath audio-file))]
     (when-not (zero? (:exit result))
       (throw (ex-info "paplay failed"
                       {:exit-code (:exit result)
@@ -63,7 +63,7 @@
 (defn- play-with-afplay
   "Play audio using afplay (macOS audio player)."
   [audio-file]
-  (let [result (shell/sh "afplay" (.getAbsolutePath audio-file))]
+  (let [result (sh "afplay" (.getAbsolutePath audio-file))]
     (when-not (zero? (:exit result))
       (throw (ex-info "afplay failed"
                       {:exit-code (:exit result)
@@ -139,7 +139,7 @@
   ([backend text]
    (speak backend text {}))
   ([backend text options]
-   (let [result (tts/synthesize backend text)]
+   (let [result (synthesize backend text)]
      (play-audio (:audio-bytes result) options)
      result)))
 

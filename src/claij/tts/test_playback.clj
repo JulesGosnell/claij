@@ -1,8 +1,8 @@
 (ns claij.tts.test-playback
   "Quick test script for TTS playback"
-  (:require [claij.tts.piper.python :as piper]
-            [claij.tts.playback :as playback]
-            [claij.tts.core :as tts]))
+  (:require [claij.tts.piper.python :refer [create-backend]]
+            [claij.tts.playback :refer [speak]]
+            [claij.tts.core :refer [initialize!]]))
 
 (defn -main [& args]
   (let [text (or (first args) "Hello from Clojure! This is a test of text to speech.")

@@ -15,10 +15,10 @@
    - start-server!: Start HTTP server with a backend
    - stop-server!: Stop the running server"
   (:require [clojure.tools.logging :as log]
-            [ring.adapter.jetty :as jetty]
-            [claij.tts.core :as tts]
-            [claij.tts.handler :as handler]
-            [claij.tts.piper.python :as piper])
+            [ring.adapter.jetty :refer [run-jetty]]
+            [claij.tts.core :refer [backend-info initialize!]]
+            [claij.tts.handler :refer [create-app] :rename {create-app handler-app}]
+            [claij.tts.piper.python :refer [create-backend]])
   (:gen-class))
 
 (set! *warn-on-reflection* true)
@@ -41,7 +41,7 @@
    
    backend - TTSBackend instance"
   [backend]
-  (-> (handler/create-app backend)
+  (-> (handler-app backend)
       wrap-logging))
 
 (defn start-server!
@@ -66,20 +66,20 @@
                   join? false}}]
 
    (log/info "Initializing TTS service...")
-   (let [backend-info (tts/backend-info backend)]
+   (let [backend-info (backend-info backend)]
      (log/info "Backend:" backend-info))
 
    ;; Initialize the backend (load models, connect to services, etc.)
-   (tts/initialize! backend)
+   (initialize! backend)
    (log/info "Backend initialized successfully")
 
    (log/info "Starting HTTP server on" (str host ":" port))
 
    (let [app (create-app backend)
-         server (jetty/run-jetty app
-                                 {:port port
-                                  :host host
-                                  :join? join?})]
+         server (run-jetty app
+                           {:port port
+                            :host host
+                            :join? join?})]
      (reset! server-state server)
      (log/info "TTS service ready!")
      server)))
@@ -113,7 +113,7 @@
               {:port port :host host :voice-path voice-path})
 
     ;; Create Piper backend
-    (let [backend (piper/create-backend {:voice-path voice-path})]
+    (let [backend (create-backend {:voice-path voice-path})]
       (start-server! backend {:port port
                               :host host
                               :join? true}))))

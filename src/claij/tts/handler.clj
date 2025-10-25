@@ -16,7 +16,7 @@
    - create-app: Create Ring handler for a specific backend"
   (:require [clojure.data.json :as json]
             [clojure.tools.logging :as log]
-            [claij.tts.core :as tts]))
+            [claij.tts.core :refer [synthesize health-check backend-info]]))
 
 (set! *warn-on-reflection* true)
 
@@ -71,7 +71,7 @@
       (when (or (nil? text) (empty? text))
         (throw (ex-info "Text is required" {:type :missing-text})))
       (log/info "Synthesizing" (count text) "characters")
-      (let [result (tts/synthesize backend text)]
+      (let [result (synthesize backend text)]
         (build-success-response result)))
     (catch Exception e
       (build-error-response e))))
@@ -80,8 +80,8 @@
   "Health check endpoint.
    Returns backend health status and info."
   [backend _request]
-  (let [health-result (tts/health-check backend)
-        backend-info (tts/backend-info backend)]
+  (let [health-result (health-check backend)
+        backend-info (backend-info backend)]
     (build-health-response health-result backend-info)))
 
 (defn- not-found-handler

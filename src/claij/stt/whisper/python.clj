@@ -12,7 +12,7 @@
    (initialize! backend)
    (transcribe backend audio-bytes)"
   (:require [clojure.tools.logging :as log]
-            [claij.stt.core :as stt]))
+            [claij.stt.core :refer [STTBackend initialize!]]))
 
 (set! *warn-on-reflection* true)
 
@@ -113,7 +113,7 @@
                            device-atom
                            modules-loaded?-atom
                            module-cache-atom]
-  stt/STTBackend
+  STTBackend
 
   (initialize! [this]
     (when-not @model-atom
@@ -125,7 +125,7 @@
     this)
 
   (transcribe [this audio-array]
-    (stt/initialize! this)
+    (initialize! this)
     (let [result (py-call-attr @model-atom "transcribe" audio-array)
           result-map (py->jvm result)]
       (log/info "Transcription result:" (get result-map "text"))

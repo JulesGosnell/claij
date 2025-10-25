@@ -8,7 +8,7 @@
    Public API:
    - extract-bytes: Extract byte array from multipart file upload
    - validate-audio: Validate audio byte array (basic checks)"
-  (:require [clojure.java.io :as io])
+  (:require [clojure.java.io :refer [input-stream copy]])
   (:import [java.io ByteArrayOutputStream]))
 
 (set! *warn-on-reflection* true)
@@ -30,8 +30,8 @@
       (:tempfile file-part)
       (let [^java.io.File temp-file (:tempfile file-part)
             ^java.io.ByteArrayOutputStream baos (ByteArrayOutputStream.)]
-        (with-open [in (io/input-stream temp-file)]
-          (io/copy in baos)
+        (with-open [in (input-stream temp-file)]
+          (copy in baos)
           (.toByteArray baos)))
 
       :else
