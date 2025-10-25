@@ -17,7 +17,7 @@
   (:require [ring.adapter.jetty :refer [run-jetty]]
             [reitit.ring :refer [ring-handler router]]
             [clj-http.client :refer [post]]
-            [jsonista.core :as json]
+            [clojure.data.json :as json]
             [clojure.core.async :as async :refer [go-loop <! >! >!! <!! alts!]]
             [taoensso.timbre :as log]))
 
@@ -72,12 +72,12 @@
                            {:headers {"x-api-key" (:anthropic-api-key config)
                                       "anthropic-version" "2023-06-01"
                                       "content-type" "application/json"}
-                            :body (json/write-value-as-string request-body)
+                            :body (json/write-str request-body)
                             :throw-exceptions false})]
         (if (= 200 (:status response))
           (do
             (prn response)
-            (log/info "Claude:" (get-in (json/read-value (get-in response [:body])) ["content"]))
+            (log/info "Claude:" (get-in (json/read-str (get-in response [:body]) :key-fn keyword) [:content]))
             (:body response))
           (do
             (log/error "Claude API error:" (:status response) (:body response))
@@ -94,7 +94,7 @@
                          {:headers {"X-Auth-Token" (:rocketchat-token config)
                                     "X-User-Id" (:rocketchat-user-id config)
                                     "Content-Type" "application/json"}
-                          :body (json/write-value-as-string
+                          :body (json/write-str
                                  {:channel channel
                                   :text text})
                           :throw-exceptions false})]
@@ -105,11 +105,11 @@
 (defn process-rocketchat-webhook
   "Handle incoming RocketChat webhook"
   [request]
-  (let [body (-> request :body slurp json/read-value)
-        text (get body "text")
-        user (get-in body ["user" "username"])
-        channel (get body "channel_name")
-        message-id (get body "message_id")]
+  (let [body (-> request :body slurp (json/read-str :key-fn keyword))
+        text (:text body)
+        user (get-in body [:user :username])
+        channel (:channel_name body)
+        message-id (:message_id body)]
 
     (log/info "Received message from" user "in" channel ":" text)
 
@@ -167,7 +167,7 @@
     [["/webhook" {:post process-rocketchat-webhook}]
      ["/health" {:get (fn [_] {:status 200 :body "OK"})}]
      ["/status" {:get (fn [_] {:status 200
-                               :body (json/write-value-as-string
+                               :body (json/write-str
                                       {:queue-size (.size task-queue)
                                        :high-priority-queue-size (.size high-priority-queue)
                                        :contexts (count @conversation-contexts)})})}]])))
