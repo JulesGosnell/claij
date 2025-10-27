@@ -2,7 +2,7 @@
   (:require
    [clj-http.client :refer [post]]
    [clojure.string :refer [split]]
-   [claij.agent.util :refer [assert-env-var trace clj->json json->clj]]))
+   [claij.util :refer [assert-env-var trace clj->json json->clj]]))
 
 ;; https://docs.claude.com/en/api/overview
 

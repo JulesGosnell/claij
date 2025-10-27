@@ -5,7 +5,7 @@
    [clojure.core.async :refer [go-loop <! >! chan >!! <!!]]
    [clojure-mcp.linting :refer [lint]] ;; thanks, Bruce :-)
    [claij.agent.repl :refer [start-prepl]]
-   [claij.agent.util :refer [assert-env-var clj->json json->clj]]))
+   [claij.util :refer [assert-env-var clj->json json->clj]]))
 
 ;; https://openrouter.ai/docs/quickstart
 

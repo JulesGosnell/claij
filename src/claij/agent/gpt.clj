@@ -1,7 +1,7 @@
 (ns claij.agent.gpt
   (:require
    [clj-http.client :refer [post]]
-   [claij.agent.util :refer [assert-env-var trace clj->json json->clj]]))
+   [claij.util :refer [assert-env-var trace clj->json json->clj]]))
 
 ;; https://platform.openai.com/docs/api-reference/responses
 
