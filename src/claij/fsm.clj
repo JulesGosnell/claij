@@ -1,5 +1,6 @@
 (ns claij.fsm
   (:require
+   [clojure.set :refer [intersection]]
    [m3.validate :refer [validate]]
    ))
 
@@ -82,14 +83,22 @@
    "$id" "TODO"
    "oneOf"
    (mapv
-    (fn [{i :id s :schema}] {"properties" {"id" {"const" i} "document" s}})
+    (fn [{i :id s :schema}]
+      {"properties"
+       {"id" {"const" i}
+        "roles" {"type" "array" "items" {"type" "string"}}
+        "document" s}})
     ((group-by (comp first :id) xs)
      state-id))})
+
+(defn index-by [f es]
+  (reduce (fn [acc e] (assoc acc (f e) e)) {} es))
 
 (defn xition
   "given the fsm, the current-state and a valid proposal traverse from
   current state to one of the possible next states"
-  [fsm last-state {[_ next-state] "id" :as document}]
-  (when (:valid? (validate {} (make-xitions-schema fsm last-state) {} document))
-    next-state))
-
+  [{xs :xitions :as fsm} last-state {[_ next-state :as x-id] "id" rs "roles" :as document}]
+  (and
+   (:valid? (validate {} (make-xitions-schema fsm last-state) {} document)) ;; false on fail
+   (seq (intersection (set (((index-by :id xs) x-id) :roles)) (set rs))) ;; inefficient... - nil on fail
+   next-state))
