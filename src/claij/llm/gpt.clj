@@ -1,4 +1,4 @@
-(ns claij.agent.gpt
+(ns claij.llm.gpt
   (:require
    [clj-http.client :refer [post]]
    [claij.util :refer [assert-env-var trace clj->json json->clj]]))

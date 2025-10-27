@@ -1,4 +1,4 @@
-(ns claij.agent.grok
+(ns claij.llm.grok
   (:require
    [clj-http.client :refer [post]]
    [claij.agent.util :refer [assert-env-var trace clj->json json->clj]]))

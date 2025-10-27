@@ -1,4 +1,4 @@
-(ns claij.agent.claude
+(ns claij.llm.claude
   (:require
    [clj-http.client :refer [post]]
    [clojure.string :refer [split]]

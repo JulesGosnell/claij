@@ -1,4 +1,4 @@
-(ns claij.agent.agent-test
+(ns claij.llm.llm-test
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.core.async :refer [chan go-loop <! >!! <!! timeout]]
             [claij.bridge :refer [start-mcp-bridge]]))
