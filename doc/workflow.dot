@@ -1,0 +1,55 @@
+digraph FSM {
+    node [shape=box, style=rounded, fontsize=10];
+    edge [arrowhead=vee];
+
+    subgraph cluster_root {
+        label = "Kanban LLM Coding Society";
+        style = filled; color=lightgrey;
+
+        subgraph cluster_meta {
+            label = "Meta-Loop (Trigger: Ready-for-Dev Empty)";
+            style = filled; color=lightblue;
+            Retro [label="Retrospective\nReview jams, tweak rules"];
+            Plan [label="Planning Refill\nPull backlog, size, prioritize, load Ready-for-Dev"];
+            Retro -> Plan;
+        }
+
+        subgraph cluster_story {
+            label = "Story Loop (Per Ticket, on Main)";
+            style = filled; color=lightgreen;
+            Start [label="Start\nReady-for-Dev Not Empty"];
+            Pick [label="1. Pick Story\nHighest Priority"];
+            Zone [label="2. Zone Check\nLock areas, queue if conflict"];
+            API [label="3. API Design"];
+            Impl [label="4. Implement"];
+            Test [label="5. Test"];
+            Merge [label="6. Merge\nAtomic to Main"];
+            Close [label="7. Close\nTo Done"];
+            Start -> Pick -> Zone -> API -> Impl -> Test -> Merge -> Close -> Start [label="Loop until empty"];
+
+            subgraph cluster_api {
+                label = "API Design Sub-FSM";
+                style = dashed; color=lightyellow;
+                Suggest [label="Gather Suggestions"];
+                Clump [label="MC Clumps Ideas"];
+                Vote [label="Vote"];
+                Lock [label="Lock Contract"];
+                Suggest -> Clump -> Vote -> Lock;
+                Lock -> Impl [dir=back, style=invis]; // Connect out
+            }
+
+            subgraph cluster_impl {
+                label = "Implement Sub-FSM";
+                style = dashed; color=lightyellow;
+                Code [label="Coder Role"];
+                Tester [label="Tester Role"];
+                Doc [label="Documenter Role"];
+                Tool [label="Toolsmith\nScan for patterns"];
+                Code -> Tester -> Doc -> Tool [style=invis]; // Parallel roles
+            }
+        }
+
+        Plan -> Start [label="After Refill"];
+        Close -> Retro [label="If Empty", style=dashed];
+    }
+}

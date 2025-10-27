@@ -6,6 +6,24 @@ CLAIJ's development workflow combines **Kanban-style task management** with **FS
 
 The workflow is designed for **AI-driven development teams** where LLM instances take on different "hats" (roles) and coordinate through structured state transitions rather than free-form chat. This prevents broadcast storms, reduces token waste, and enables parallel work with conflict avoidance.
 
+## Workflow Visualization
+
+Visual representations of the workflow FSM are available:
+
+### High-Level Workflow
+- **[Workflow Diagram (SVG)](workflow.svg)** - Rendered visualization of the complete system
+- **[Workflow Source (DOT)](workflow.dot)** - GraphViz source for the diagram
+
+Shows the Meta-Loop (Retrospective → Planning) and Story Loop (Pick → Zone Check → API Design → Implement → Test → Merge → Close) with their key sub-FSMs.
+
+### Story Processing FSM
+- **[Story FSM Diagram (SVG)](story.svg)** - Detailed story implementation flow
+- **[Story FSM Source (DOT)](story.dot)** - GraphViz source
+
+Shows the detailed flow of taking a story from Ready-for-Dev through to Done: Pick → Move to Dev → Break into Tasks → Assign & Implement → Dev-Complete → Integration Test → Done.
+
+**Note**: These visualizations are the first steps toward a **library of executable FSMs**. The vision is to encode all workflow state machines in a Clojure DSL that links states to specific hats (roles) and scripts (implementations), enabling fully automated workflow orchestration. See [FSM Library Vision](#fsm-library-vision) below.
+
 ## Core Principles
 
 ### 1. Small, Granular Stories
@@ -584,6 +602,277 @@ As the Toolsmith extracts patterns:
 - Documentation auto-generated
 - Team uses DSL in subsequent work
 - Token costs decrease over time
+
+## FSM Library Vision
+
+The workflow visualizations (workflow.dot, story.dot) represent the first steps toward a **comprehensive library of executable FSMs** encoded in a Clojure DSL. This library will enable fully automated, reproducible workflow orchestration.
+
+### Design Goals
+
+1. **Declarative FSM Definitions**: Each FSM encoded as data (not imperative code)
+2. **Hat Bindings**: States explicitly bind to specific hats (roles) that handle them
+3. **Script Integration**: Transitions can trigger executable scripts (Clojure functions, shell commands, tool calls)
+4. **Composability**: FSMs nest within other FSMs (sub-FSM pattern)
+5. **State Persistence**: FSM state serializable and recoverable across sessions
+6. **Introspection**: FSMs self-document their states, transitions, and requirements
+7. **Validation**: FSM definitions validated at load time (no invalid transitions)
+
+### FSM DSL Sketch
+
+Here's a conceptual sketch of what the FSM DSL might look like in Clojure:
+
+```clojure
+(ns claij.fsm.library.story
+  (:require [claij.fsm.core :as fsm]))
+
+(fsm/deffsm story-processing
+  "Processes a story from Ready-for-Dev to Done"
+  
+  {:initial-state :start
+   :terminal-states #{:done}
+   
+   :states
+   {:start
+    {:label "Start - Ready-for-Dev Not Empty"
+     :active-hats #{:mc}
+     :muted-hats #{:all-dev-hats}}
+    
+    :pick-story
+    {:label "Take Highest Priority Story"
+     :active-hats #{:mc}
+     :on-entry (fsm/script [:mc/pick-highest-priority-story])
+     :on-exit (fsm/script [:kanban/update-board :story-id :to :dev])}
+    
+    :break-into-tasks
+    {:label "Collaboratively Break into Granular Tasks"
+     :active-hats #{:mc :architect :lead-dev}
+     :on-entry (fsm/script [:mc/facilitate-task-breakdown])
+     :sub-fsm :task-breakdown}
+    
+    :assign-and-implement
+    {:label "Assign & Implement Tasks"
+     :active-hats #{:mc :assigned-dev-hats :tester :toolsmith}
+     :sub-fsm :implement-tasks
+     :parallel true  ;; Multiple tasks can run concurrently
+     :zone-lock true}  ;; Lock code zones during implementation
+    
+    :integration-test
+    {:label "Integration Test"
+     :active-hats #{:mc :tester}
+     :on-entry (fsm/script [:test/run-full-suite])
+     :success-condition (fsm/predicate [:test/all-passed?])
+     :retry-on-failure {:max-retries 3
+                        :backoff-state :fix-test}}
+    
+    :done
+    {:label "Move to Done"
+     :active-hats #{:mc}
+     :on-entry (fsm/script [:kanban/move-to-done :story-id]
+                           [:zone/unlock-all])}}
+   
+   :transitions
+   [{:from :start        :to :pick-story         :trigger :ready-for-dev-not-empty}
+    {:from :pick-story   :to :break-into-tasks   :trigger :story-picked}
+    {:from :break-into-tasks :to :assign-and-implement :trigger :tasks-defined}
+    {:from :assign-and-implement :to :integration-test :trigger :all-tasks-complete}
+    {:from :integration-test :to :done :trigger :tests-passed}
+    {:from :integration-test :to :assign-and-implement :trigger :tests-failed}
+    {:from :done :to :start :trigger :more-stories-in-ready-for-dev}
+    {:from :done :to :meta-loop :trigger :ready-for-dev-empty}]})
+
+;; Sub-FSM for task breakdown
+(fsm/deffsm task-breakdown
+  "Breaks a story into atomic tasks"
+  
+  {:initial-state :gather-proposals
+   :terminal-states #{:tasks-locked}
+   
+   :states
+   {:gather-proposals
+    {:label "Gather Task Proposals from Team"
+     :active-hats #{:architect :dev-hats}
+     :timeout-ms 60000}
+    
+    :review-and-merge
+    {:label "Review and Merge Similar Proposals"
+     :active-hats #{:mc :architect}
+     :sub-fsm :vote-if-needed}
+    
+    :size-tasks
+    {:label "Size Each Task (S/M/L)"
+     :active-hats #{:mc :dev-hats}
+     :on-entry (fsm/script [:task/estimate-complexity])}
+    
+    :tasks-locked
+    {:label "Tasks Finalized"
+     :on-entry (fsm/script [:task/persist-to-board])}}
+   
+   :transitions
+   [{:from :gather-proposals :to :review-and-merge :trigger :all-proposals-submitted}
+    {:from :review-and-merge :to :size-tasks :trigger :consensus-reached}
+    {:from :size-tasks :to :tasks-locked :trigger :all-sized}]})
+```
+
+### Script Implementation
+
+Scripts referenced in FSM definitions would be implemented as multimethods or protocols:
+
+```clojure
+(ns claij.fsm.scripts.mc)
+
+(defmulti execute-script
+  "Execute FSM scripts based on script type"
+  (fn [script-vector state-data] (first script-vector)))
+
+(defmethod execute-script :mc/pick-highest-priority-story
+  [_ {:keys [ready-for-dev-stories]}]
+  (let [story (first (sort-by :priority ready-for-dev-stories))]
+    {:story-id (:id story)
+     :next-trigger :story-picked}))
+
+(defmethod execute-script :kanban/update-board
+  [[_ story-id-key to-column] state-data]
+  (let [story-id (get state-data story-id-key)]
+    (kanban/move-card! story-id to-column)
+    {:next-trigger :story-moved}))
+
+(defmethod execute-script :test/run-full-suite
+  [_ state-data]
+  (let [results (test/run-all-tests!)]
+    (if (test/all-passed? results)
+      {:next-trigger :tests-passed
+       :test-results results}
+      {:next-trigger :tests-failed
+       :test-results results
+       :failure-details (test/extract-failures results)})))
+```
+
+### Hat Configuration
+
+Hats would be configured with FSM awareness:
+
+```clojure
+(ns claij.hats.core)
+
+(defrecord Hat [id role system-prompt active? muted? fsm-context])
+
+(defn activate-hats-for-state
+  "Activate only the hats relevant to current FSM state"
+  [fsm current-state all-hats]
+  (let [state-def (get-in fsm [:states current-state])
+        active-hat-roles (:active-hats state-def)
+        muted-hat-roles (:muted-hats state-def)]
+    (for [hat all-hats]
+      (assoc hat
+             :active? (contains? active-hat-roles (:role hat))
+             :muted? (contains? muted-hat-roles (:role hat))
+             :fsm-context {:current-state current-state
+                          :available-triggers (fsm/available-triggers fsm current-state)}))))
+```
+
+### Benefits of FSM Library
+
+1. **Reproducibility**: Same FSM definition produces same behavior every time
+2. **Debuggability**: FSM execution traced and logged; easy to see where things went wrong
+3. **Testability**: FSM definitions tested in isolation; scripts mocked
+4. **Composability**: Complex workflows built from simple, reusable FSM components
+5. **Self-Documentation**: FSMs generate their own documentation, diagrams, and help text
+6. **Evolution**: FSMs versioned; team can experiment with workflow changes safely
+7. **Tool Integration**: Scripts can call any CLAIJ tool (MCP, REPL, file system, etc.)
+
+### FSM Library Structure
+
+```
+claij.fsm/
+├── core.clj              # FSM engine, interpreter, state management
+├── dsl.clj               # DSL macros (deffsm, script, predicate, etc.)
+├── validation.clj        # FSM definition validation
+├── visualization.clj     # Generate .dot files from FSM definitions
+├── scripts/
+│   ├── mc.clj           # MC-specific scripts
+│   ├── kanban.clj       # Kanban board manipulation
+│   ├── test.clj         # Test running scripts
+│   ├── zone.clj         # Code zone locking/unlocking
+│   └── vote.clj         # Voting coordination
+└── library/
+    ├── story.clj        # Story processing FSM
+    ├── meta_loop.clj    # Retrospective + Planning FSMs
+    ├── vote.clj         # Vote sub-FSM
+    ├── review.clj       # Code review sub-FSM
+    ├── debug.clj        # Debug sub-FSM
+    ├── fix_test.clj     # Fix-test sub-FSM
+    ├── make_tool.clj    # Make-tool sub-FSM
+    ├── refactor.clj     # Refactor sub-FSM
+    ├── api_design.clj   # API design sub-FSM
+    └── implement.clj    # Implement sub-FSM
+```
+
+### Execution Model
+
+The FSM engine would:
+
+1. **Load FSM**: Read FSM definition from library
+2. **Initialize State**: Set initial state and load state data
+3. **Enter State**: Activate appropriate hats, run on-entry scripts
+4. **Wait for Trigger**: Monitor for state transition triggers (from LLM responses, script results, or timeouts)
+5. **Validate Transition**: Check if trigger is valid for current state
+6. **Execute Transition**: Run on-exit scripts, move to new state
+7. **Handle Sub-FSMs**: Push/pop FSM stack for nested sub-FSMs
+8. **Persist State**: Save FSM state after each transition
+9. **Repeat**: Continue until terminal state reached
+
+### Integration with Structured Responses
+
+FSM state and available triggers would be included in the JSON schema sent to LLMs:
+
+```json
+{
+  "answer": "I've broken the story into 3 tasks: implement API, write tests, update docs",
+  "state": {
+    "current_fsm": "story-processing",
+    "current_state": "break-into-tasks",
+    "available_triggers": ["all-proposals-submitted", "request-more-time"],
+    "active_hats": ["mc", "architect", "lead-dev"],
+    "sub_fsm_stack": []
+  },
+  "trigger": "all-proposals-submitted"
+}
+```
+
+The MC would read the `trigger` field and advance the FSM accordingly.
+
+### Roadmap
+
+**Phase 1 (Current)**: Document FSMs as .dot visualizations
+- ✓ workflow.dot (high-level)
+- ✓ story.dot (story processing)
+- ⧗ Complete library of .dot files for all sub-FSMs
+
+**Phase 2**: Implement FSM DSL and engine
+- Core FSM interpreter
+- DSL macros for FSM definition
+- State persistence
+- Script execution framework
+
+**Phase 3**: Implement script library
+- MC scripts (story picking, facilitation, etc.)
+- Kanban manipulation scripts
+- Testing scripts
+- Zone management scripts
+
+**Phase 4**: Implement all Sub-FSMs in DSL
+- Port Vote, Review, Make-Tool, Refactor, etc. from documentation to executable code
+- Add FSM validation and testing
+
+**Phase 5**: Full integration
+- Wire FSMs to LLM conversations via Structured Responses
+- Hat system fully FSM-aware
+- End-to-end workflow automation
+
+**Phase 6**: Self-improvement
+- Toolsmith can propose new FSM patterns
+- Team can vote on workflow FSM changes
+- FSMs evolve based on retrospective insights
 
 ## Future Enhancements
 
