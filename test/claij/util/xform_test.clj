@@ -1,6 +1,6 @@
-(ns claij.xform-test
+(ns claij.util.xform-test
   (:require [clojure.test :refer [deftest is testing]]
-            [claij.xform :refer [batching-transducer]]))
+            [claij.util.xform :refer [batching-transducer]]))
 
 (deftest test-batching-transducer
   (testing "Batches up to max-count"

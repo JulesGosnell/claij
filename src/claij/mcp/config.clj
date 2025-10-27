@@ -1,4 +1,4 @@
-(ns claij.config)
+(ns claij.mcp.config)
 
 (def config
   {:claude

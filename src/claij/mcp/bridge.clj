@@ -1,4 +1,4 @@
-(ns claij.bridge
+(ns claij.mcp.bridge
   (:require
    [clojure.core.async :refer [go-loop <! >! close!]]
    [clojure.java.process :refer [start stdin stdout]]
