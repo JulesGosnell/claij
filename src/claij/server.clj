@@ -10,7 +10,7 @@
    [clojure.string :refer [split trim join]]
    [clojure.core.async :refer [go-loop <! >! chan]]
    [clj-http.client :refer [post]]
-   [claij.agent.util :refer [assert-env-var clj->json json->clj]])
+   [claij.util :refer [assert-env-var clj->json json->clj]])
   (:import
    [java.net URL])
   (:gen-class))
