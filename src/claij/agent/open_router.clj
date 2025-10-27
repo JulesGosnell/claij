@@ -1,11 +1,11 @@
 (ns claij.agent.open-router
   (:require
+   [claij.repl :refer [start-prepl]]
+   [claij.util :refer [assert-env-var clj->json json->clj]]
    [clj-http.client :refer [post]]
-   [clojure.string :refer [split trim join]]
-   [clojure.core.async :refer [go-loop <! >! chan >!! <!!]]
-   [clojure-mcp.linting :refer [lint]] ;; thanks, Bruce :-)
-   [claij.agent.repl :refer [start-prepl]]
-   [claij.util :refer [assert-env-var clj->json json->clj]]))
+   [clojure-mcp.linting :refer [lint]]
+   [clojure.core.async :refer [<! <!! >! >!! chan go-loop]]
+   [clojure.string :refer [join split trim]]))
 
 ;; https://openrouter.ai/docs/quickstart
 
