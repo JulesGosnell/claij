@@ -1,7 +1,7 @@
 (ns claij.agent.agent-test
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.core.async :refer [chan go-loop <! >!! <!! timeout]]
-            [claij.agent.bridge :refer [start-mcp-bridge]]))
+            [claij.bridge :refer [start-mcp-bridge]]))
 
 (deftest test-mcp-agent
   (testing "MCP agent read and echo sequence"

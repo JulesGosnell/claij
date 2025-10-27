@@ -1,4 +1,4 @@
-(ns claij.agent.bridge
+(ns claij.bridge
   (:require
    [clojure.core.async :refer [go-loop <! >! close!]]
    [clojure.java.process :refer [start stdin stdout]]
