@@ -1,4 +1,4 @@
-(ns claij.agent.config)
+(ns claij.config)
 
 (def config
   {:claude
