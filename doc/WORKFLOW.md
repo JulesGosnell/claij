@@ -460,10 +460,10 @@ The FSM prevents chaos by **muting irrelevant hats** in each state:
 
 ```clojure
 {:zone-locks
- {"src/claij/core.clj" {:story-id 42
+ {"src/claij/mcp/core.clj" {:story-id 42
                                :locked-at #inst "2025-10-27T10:30:00"
                                :locked-by "dev-hat-1"}
-  "src/claij/xform.clj" {:story-id 42
+  "src/claij/util/xform.clj" {:story-id 42
                                 :locked-at #inst "2025-10-27T10:30:00"
                                 :locked-by "dev-hat-1"}}
  :zone-queue

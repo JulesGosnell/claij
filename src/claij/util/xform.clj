@@ -1,4 +1,4 @@
-(ns claij.xform)
+(ns claij.util.xform)
 
 (defn batching-transducer
   "Transducer that batches events up to max-count or after timeout-ms milliseconds.

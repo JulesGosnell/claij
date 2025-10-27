@@ -13,7 +13,7 @@
 ;;   (jetty/run-jetty handler {:port 8080 :join? false})
 ;;   (log/info "Agent started! Visit http://localhost:8080"))
 
-(ns claij.agent.core
+(ns claij.mcp.core
   (:require [ring.adapter.jetty :refer [run-jetty]]
             [reitit.ring :refer [ring-handler router]]
             [clj-http.client :refer [post]]
