@@ -1,4 +1,4 @@
-(ns claij.agent.gemini
+(ns claij.llm.gemini
   (:require
    [clj-http.client :refer [post]]
    [claij.agent.util :refer [assert-env-var trace clj->json json->clj]]))

@@ -1,4 +1,4 @@
-(ns claij.agent.open-router
+(ns claij.llm.open-router
   (:require
    [claij.repl :refer [start-prepl]]
    [claij.util :refer [assert-env-var clj->json json->clj]]
