@@ -1,5 +1,23 @@
 # CLAIJ Coding Guidelines
 
+## Core Values
+
+**These principles guide all code in CLAIJ:**
+
+- **Symmetry in naming** - `open/close`, `start/stop` - similar length, clear pairs
+- **Short, clear names** - Prefer Anglo-Saxon over Latin/Greek: `get` not `retrieve`
+- **No boilerplate** - Every line should earn its place
+- **Inline when used once** - Extract only when reused or truly complex
+- **Always ask: "Can this be simpler?"**
+- **Idiomatic, functional style** - Pure functions, immutable data, composition
+- **Decompose complexity** - Small, simple, reusable pieces composed via higher-order functions
+- **Principle of least surprise** - Code should do what it looks like it does
+- **Minimize concerns** - Keep each piece focused on one thing
+- **Data-driven design** - Represent concepts as data, not objects
+- **Think first, code second** - 1 unit of time [re]thinking is worth 100 units of time coding
+- **Comments: sparse but pragmatic** - Minimize but don't exclude on religious grounds
+- **Run the tests** - Always run the test suite before declaring something works
+
 ## Philosophy
 
 **Think first, code second.** 1 unit of time [re]thinking is worth 100 units of time coding.

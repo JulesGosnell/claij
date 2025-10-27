@@ -356,8 +356,12 @@ Clojure is ideal for this kind of integration work:
 
 ### Development Guidelines
 
-- **[doc/CODING.md](doc/CODING.md)** - General coding practices and conventions
-- **[doc/CODING_GUIDELINES.md](doc/CODING_GUIDELINES.md)** - Detailed style guide and best practices
+- **[doc/CODING_GUIDELINES.md](doc/CODING_GUIDELINES.md)** - Comprehensive coding style guide and best practices
+  - Core values and philosophy
+  - Naming conventions and code structure
+  - Functional programming patterns
+  - Performance optimization (avoiding reflection)
+  - Testing and error handling guidelines
 
 ### Technical Documentation
 
