@@ -1,4 +1,4 @@
-;; (ns claij.agent.core
+;; (ns claij.core
 ;;   (:require [ring.adapter.jetty :as jetty]
 ;;             [taoensso.timbre :as log]))
 

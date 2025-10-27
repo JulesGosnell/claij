@@ -47,9 +47,9 @@ While we're currently focused on building a complete Clojure development environ
 
 ### Current Components
 
-- **Agent Bridges** (`src/claij/agent/bridge.clj`) - MCP protocol communication
+- **Agent Bridges** (`src/claij/bridge.clj`) - MCP protocol communication
 - **LLM Integrations** - Individual adapters for each AI provider
-- **Request Transformation** (`src/claij/agent/xform.clj`) - Data transformation pipelines
+- **Request Transformation** (`src/claij/xform.clj`) - Data transformation pipelines
 - **Configuration** (`src/claij/agent/config.clj`) - Centralized configuration management
 
 ## Development

@@ -1,4 +1,4 @@
-(ns claij.agent.repl
+(ns claij.repl
   (:require
    [clojure.core.async :as async :refer [<!! close! thread]]
    [clojure.core.server :refer [prepl]])
