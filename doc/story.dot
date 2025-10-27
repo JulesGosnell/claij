@@ -1,0 +1,29 @@
+digraph FSM {
+    node [shape=box, style=rounded, fontsize=10];
+    edge [arrowhead=vee];
+
+    subgraph cluster_main {
+        label = "Story Processing FSM";
+        style = filled; color=lightgrey;
+
+        Start [label="Start\nReady-for-Dev Not Empty"];
+        Pick [label="Take Highest Priority Story\nfrom Ready-for-Dev"];
+        MoveDev [label="Move to Dev"];
+        Break [label="Collaboratively Break\ninto Granular Tasks"];
+        AssignImpl [label="Assign & Implement Tasks"];
+        MoveComplete [label="Move to Dev-Complete"];
+        IntTest [label="Integration Test"];
+        MoveDone [label="Move to Done"];
+        End [label="End\nLoop if More Stories"];
+
+        Start -> Pick -> MoveDev -> Break -> AssignImpl -> MoveComplete -> IntTest -> MoveDone -> End;
+
+        subgraph cluster_subfsm {
+            label = "Assign & Implement Sub-FSM";
+            style = dashed; color=lightyellow;
+            Assign [label="Assign Tasks"];
+            Impl [label="Implement All Tasks"];
+            Assign -> Impl;
+        }
+    }
+}

@@ -257,7 +257,7 @@ Clojure is ideal for this kind of integration work:
 
 ## Future Directions
 
-- **Structured Responses with Interceptor Architecture**: A comprehensive redesign of LLM interactions around validated JSON schemas and composable interceptors. See [STRUCTURED_RESPONSES.md](STRUCTURED_RESPONSES.md) for detailed design.
+- **Structured Responses with Interceptor Architecture**: A comprehensive redesign of LLM interactions around validated JSON schemas and composable interceptors. See [doc/STRUCTURED_RESPONSES.md](doc/STRUCTURED_RESPONSES.md) for detailed design.
   
   **Core concepts:**
   - Every LLM response must conform to a JSON schema (validated via M3)
@@ -274,7 +274,7 @@ Clojure is ideal for this kind of integration work:
 
 - **Evolving DSL for Efficiency**: Empower the toolsmith hat to extract and build a domain-specific language (DSL) from repeated patterns, minimizing token usage across the team. As AIs collaborate, the DSL evolves into shorthand functions (e.g., dsl.write_file_with_retry), broadcast to others for reuse, transforming verbose exchanges into concise calls and optimizing long-term project efficiency.
 
-- **Finite State Machine Governance**: Overlay a FSM to structure conversations, defining states like planning, coding, and testing, with transitions triggered by JSON flags rather than keywords. This prevents broadcast storms by muting irrelevant hats per state, supports branching for issues like blockers, and allows mid-project team spin-ups, making workflows agile and predictable.
+- **Finite State Machine Governance**: Overlay a FSM to structure conversations, defining states like planning, coding, and testing, with transitions triggered by JSON flags rather than keywords. This prevents broadcast storms by muting irrelevant hats per state, supports branching for issues like blockers, and allows mid-project team spin-ups, making workflows agile and predictable. **See [doc/WORKFLOW.md](doc/WORKFLOW.md) for the complete workflow specification.**
 
   **Sub-FSM Patterns for Team Workflows**:
   
@@ -332,6 +332,38 @@ Clojure is ideal for this kind of integration work:
  - Versioning Per LLM: Maintain state versions on a per-LLM basis, using a tree structure (vector of vectors) for nested subversions. Paths like [0 1 2] serialize to 0.1.2, enabling parallel forks from any parent without hashing overhead.
  - Summary Layering: Generate summaries only at the current level, treating base summaries as shared user-role messages. Clones build sub-summaries from the base, minimizing redundancy.
  - Merge Detection: Incorporate special merge nodes in the tree structure, flagged with {:type :merge, :base-summary "...", :sub-summaries [...], :merged-summary "..."}. This allows easy identification of merges during traversal or replay.
+
+## Documentation
+
+### Architecture and Design
+
+- **[doc/WORKFLOW.md](doc/WORKFLOW.md)** - Complete FSM-driven development workflow specification
+  - Kanban board structure and Meta-Loop (Retrospective → Planning)
+  - Story Loop with zone management and conflict prevention
+  - All 9 Sub-FSMs (Vote, Review, Make-Tool, Refactor, Debug, Fix-Test, API-Design, Implement, Feature-Development)
+  - State muting rules and hat orchestration
+  - Integration with MCP and DSL evolution
+  - **FSM Library Vision** - Roadmap for encoding workflows in executable Clojure DSL
+  - Visualizations:
+    - [High-level workflow (SVG)](doc/workflow.svg) | [Source (DOT)](doc/workflow.dot)
+    - [Story processing FSM (SVG)](doc/story.svg) | [Source (DOT)](doc/story.dot)
+
+- **[doc/STRUCTURED_RESPONSES.md](doc/STRUCTURED_RESPONSES.md)** - Comprehensive JSON schema-based response architecture
+  - Validated responses with M3
+  - Interceptor patterns for extensibility
+  - Validation-retry loops
+  - Schema composition and auditing
+
+### Development Guidelines
+
+- **[doc/CODING.md](doc/CODING.md)** - General coding practices and conventions
+- **[doc/CODING_GUIDELINES.md](doc/CODING_GUIDELINES.md)** - Detailed style guide and best practices
+
+### Technical Documentation
+
+- **[doc/NAMESPACE_REFACTORING.md](doc/NAMESPACE_REFACTORING.md)** - Namespace organization and refactoring notes
+- **[doc/REFLECTION_FIX.md](doc/REFLECTION_FIX.md)** - Details on reflection handling and fixes
+
 ## License
 
 Apache License 2.0 - See [LICENSE](LICENSE) file for details.
