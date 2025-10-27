@@ -1,0 +1,95 @@
+(ns claij.fsm
+  (:require
+   [m3.validate :refer [validate]]
+   ))
+
+;; we need an example fsm
+
+(def m2
+  {"type" "object"
+   "$defs"
+   {"done"
+    {"type" "string"
+     "description" "summarise what you have done"}
+
+    "mcp-tool-invocation"
+    {"description" "args list for the mcp invocation"
+     "type" "array"
+     "items" "string"}
+
+    "mcp-tool-invocations"
+    {"type" "array"
+     "items" {"$ref" "#/$defs/mcp-tool-invocation"}}
+
+    "mcp-tool-request"
+    {"type" "object"
+     "properties"
+     {"id"
+      {"type" "string"}
+      "invocations"
+      {"$ref" "#/$defs/mcp-tool-invocations"}}}
+
+    "mcp-tool-requests"
+    {"type" "array"
+     "items" {"$ref" "#/$defs/mcp-tool-requests"}}
+
+    "mcp-service-request"
+    {"type" "object"
+     "properties"
+     {"id" {"type" "string"}
+      "tool-requests"
+      {"$ref" "#/$defs/mcp-tools-request"}}}
+
+    "chat-request"
+    {"$ref" "#/$defs/request"}
+
+    "request"
+    {"type" "string"
+     "description" "summarise what you would like"}
+
+    "response"
+    {"oneOf"
+     [{"$ref" "#/$defs/done"}
+      {"$ref" "#/$defs/mcp-tools-request"}
+     ;;{"$ref" "#/$defs/repl-request"}
+      {"$ref" "#/$defs/chat-request"}]}}
+
+   "properties"
+   {"request"
+    {"$ref" "#/$defs/request"}
+
+    "response"
+    {"$ref" "#/$defs/response"}}})
+
+
+;; the plan
+;; to transition we need a json document - a "proposal"
+;; this either comes from a request (us->llm) or a response (llm->us)
+;; the fsm is direction agnostic
+;; each xition carries a schema
+;; the document will be validated against oneOf these schemas
+;; it will make the xition of which it validates against the schema
+;; when making a request, we will send a "oneOf" the xition from our state's schemas
+;; the llm will make a response that conforms to the xition it wants to make
+;; if it validates, we will make the xition, otherwise we go back to the llm til it gets it right
+
+(def meta-schema-uri "https://json-schema.org/draft/2020-12/schema")
+
+(defn make-xitions-schema
+  "make a schema that describes a valid proposal from a given state"
+  [{xs :xitions} state-id]
+  {"$schema" meta-schema-uri
+   "$id" "TODO"
+   "oneOf"
+   (mapv
+    (fn [{i :id s :schema}] {"properties" {"id" {"const" i} "document" s}})
+    ((group-by (comp first :id) xs)
+     state-id))})
+
+(defn xition
+  "given the fsm, the current-state and a valid proposal traverse from
+  current state to one of the possible next states"
+  [fsm last-state {[_ next-state] "id" :as document}]
+  (when (:valid? (validate {} (make-xitions-schema fsm last-state) {} document))
+    next-state))
+
