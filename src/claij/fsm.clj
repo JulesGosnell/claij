@@ -1,7 +1,9 @@
 (ns claij.fsm
   (:require
+   [clojure.tools.logging :as log]
+   [clojure.core.async :refer [chan go-loop alts! >!!]]
    [m3.validate :refer [validate]]
-   [claij.util :refer [index-by ->key]]))
+   [claij.util :refer [index-by ->key map-values]]))
 
 ;; the plan
 ;; to transition we need a json document - a "proposal"
@@ -54,61 +56,72 @@
        "required" ["$id" "id" "document"]})
     xs)})
 
-(defn walk [action-id->action {ss "states" xs "xitions" :as _fsm} [{[last-state-id next-state-id :as x-id] "id" :as input} :as inputs]]
-  (let [last-state-id->xitions (group-by (comp first (->key "id")) xs)
-        last-xitions (last-state-id->xitions last-state-id)]
-    (if last-xitions
-      (let [last-schema (xitions->schema last-state-id last-xitions)]
-        (if-let [next-state-id
-                 (and
-                  (:valid? (validate {} last-schema {} input)) ;; false on fail
-                  next-state-id)]
-          ;; bind to next state
-          (let [id->state (index-by (->key "id") ss)
-                {action-id "action" :as _next-state} (id->state next-state-id)
-                action (action-id->action action-id)
-                next-state-id->xitions (group-by (comp first (->key "id")) xs)
-                next-xitions (next-state-id->xitions next-state-id)
-                next-schema (xitions->schema next-state-id next-xitions)]
-            (action next-schema inputs)
-            ;; and then recurse (pass a handler...)
-            )
-          ;; bail
-          next-state-id ;; nil or false
-          ))
-      inputs)))
+(defn embed-schema [id s]
+  {"$schema" meta-schema-uri
+   "$id" (str schema-base-uri "/" "TODO")
+   "properties"
+   {"$schema" {"type" "string"}
+    "$id" {"type" "string"}
+    "id" {"const" id}
+    "document" s}})
+
+;; rename "action" "transform"
+;; TODO: if we inline cform, we may be able to more work outside and less inside it...
+(defn xform [action-id->action {[from to] "id" :as ix} {sid "id" a "action" :as s} ox-and-cs [h :as trail]]
+  (log/infof "[%s -> %s]: %s" from to (pr-str h))
+
+  ;; TODO:
+  ;; an llm state should say which model to used
+  ;; an llm state should provide prompts
+
+  (let [state-schema {"$schema" meta-schema-uri
+                      "$id" (str schema-base-uri "/FSM-ID/FSM-VERSION/" sid)
+                      ;; consider additional* and other tightenings...
+                      "oneOf" (mapv (fn [[{oid "id" schema "schema" :as x} c]] (embed-schema oid schema)) ox-and-cs)}
+        id->x-and-c (index-by (comp (->key "id") first) ox-and-cs)
+        ;; handler returns nil on success otherwise validation errors...
+        handler (fn [{oid "id" :as output}]
+                  (let [[{xition-schema "schema" :as ox} c] (id->x-and-c oid)
+                        schema (embed-schema oid xition-schema)
+                        {v? :valid? es :errors} (validate {} schema {} output)]
+                    (if v?
+                      (do
+                        (>!! c (cons [schema output] trail))
+                        nil)
+                      es)))]
+    (if-let [action (action-id->action a)]
+      (action trail state-schema handler)
+      (handler (second (first trail))))))
+
+(defn make-fsm [action-id->action {ss "states" xs "xitions"}]
+  (let [id->x (index-by (->key "id") xs)
+        xid->c (map-values (fn [_k _v] (chan)) id->x)
+        xs->x-and-cs (fn [_ xs] (mapv (juxt identity (comp xid->c (->key "id"))) xs))
+        sid->ix-and-cs (map-values xs->x-and-cs (group-by (comp second (->key "id")) xs))
+        sid->ox-and-cs (map-values xs->x-and-cs (group-by (comp first  (->key "id")) xs))]
+    ((into
+     {}
+     (mapv
+      (fn [{id "id" :as s}]
+        [id
+         (let [ix-and-cs (sid->ix-and-cs id)
+               ox-and-cs (sid->ox-and-cs id)
+               ic->ix (into {} (mapv (fn [[x c]] [c x]) ix-and-cs))
+               cs (keys ic->ix)]
+           (go-loop [] ;; hopefully start a loop in another thread
+             (let [[v ic] (alts! cs) ;; check all input channels
+                   ix (ic->ix ic)]
+             ;; TODO: if we inline xform here, perhaps we can pull more code out of the loop ?
+               (xform action-id->action ix s ox-and-cs v)))
+           cs)])
+      ss))
+     "start")))
 
 
-;; (defn make-fsm [{ss "states" xs "xitions"}]
-;;   (let [id->s (index-by (->key "id") ss)
-;;         id->x (index-by (->key "id") xs)
-;;         sid->xs (group-by (comp first (->key "id")) xs)
-
-;;         connect-s
-;;         (fn [{sid "id" :as s}]
-;;           (let [xs (sid->xs sid)
-;;                 connect-x
-;;                 (fn [x]
-                  
-;;                   )]
-;;             )
-;;           )
-;;         ]
-;;     )
-;;   )
-
-(defn make-fsm [{ss "states" xs "xitions"}]
-  (let [id->s (index-by (->key "id") ss)
-        id->x (index-by (->key "id") xs)]
-    
-
-    ;; for each xition
-    ;; - make a channel
-    ;; for each state
-    ;; - write a dispatcher over the output channels
-    ;; - attach the dispatcher to all the input channels
-    ;; - dispatcher should close over the state and xition
+;; need:
+;; a correlation id threaded through the data
+;; a monitor or callback on each state
+;; start and end states which are just labels
+;; sub-fsms = like a sub-routine - can be embedded in a state or a transition - hmmm - schemas must match ?
 
 
-    
-    ))

@@ -1,7 +1,8 @@
 (ns claij.fsm-test
   (:require
+   [clojure.tools.logging :as log]
    [clojure.test :refer [deftest testing is]]
-   [claij.fsm :refer [walk]]))
+   [claij.fsm :refer [make-fsm]]))
 
 ;;------------------------------------------------------------------------------
 
@@ -19,10 +20,12 @@
   {"states"
    [{"id" "start"}
     {"id" "meeting" "action" "greet"}
-    {"id" "end"     "action" "identity"}]
+    {"id" "end"     "action" "log"}]
 
    "xitions"
-   [{"id" ["start" "meeting"]
+   [{"id" [nil "start"]
+     "schema" true} ;; TODO: tighten schema
+    {"id" ["start" "meeting"]
      "schema" {"type" "string"}}
     {"id" ["meeting" "end"]
      "schema" {"type" "string"}}]})
@@ -45,52 +48,34 @@
 
 ;; TODO: provide schemas for each item in trail otherwise how will they be understood ?
 
-(defn greet-action [{schema-id "$id" [{{{id "const"} "id"} "properties"}] "oneOf" :as _schema} [{document "document" :as _input} :as inputs]]
-  (cons
-   {"$schema" schema-id
-    "$id" "TODO"
-    "id" id
-    "document" ({"how are you ?" "very well thank-you"} document)}
-   inputs))
+(defn greet-action [[[_ {document "document" :as _input}] :as _inputs] {schema-id "$id" [{{{id "const"} "id"} "properties"}] "oneOf" :as _schema} handler]
+  (if-let [es
+           (handler
+            {"$schema" schema-id
+             "$id" "TODO"
+             "id" id
+             "document" ({"how are you ?" "very well thank-you"} document)})]
+    (log/error es)
+    nil))
 
 ;; TODO: this may not be enough
-(defn identity-action [_schema inputs]
-  inputs)
+(defn log-action [[input :as _inputs] _schema handler]
+  (log/info "END:" (second input))
+  ;; (if-let [es (handler input)]
+  ;;   (log/error es)
+  ;;   nil)
+  )
 
 (def action-id->action
   {"greet" greet-action
-   "identity" identity-action})
+   "log" log-action})
 
-;;------------------------------------------------------------------------------
-
-(deftest walk-test
-  (testing "a couple more hops"
-    (is
-     (=
-      [{"$schema"
-        "http://megalodon:8080/schemas/FSM-ID/FSM-VERSION/meeting/transitions",
-        "$id" "TODO",
-        "id" ["meeting" "end"],
-        "document" "very well thank-you"}
-       {"$schema"
-        "http://megalodon:8080/schemas/FSM-ID/FSM-VERSION/start/transitions",
-        "$id" "TODO",
-        "id" ["start" "meeting"],
-        "document" "how are you ?"}]
-      (walk
-       action-id->action
-       fsm
-       (walk
-        action-id->action
-        fsm
-        (list
-         {"$schema" "http://megalodon:8080/schemas/FSM-ID/FSM-VERSION/start/transitions"
-          "$id" "TODO"
-          "id" ["start" "meeting"]
-          "document" "how are you ?"})))))))
+(comment
+  (make-fsm action-id->action fsm)
+  (def c (first *1))
+  (clojure.core.async/>!! c [[true {"$schema" "http://megalodon:8080/schemas/FSM-ID/FSM-VERSION/start/transitions" "$id" "TODO" "id" ["start" "meeting"] "document" "how are you ?"}]]))
 
 
- 
 ;; TODO:
 ;; reintroduce roles as hats
 ;; add [sub-]schemas to trail
