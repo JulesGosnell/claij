@@ -2,7 +2,7 @@
   (:require
    [clojure.set :refer [intersection]]
    [m3.validate :refer [validate]]
-   ))
+   [claij.util :refer [index-by]]))
 
 ;; the plan
 ;; to transition we need a json document - a "proposal"
@@ -28,9 +28,6 @@
 ;; - if the action is going to cause a request to kick off to an llvm then we need to pass in everything that it might need...
 ;; - fsm
 (def meta-schema-uri "https://json-schema.org/draft/2020-12/schema")
-
-(defn index-by [f es]
-  (reduce (fn [acc e] (assoc acc (f e) e)) {} es))
     
 ;; if the last xition was a response from an llm then the next will be
 ;; How can we work it so that the fsm has no concept of request/response but simply connects input channels to output channels -  put together a small demo that evaluates a piece of dsl
