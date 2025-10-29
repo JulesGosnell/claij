@@ -18,5 +18,8 @@
 (defn index-by [f es]
   (reduce (fn [acc e] (assoc acc (f e) e)) {} es))
 
+(defn map-values [f m] (reduce-kv (fn [acc k v] (assoc acc k (f k v))) {} m))
+   
+
 (defn ->key [s] (fn [m] (m s)))
 
