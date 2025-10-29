@@ -14,3 +14,6 @@
 
 (defn clj->json [clj]
   (write-str clj))
+
+(defn index-by [f es]
+  (reduce (fn [acc e] (assoc acc (f e) e)) {} es))
