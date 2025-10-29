@@ -1,8 +1,7 @@
 (ns claij.fsm
   (:require
-   [clojure.set :refer [intersection]]
    [m3.validate :refer [validate]]
-   [claij.util :refer [index-by]]))
+   [claij.util :refer [index-by ->key]]))
 
 ;; the plan
 ;; to transition we need a json document - a "proposal"
@@ -45,7 +44,7 @@
    "$id" (xition-id->schema-uri last-state)
    "oneOf"
    (mapv
-    (fn [{i :id s :schema}]
+    (fn [{i "id" s "schema"}]
       {"properties"
        {"$schema" {"type" "string"}
         "$id" {"type" "string"}
@@ -55,8 +54,8 @@
        "required" ["$id" "id" "document"]})
     xs)})
 
-(defn walk [action-id->action {ss :states xs :xitions :as _fsm} [{[last-state-id next-state-id :as x-id] "id" :as input} :as inputs]]
-  (let [last-state-id->xitions (group-by (comp first :id) xs)
+(defn walk [action-id->action {ss "states" xs "xitions" :as _fsm} [{[last-state-id next-state-id :as x-id] "id" :as input} :as inputs]]
+  (let [last-state-id->xitions (group-by (comp first (->key "id")) xs)
         last-xitions (last-state-id->xitions last-state-id)]
     (if last-xitions
       (let [last-schema (xitions->schema last-state-id last-xitions)]
@@ -65,10 +64,10 @@
                   (:valid? (validate {} last-schema {} input)) ;; false on fail
                   next-state-id)]
           ;; bind to next state
-          (let [id->state (index-by :id ss)
-                {action-id :action :as _next-state} (id->state next-state-id)
+          (let [id->state (index-by (->key "id") ss)
+                {action-id "action" :as _next-state} (id->state next-state-id)
                 action (action-id->action action-id)
-                next-state-id->xitions (group-by (comp first :id) xs)
+                next-state-id->xitions (group-by (comp first (->key "id")) xs)
                 next-xitions (next-state-id->xitions next-state-id)
                 next-schema (xitions->schema next-state-id next-xitions)]
             (action next-schema inputs)
@@ -80,13 +79,13 @@
       inputs)))
 
 
-;; (defn make-fsm [{ss :states xs :xitions}]
-;;   (let [id->s (index-by :id ss)
-;;         id->x (index-by :id xs)
-;;         sid->xs (group-by (comp first :id) xs)
+;; (defn make-fsm [{ss "states" xs "xitions"}]
+;;   (let [id->s (index-by (->key "id") ss)
+;;         id->x (index-by (->key "id") xs)
+;;         sid->xs (group-by (comp first (->key "id")) xs)
 
 ;;         connect-s
-;;         (fn [{sid :id :as s}]
+;;         (fn [{sid "id" :as s}]
 ;;           (let [xs (sid->xs sid)
 ;;                 connect-x
 ;;                 (fn [x]
@@ -98,9 +97,9 @@
 ;;     )
 ;;   )
 
-(defn make-fsm [{ss :states xs :xitions}]
-  (let [id->s (index-by :id ss)
-        id->x (index-by :id xs)]
+(defn make-fsm [{ss "states" xs "xitions"}]
+  (let [id->s (index-by (->key "id") ss)
+        id->x (index-by (->key "id") xs)]
     
 
     ;; for each xition
