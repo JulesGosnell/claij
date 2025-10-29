@@ -23,10 +23,8 @@
 
    :xitions
    [{:id ["start" "meeting"]
-     :roles ["jules"]
      :schema {"type" "string"}}
     {:id ["meeting" "end"]
-     :roles ["jules"]
      :schema {"type" "string"}}]})
 
 ;;------------------------------------------------------------------------------
@@ -34,7 +32,6 @@
 
 (defn llm-action [input]
   ;; we need to know
-  ;; - the transition's roles, so we can don those hats
   ;; - the interceptors that will build the prompt stack
   ;; - the input schema (as it documents the input)
   ;; - the input
@@ -53,8 +50,7 @@
    {"$schema" schema-id
     "$id" "TODO"
     "id" id
-    "roles" ["jules"] "document"
-    ({"how are you ?" "very well thank-you"} document)}
+    "document" ({"how are you ?" "very well thank-you"} document)}
    inputs))
 
 ;; TODO: this may not be enough
@@ -75,13 +71,11 @@
         "http://megalodon:8080/schemas/FSM-ID/FSM-VERSION/meeting/transitions",
         "$id" "TODO",
         "id" ["meeting" "end"],
-        "roles" ["jules"],
         "document" "very well thank-you"}
        {"$schema"
         "http://megalodon:8080/schemas/FSM-ID/FSM-VERSION/start/transitions",
         "$id" "TODO",
         "id" ["start" "meeting"],
-        "roles" ["jules"],
         "document" "how are you ?"}]
       (walk
        action-id->action
@@ -93,15 +87,13 @@
          {"$schema" "http://megalodon:8080/schemas/FSM-ID/FSM-VERSION/start/transitions"
           "$id" "TODO"
           "id" ["start" "meeting"]
-          "roles" ["jules"]
           "document" "how are you ?"})))))))
 
 
  
 ;; TODO:
+;; reintroduce roles as hats
 ;; add [sub-]schemas to trail
-;; reconsider roles - llm will be whatever we need it to be on every request so it will always be in role...
-;; I think roles = hats - document the distinction
 ;; I guess humans could be out of role but ...
 ;; if [m2 m1] is returned by action and m2s are unique then we could just index-by and look up m2 without needing the oneOf validation... - yippee !
 ;; no - an llm will return just the m1 and we will need to do the oneOf validation to know what they meant ? or do e just get them to return [m2 m1]
@@ -111,7 +103,6 @@
 ;; the above is useful for controlled testing but not production
 ;; fsm should not have keywords
 ;; replace original with new impl
-;; we should probably rename roles to hats
 ;; integrate an llm
 ;; integrate some sort of human postbox - email with a link ?
 ;; integrate mcp

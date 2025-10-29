@@ -50,13 +50,12 @@
        {"$schema" {"type" "string"}
         "$id" {"type" "string"}
         "id" {"const" i}
-        "roles" {"type" "array" "items" {"type" "string"} "additionalItems" false}
         "document" s}
        "additionalProperties" false
-       "required" ["$id" "id" "roles" "document"]})
+       "required" ["$id" "id" "document"]})
     xs)})
 
-(defn walk [action-id->action {ss :states xs :xitions :as _fsm} [{[last-state-id next-state-id :as x-id] "id"  roles "roles" d "document" :as input} :as inputs]]
+(defn walk [action-id->action {ss :states xs :xitions :as _fsm} [{[last-state-id next-state-id :as x-id] "id" :as input} :as inputs]]
   (let [last-state-id->xitions (group-by (comp first :id) xs)
         last-xitions (last-state-id->xitions last-state-id)]
     (if last-xitions
@@ -64,7 +63,6 @@
         (if-let [next-state-id
                  (and
                   (:valid? (validate {} last-schema {} input)) ;; false on fail
-                  (seq (intersection (set (((index-by :id xs) x-id) :roles)) (set roles)))
                   next-state-id)]
           ;; bind to next state
           (let [id->state (index-by :id ss)
