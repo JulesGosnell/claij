@@ -94,7 +94,6 @@
 ;; TODO:
 ;; reintroduce roles as hats
 ;; add [sub-]schemas to trail
-;; I guess humans could be out of role but ...
 ;; if [m2 m1] is returned by action and m2s are unique then we could just index-by and look up m2 without needing the oneOf validation... - yippee !
 ;; no - an llm will return just the m1 and we will need to do the oneOf validation to know what they meant ? or do e just get them to return [m2 m1]
 ;; we could just give them a list of schemas to choose from ...
