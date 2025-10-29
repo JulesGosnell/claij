@@ -4,65 +4,6 @@
    [m3.validate :refer [validate]]
    ))
 
-;; we need an example fsm
-
-(def m2
-  {"type" "object"
-   "$defs"
-   {"done"
-    {"type" "string"
-     "description" "summarise what you have done"}
-
-    "mcp-tool-invocation"
-    {"description" "args list for the mcp invocation"
-     "type" "array"
-     "items" "string"}
-
-    "mcp-tool-invocations"
-    {"type" "array"
-     "items" {"$ref" "#/$defs/mcp-tool-invocation"}}
-
-    "mcp-tool-request"
-    {"type" "object"
-     "properties"
-     {"id"
-      {"type" "string"}
-      "invocations"
-      {"$ref" "#/$defs/mcp-tool-invocations"}}}
-
-    "mcp-tool-requests"
-    {"type" "array"
-     "items" {"$ref" "#/$defs/mcp-tool-requests"}}
-
-    "mcp-service-request"
-    {"type" "object"
-     "properties"
-     {"id" {"type" "string"}
-      "tool-requests"
-      {"$ref" "#/$defs/mcp-tools-request"}}}
-
-    "chat-request"
-    {"$ref" "#/$defs/request"}
-
-    "request"
-    {"type" "string"
-     "description" "summarise what you would like"}
-
-    "response"
-    {"oneOf"
-     [{"$ref" "#/$defs/done"}
-      {"$ref" "#/$defs/mcp-tools-request"}
-     ;;{"$ref" "#/$defs/repl-request"}
-      {"$ref" "#/$defs/chat-request"}]}}
-
-   "properties"
-   {"request"
-    {"$ref" "#/$defs/request"}
-
-    "response"
-    {"$ref" "#/$defs/response"}}})
-
-
 ;; the plan
 ;; to transition we need a json document - a "proposal"
 ;; this either comes from a request (us->llm) or a response (llm->us)
@@ -88,11 +29,23 @@
 ;; - fsm
 (def meta-schema-uri "https://json-schema.org/draft/2020-12/schema")
 
-(defn make-xitions-schema
-  "make a schema that describes a valid proposal from a given state"
-  [{xs :xitions} state-id]
+(defn index-by [f es]
+  (reduce (fn [acc e] (assoc acc (f e) e)) {} es))
+    
+;; if the last xition was a response from an llm then the next will be
+;; How can we work it so that the fsm has no concept of request/response but simply connects input channels to output channels -  put together a small demo that evaluates a piece of dsl
+;; we need to use async http calls ...
+
+(def schema-base-uri "http://megalodon:8080/schemas")
+
+;; TODO - fsm needs a unique id - 
+;; TODO: consider version...
+(defn xition-id->schema-uri [state-id]
+  (str schema-base-uri "/" "FSM-ID" "/" "FSM-VERSION" "/" state-id "/transitions"))
+
+(defn xitions->schema [last-state xs]
   {"$schema" meta-schema-uri
-   "$id" "TODO"
+   "$id" (xition-id->schema-uri last-state)
    "oneOf"
    (mapv
     (fn [{i :id s :schema}]
@@ -104,35 +57,29 @@
         "document" s}
        "additionalProperties" false
        "required" ["$id" "id" "roles" "document"]})
-    ((group-by (comp first :id) xs)
-     state-id))})
+    xs)})
 
-(defn index-by [f es]
-  (reduce (fn [acc e] (assoc acc (f e) e)) {} es))
-
-(defn xition
-  "given the fsm, the current-state and a valid proposal transition from
-  current state to one of the possible next states"
-  [{xs :xitions :as fsm} last-state {[_ next-state :as x-id] "id" rs "roles" :as input}]
-  (and
-   (:valid? (validate {} (make-xitions-schema fsm last-state) {} input)) ;; false on fail
-   (seq (intersection (set (((index-by :id xs) x-id) :roles)) (set rs))) ;; inefficient... - nil on fail
-   next-state))
-
-;; should states and transitions be joined directly or by async channels ?
-
-(defn state
-  "bind to a new state - potentially performing an associated action"
-  [action->fn {states :states :as fsm} id input]
-  (let [{a :action :as state} ((index-by :id states) id)
-        action (action->fn a)]
-    (action input)))
-    
-    
-
-    ;; if the last xition was a response from an llm then the next will be
-
-    ;; How can we work it so that the fsm has no concept of request/response but simply connects input channels to output channels -  put together a small demo that evaluates a piece of dsl
-    
-    ;; we need to use async http calls ...
-
+(defn walk [action-id->action {ss :states xs :xitions :as _fsm} [{[last-state-id next-state-id :as x-id] "id"  roles "roles" d "document" :as input} :as inputs]]
+  (let [last-state-id->xitions (group-by (comp first :id) xs)
+        last-xitions (last-state-id->xitions last-state-id)]
+    (if last-xitions
+      (let [last-schema (xitions->schema last-state-id last-xitions)]
+        (if-let [next-state-id
+                 (and
+                  (:valid? (validate {} last-schema {} input)) ;; false on fail
+                  (seq (intersection (set (((index-by :id xs) x-id) :roles)) (set roles)))
+                  next-state-id)]
+          ;; bind to next state
+          (let [id->state (index-by :id ss)
+                {action-id :action :as _next-state} (id->state next-state-id)
+                action (action-id->action action-id)
+                next-state-id->xitions (group-by (comp first :id) xs)
+                next-xitions (next-state-id->xitions next-state-id)
+                next-schema (xitions->schema next-state-id next-xitions)]
+            (action next-schema inputs)
+            ;; and then recurse (pass a handler...)
+            )
+          ;; bail
+          next-state-id ;; nil or false
+          ))
+      inputs)))

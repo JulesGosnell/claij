@@ -1,121 +1,7 @@
 (ns claij.fsm-test
   (:require
    [clojure.test :refer [deftest testing is]]
-   [clojure.set :refer [intersection]]
-   [m3.validate :refer [validate]]
-   [claij.fsm :refer [make-xitions-schema xition state meta-schema-uri index-by]]))
-
-(def fsm
-  {:states
-   [{:id "a"}
-    {:id "b"}
-    {:id "c"}]
-
-   :xitions
-   [{:id ["a" "a"]
-     :roles ["lead"]
-     :schema {"type" "number"}}
-    {:id ["a" "b"]
-     :roles ["lead" "dev"]
-     :schema {"type" "string"}}
-    {:id ["a" "c"]
-     :roles ["tools"]
-     :schema {"type" "boolean"}}]})
-
-(deftest test-fsm
-
-  (testing "make-xitions-schema"
-    (is
-     (=
-      {"$schema" "https://json-schema.org/draft/2020-12/schema",
-       "$id" "TODO",
-       "oneOf"
-       [{"properties"
-         {"$schema" {"type" "string"},
-          "$id" {"type" "string"},
-          "id" {"const" ["a" "a"]},
-          "roles"
-          {"type" "array",
-           "items" {"type" "string"},
-           "additionalItems" false},
-          "document" {"type" "number"}},
-         "additionalProperties" false,
-         "required" ["$id" "id" "roles" "document"]}
-        {"properties"
-         {"$schema" {"type" "string"},
-          "$id" {"type" "string"},
-          "id" {"const" ["a" "b"]},
-          "roles"
-          {"type" "array",
-           "items" {"type" "string"},
-           "additionalItems" false},
-          "document" {"type" "string"}},
-         "additionalProperties" false,
-         "required" ["$id" "id" "roles" "document"]}
-        {"properties"
-         {"$schema" {"type" "string"},
-          "$id" {"type" "string"},
-          "id" {"const" ["a" "c"]},
-          "roles"
-          {"type" "array",
-           "items" {"type" "string"},
-           "additionalItems" false},
-          "document" {"type" "boolean"}},
-         "additionalProperties" false,
-         "required" ["$id" "id" "roles" "document"]}]}
-      (make-xitions-schema fsm "a"))))
-
-;; allow switching transition by role
-  ;; but then transitions become ambiguous
-
-  (testing "xition: "
-    (testing "matches"
-      (is
-       (=
-        "b"
-        (xition
-         fsm
-         "a"
-         {"$id" "TODO"
-          "id" ["a" "b"]
-          "roles" ["dev" "docs"]
-          "document" "a test xition"}))))
-    (testing "doesn't match"
-      (is
-       (false?
-        (xition
-         fsm
-         "a"
-         {"$id" "TODO"
-          "id" ["a" "b"]
-          "roles" ["dev" "docs"]
-          "document" 0}))))
-    (testing "out of role"
-      (is
-       (nil?
-        (xition
-         fsm
-         "a"
-         {"$id" "TODO"
-          "id" ["a" "b"]
-          "roles" ["docs"]
-          "document" "a test xition"})))))
-
-  (testing "state: "
-    (testing "simple"
-      (let [state-id "meeting"
-            action-id "greet"
-            input "how are you"
-            output "very well thank-you"]
-        (is (=
-             output
-             (state
-              {action-id {input output}}
-              {:states [{:id state-id :action action-id}]}
-              state-id
-              input)))))))
-
-
+   [claij.fsm :refer [walk]]))
 
 ;;------------------------------------------------------------------------------
 
@@ -129,7 +15,7 @@
 
 ;; think about terminaology for states and transitions - very important to get it right - tense ?
 
-(def fsm2
+(def fsm
   {:states
    [{:id "start"}
     {:id "meeting" :action "greet"}
@@ -181,54 +67,6 @@
 
 ;;------------------------------------------------------------------------------
 
-(def schema-base-uri "http://megalodon:8080/schemas")
-
-;; TODO - fsm needs a unique id - 
-;; TODO: consider version...
-(defn xition-id->schema-uri [state-id]
-  (str schema-base-uri "/" "FSM-ID" "/" "FSM-VERSION" "/" state-id "/transitions"))
-
-(defn xitions->schema [last-state xs]
-  {"$schema" meta-schema-uri
-   "$id" (xition-id->schema-uri last-state)
-   "oneOf"
-   (mapv
-    (fn [{i :id s :schema}]
-      {"properties"
-       {"$schema" {"type" "string"}
-        "$id" {"type" "string"}
-        "id" {"const" i}
-        "roles" {"type" "array" "items" {"type" "string"} "additionalItems" false}
-        "document" s}
-       "additionalProperties" false
-       "required" ["$id" "id" "roles" "document"]})
-    xs)})
-
-(defn walk [action-id->action {ss :states xs :xitions :as _fsm} [{[last-state-id next-state-id :as x-id] "id"  roles "roles" d "document" :as input} :as inputs]]
-  (let [last-state-id->xitions (group-by (comp first :id) xs)
-        last-xitions (last-state-id->xitions last-state-id)]
-    (if last-xitions
-      (let [last-schema (xitions->schema last-state-id last-xitions)]
-        (if-let [next-state-id
-                 (and
-                  (:valid? (validate {} last-schema {} input)) ;; false on fail
-                  (seq (intersection (set (((index-by :id xs) x-id) :roles)) (set roles)))
-                  next-state-id)]
-          ;; bind to next state
-          (let [id->state (index-by :id ss)
-                {action-id :action :as _next-state} (id->state next-state-id)
-                action (action-id->action action-id)
-                next-state-id->xitions (group-by (comp first :id) xs)
-                next-xitions (next-state-id->xitions next-state-id)
-                next-schema (xitions->schema next-state-id next-xitions)]
-            (action next-schema inputs)
-            ;; and then recurse (pass a handler...)
-            )
-          ;; bail
-          next-state-id ;; nil or false
-          ))
-      inputs)))
-  
 (deftest walk-test
   (testing "a couple more hops"
     (is
@@ -247,10 +85,10 @@
         "document" "how are you ?"}]
       (walk
        action-id->action
-       fsm2
+       fsm
        (walk
         action-id->action
-        fsm2
+        fsm
         (list
          {"$schema" "http://megalodon:8080/schemas/FSM-ID/FSM-VERSION/start/transitions"
           "$id" "TODO"
