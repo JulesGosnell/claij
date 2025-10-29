@@ -16,16 +16,16 @@
 ;; think about terminaology for states and transitions - very important to get it right - tense ?
 
 (def fsm
-  {:states
-   [{:id "start"}
-    {:id "meeting" :action "greet"}
-    {:id "end"     :action "identity"}]
+  {"states"
+   [{"id" "start"}
+    {"id" "meeting" "action" "greet"}
+    {"id" "end"     "action" "identity"}]
 
-   :xitions
-   [{:id ["start" "meeting"]
-     :schema {"type" "string"}}
-    {:id ["meeting" "end"]
-     :schema {"type" "string"}}]})
+   "xitions"
+   [{"id" ["start" "meeting"]
+     "schema" {"type" "string"}}
+    {"id" ["meeting" "end"]
+     "schema" {"type" "string"}}]})
 
 ;;------------------------------------------------------------------------------
 ;; some actions:
@@ -100,7 +100,6 @@
 ;; maybe stick with oneOf stuff for the moment - consider tomorrow
 ;; should this be wired together with async channels and all just kick off asynchronously - yes - pass a handler to walk to put trail onto channel
 ;; the above is useful for controlled testing but not production
-;; fsm should not have keywords
 ;; replace original with new impl
 ;; integrate an llm
 ;; integrate some sort of human postbox - email with a link ?

@@ -17,3 +17,6 @@
 
 (defn index-by [f es]
   (reduce (fn [acc e] (assoc acc (f e) e)) {} es))
+
+(defn ->key [s] (fn [m] (m s)))
+
