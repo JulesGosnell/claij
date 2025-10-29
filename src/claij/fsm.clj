@@ -78,3 +78,38 @@
           next-state-id ;; nil or false
           ))
       inputs)))
+
+
+;; (defn make-fsm [{ss :states xs :xitions}]
+;;   (let [id->s (index-by :id ss)
+;;         id->x (index-by :id xs)
+;;         sid->xs (group-by (comp first :id) xs)
+
+;;         connect-s
+;;         (fn [{sid :id :as s}]
+;;           (let [xs (sid->xs sid)
+;;                 connect-x
+;;                 (fn [x]
+                  
+;;                   )]
+;;             )
+;;           )
+;;         ]
+;;     )
+;;   )
+
+(defn make-fsm [{ss :states xs :xitions}]
+  (let [id->s (index-by :id ss)
+        id->x (index-by :id xs)]
+    
+
+    ;; for each xition
+    ;; - make a channel
+    ;; for each state
+    ;; - write a dispatcher over the output channels
+    ;; - attach the dispatcher to all the input channels
+    ;; - dispatcher should close over the state and xition
+
+
+    
+    ))
