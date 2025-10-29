@@ -74,6 +74,18 @@
 ;; the llm will make a response that conforms to the xition it wants to make
 ;; if it validates, we will make the xition, otherwise we go back to the llm til it gets it right
 
+;; a transition ensures that you hve all the correct parameter for the following state
+;; the state is one of:
+;; -  human
+;; - an llm
+;; - an mcp service
+;; - a repl
+;; - a yet-to-be-invented extension
+;; the state takes its input and provides an output
+
+;; thoughts
+;; - if the action is going to cause a request to kick off to an llvm then we need to pass in everything that it might need...
+;; - fsm
 (def meta-schema-uri "https://json-schema.org/draft/2020-12/schema")
 
 (defn make-xitions-schema
@@ -85,9 +97,13 @@
    (mapv
     (fn [{i :id s :schema}]
       {"properties"
-       {"id" {"const" i}
-        "roles" {"type" "array" "items" {"type" "string"}}
-        "document" s}})
+       {"$schema" {"type" "string"}
+        "$id" {"type" "string"}
+        "id" {"const" i}
+        "roles" {"type" "array" "items" {"type" "string"} "additionalItems" false}
+        "document" s}
+       "additionalProperties" false
+       "required" ["$id" "id" "roles" "document"]})
     ((group-by (comp first :id) xs)
      state-id))})
 
@@ -95,10 +111,28 @@
   (reduce (fn [acc e] (assoc acc (f e) e)) {} es))
 
 (defn xition
-  "given the fsm, the current-state and a valid proposal traverse from
+  "given the fsm, the current-state and a valid proposal transition from
   current state to one of the possible next states"
-  [{xs :xitions :as fsm} last-state {[_ next-state :as x-id] "id" rs "roles" :as document}]
+  [{xs :xitions :as fsm} last-state {[_ next-state :as x-id] "id" rs "roles" :as input}]
   (and
-   (:valid? (validate {} (make-xitions-schema fsm last-state) {} document)) ;; false on fail
+   (:valid? (validate {} (make-xitions-schema fsm last-state) {} input)) ;; false on fail
    (seq (intersection (set (((index-by :id xs) x-id) :roles)) (set rs))) ;; inefficient... - nil on fail
    next-state))
+
+;; should states and transitions be joined directly or by async channels ?
+
+(defn state
+  "bind to a new state - potentially performing an associated action"
+  [action->fn {states :states :as fsm} id input]
+  (let [{a :action :as state} ((index-by :id states) id)
+        action (action->fn a)]
+    (action input)))
+    
+    
+
+    ;; if the last xition was a response from an llm then the next will be
+
+    ;; How can we work it so that the fsm has no concept of request/response but simply connects input channels to output channels -  put together a small demo that evaluates a piece of dsl
+    
+    ;; we need to use async http calls ...
+
