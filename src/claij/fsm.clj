@@ -3,7 +3,7 @@
    [clojure.tools.logging :as log]
    [clojure.core.async :refer [chan go-loop alts! >!!]]
    [m3.validate :refer [validate]]
-   [claij.util :refer [index-by ->key map-values]]))
+   [claij.util :refer [def-m2 def-m1 index-by ->key map-values]]))
 
 ;; the plan
 ;; to transition we need a json document - a "proposal"
@@ -33,6 +33,55 @@
 ;; if the last xition was a response from an llm then the next will be
 ;; How can we work it so that the fsm has no concept of request/response but simply connects input channels to output channels -  put together a small demo that evaluates a piece of dsl
 ;; we need to use async http calls ...
+;;------------------------------------------------------------------------------
+
+(def-m2
+  fsm-m2
+  {"$schema" "https://json-schema.org/draft/next/schema"
+   ;;"$id" "fsm-schema" ;; $id is messing up $refs :-(
+   "$version" 0
+
+   "$defs"
+   {"state"
+    {"properties"
+     {"id"
+      {"type" "string"}
+
+      "action"
+      {"type" "string"}}
+     "additionalProperties" false
+     "required" ["id"]}
+
+    "xition"
+    {"properties"
+     {"id"
+      {"type"
+       {"array"
+        {"items"
+         [{"type" "string"}
+          {"type" "string"}]
+         "additionalItems" false}}}
+
+      "schema" true ;; TODO: we can do better than this - see m3
+      }
+     "additionalProperties" false
+     "required" ["id" "schema"]}}
+
+   "properties"
+   {"states"
+    {"type" "array"
+     "items" {"$ref" "#/$defs/state"}}
+
+    "xitions"
+    {"type" "array"
+     "items" {"$ref" "#/$defs/xition"}}}
+
+   "additionalProperties" false})
+
+(defmacro def-fsm [name m1]
+  `(def-m1 ~name fsm-m2 ~m1))
+
+;;------------------------------------------------------------------------------
 
 (def schema-base-uri "http://megalodon:8080/schemas")
 

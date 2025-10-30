@@ -2,7 +2,7 @@
   (:require
    [clojure.tools.logging :as log]
    [clojure.test :refer [deftest testing is]]
-   [claij.fsm :refer [make-fsm]]))
+   [claij.fsm :refer [def-fsm make-fsm fsm-m2]]))
 
 ;;------------------------------------------------------------------------------
 
@@ -16,7 +16,8 @@
 
 ;; think about terminaology for states and transitions - very important to get it right - tense ?
 
-(def fsm
+(def-fsm
+  fsm
   {"states"
    [{"id" "start"}
     {"id" "meeting" "action" "greet"}
