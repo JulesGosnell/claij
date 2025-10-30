@@ -37,38 +37,83 @@
 
 (def-m2
   fsm-m2
-  {"$schema" "https://json-schema.org/draft/next/schema"
-   ;;"$id" "fsm-schema" ;; $id is messing up $refs :-(
+  {"$schema" "https://json-schema.org/draft/2020-12/schema"
+   ;;"$id" "https://example.com/fsm-schema" ;; $id is messing up $refs :-(
    "$version" 0
 
    "$defs"
-   {"state"
-    {"properties"
+   {"prompt"
+    {"type" "object"
+     "properties"
+     {"role"
+      {"type" "string"
+       "enum" ["system" "user" "assistant"]}
+      "content"
+      {"type" "string"}}
+     "additionalProperties" false
+     "required" ["role" "content"]}
+
+    "prompts"
+    {"type" "array"
+     "items" {"$ref" "#/$defs/prompt"}}
+    
+    "state"
+    {"type" "object"
+     "properties"
      {"id"
       {"type" "string"}
 
+      "description"
+      {"type" "string"}
+
       "action"
-      {"type" "string"}}
+      {"type" "string"}
+
+      "prompts"
+      {"$ref" "#/$defs/prompts"}}
+
+     ;; "if"
+     ;; {"properties" {"action" {"const" "llm"}}}
+     ;; "then"
+     ;; {"required" ["prompts"]}
+     ;; "else"
+     ;; {"properties" {"prompts" false}}
+
      "additionalProperties" false
-     "required" ["id"]}
+     "required" ["id"
+                 ;;"action" ;; TODO
+                 ]}
 
     "xition"
-    {"properties"
-     {"id"
-      {"type"
-       {"array"
-        {"items"
-         [{"type" "string"}
-          {"type" "string"}]
-         "additionalItems" false}}}
-
+    {"type" "object"
+     "properties"
+     { "id"
+      {"type" "array"
+       "prefixItems"
+       [{"type" "string"}
+        {"type" "string"}]
+       "unevaluatedItems" false}
+      
+      "description"
+      {"type" "string"}
+      
+      "prompts"
+      {"$ref" "#/$defs/prompts"}
+      
       "schema" true ;; TODO: we can do better than this - see m3
       }
      "additionalProperties" false
      "required" ["id" "schema"]}}
 
+   "type" "object"
    "properties"
-   {"states"
+   {"description"
+    {"type" "string"}
+
+    "prompts"
+    {"$ref" "#/$defs/prompts"}
+    
+    "states"
     {"type" "array"
      "items" {"$ref" "#/$defs/state"}}
 
