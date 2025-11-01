@@ -86,7 +86,7 @@
             ;; like the fsm schema
             {"$defs" {"a-string" {"type" "string"}}}})}
          ;; like the xition schema - refers to the fsm schema
-         {"$ref" (str schema-base-uri "/test-schema#/a-string")}
+         {"$ref" (str schema-base-uri "/test-schema#/$defs/a-string")}
          {}
          "test"))))))
 
