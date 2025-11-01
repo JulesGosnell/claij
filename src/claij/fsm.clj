@@ -3,7 +3,7 @@
    [clojure.tools.logging :as log]
    [clojure.core.async :refer [chan go-loop alts! >!!]]
    [m3.uri :refer [parse-uri uri-base]]
-   [m3.validate :refer [validate make-context]]
+   [m3.validate :refer [validate make-context uri->continuation uri-base->dir]]
    [claij.util :refer [def-m2 def-m1 index-by ->key map-values]]))
 
 ;; the plan
@@ -35,6 +35,8 @@
 ;; How can we work it so that the fsm has no concept of request/response but simply connects input channels to output channels -  put together a small demo that evaluates a piece of dsl
 ;; we need to use async http calls ...
 ;;------------------------------------------------------------------------------
+
+(def schema-draft :draft2020-12)
 
 (def-m2
   fsm-m2
@@ -175,7 +177,7 @@
          (update :uri->path assoc (uri-base uri) []))
      []
      m2]
-    ((m3.validate/uri->continuation m3.validate/uri-base->dir) c p uri)))
+    ((uri->continuation uri-base->dir) c p uri)))
 
 ;;------------------------------------------------------------------------------
 
@@ -220,7 +222,7 @@
         handler (fn [{ox-id "id" :as output}]
                   (let [[ox c] (id->x-and-c ox-id)
                         ox-schema (xition-schema fsm ox)
-                        {v? :valid? es :errors} (validate {:uri->schema (partial uri->schema {(uri-base (parse-uri fsm-schema-id)) fsm-schema})} ox-schema {} output)]
+                        {v? :valid? es :errors} (validate {:draft schema-draft :uri->schema (partial uri->schema {(uri-base (parse-uri fsm-schema-id)) fsm-schema})} ox-schema {} output)]
                     (if v?
                       (do
                         (>!! c (cons [ox-schema output] trail))
