@@ -3,10 +3,11 @@
    [clojure.tools.logging :as log]
    [clojure.data.json :refer [write-str]]
    [clojure.test :refer [deftest testing is]]
+   [m3.uri :refer [parse-uri]]
    [m3.validate :refer [validate]]
    [claij.util :refer [def-m2]]
    [claij.llm.open-router :refer [open-router-async]]
-   [claij.fsm :refer [def-fsm make-fsm state-schema xition-schema]]))
+   [claij.fsm :refer [def-fsm make-fsm state-schema xition-schema schema-base-uri uri->schema]]))
 
 ;;------------------------------------------------------------------------------
 ;; how do we know when a trail is finished
@@ -72,7 +73,22 @@
         (is      (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-B"] "document" "test"})))
         (is (not (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-B"] "document" 0}))))
         (is      (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-C"] "document" 0})))
-        (is (not (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-C"] "document" "test"}))))))))
+        (is (not (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-C"] "document" "test"}))))))
+    (testing "$ref to remote schema"
+      (is
+       (:valid?
+        (validate
+         {:draft :draft2020-12
+          :uri->schema
+          (partial
+           uri->schema
+           {(parse-uri (str schema-base-uri "/test-schema"))
+            ;; like the fsm schema
+            {"$defs" {"a-string" {"type" "string"}}}})}
+         ;; like the xition schema - refers to the fsm schema
+         {"$ref" (str schema-base-uri "/test-schema#/a-string")}
+         {}
+         "test"))))))
 
 ;;------------------------------------------------------------------------------
 ;; what would a code-review-fsm look like :-)
