@@ -2,7 +2,8 @@
   (:require
    [clojure.tools.logging :as log]
    [clojure.core.async :refer [chan go-loop alts! >!!]]
-   [m3.validate :refer [validate]]
+   [m3.uri :refer [parse-uri uri-base]]
+   [m3.validate :refer [validate make-context]]
    [claij.util :refer [def-m2 def-m1 index-by ->key map-values]]))
 
 ;; the plan
@@ -110,6 +111,8 @@
    {"description"
     {"type" "string"}
 
+    "schema" true ;; TODO: tighten
+    
     "prompts"
     {"$ref" "#/$defs/prompts"}
     
@@ -128,7 +131,7 @@
 
 ;;------------------------------------------------------------------------------
 
-(def schema-base-uri "http://megalodon:8080/schemas")
+(def schema-base-uri "https://claij.org/schemas")
 
 ;; TODO - fsm needs a unique id - 
 ;; TODO: consider version...
@@ -150,44 +153,86 @@
        "required" ["$id" "id" "document"]})
     xs)})
 
-(defn embed-schema [id s]
+;;------------------------------------------------------------------------------
+;; m3 hack city - m3 should make this easier !
+
+(def u->s
+  {{:type :url, :origin "http://jules.com", :path "/schemas/test"}
+   {"$schema" "https://json-schema.org/draft/2020-12/schema"
+    ;;"$id" "http://jules.com/schemas/test"
+    "$defs" {"foo" {"type" "string"}}}})
+
+;; add map (m) of base-uri->m2 to m3's remote schema resolution strategy...
+
+(defn uri->schema [m c p uri]
+  (if-let [m2 (m (uri-base uri))]
+    [(-> (make-context
+          (-> c
+              (select-keys [:uri->schema :trace? :draft :id-key])
+              (assoc :id-uri (uri-base uri)))
+          m2)
+         (assoc :id-uri (uri-base uri))
+         (update :uri->path assoc (uri-base uri) []))
+     []
+     m2]
+    ((m3.validate/uri->continuation m3.validate/uri-base->dir) c p uri)))
+
+;;------------------------------------------------------------------------------
+
+(defn state-schema
+  "make the schema for a state - to be valid for a state, you must be valid for one (only) of its output xitions"
+  [{fid "id" fv "version" :as _fsm} {sid "id" :as _state} xs]
   {"$schema" meta-schema-uri
-   "$id" (str schema-base-uri "/" "TODO")
+   "$$id" (format "%s/%s/%d/%s" schema-base-uri fid (or fv 0) sid)
+   "oneOf"
+   (mapv
+    (fn [{xid "id" s "schema" :as _x}]
+      {"properties"
+       {"$schema" {"type" "string"}
+        "$id" {"type" "string"}
+        "id" {"const" xid}
+        "document" s}})
+    xs)})
+
+(defn xition-schema
+  "make the schema for a transition - embed its schema field in a larger context"
+  [{fid "id" fv "version" :as _fsm} {[from to :as xid] "id" s "schema" :as _xition}]
+  {"$schema" meta-schema-uri
+   "$$id" (format "%s/%s/%d/%s.%s" schema-base-uri fid (or fv 0) from to)
    "properties"
    {"$schema" {"type" "string"}
     "$id" {"type" "string"}
-    "id" {"const" id}
+    "id" {"const" xid}
     "document" s}})
 
 ;; rename "action" "transform"
 ;; TODO: if we inline cform, we may be able to more work outside and less inside it...
-(defn xform [action-id->action {[from to] "id" :as ix} {sid "id" a "action" :as s} ox-and-cs [h :as trail]]
+;; $$id is a hack because $id breaks $ref resolution - investigate
+(defn xform [action-id->action {{fsm-schema-id "$$id" :as fsm-schema} "schema" :as fsm} {[from to] "id" :as ix} {a "action" :as state} ox-and-cs [h :as trail]]
   (log/infof "[%s -> %s]: %s" from to (pr-str h))
-
   ;; TODO:
   ;; an llm state should say which model to used
   ;; an llm state should provide prompts
 
-  (let [state-schema {"$schema" meta-schema-uri
-                      "$id" (str schema-base-uri "/FSM-ID/FSM-VERSION/" sid)
-                      ;; consider additional* and other tightenings...
-                      "oneOf" (mapv (fn [[{oid "id" schema "schema" :as x} c]] (embed-schema oid schema)) ox-and-cs)}
+  (let [s-schema (state-schema fsm state (map first ox-and-cs)) ;; the union of all the states ox schemas - given to the llm
         id->x-and-c (index-by (comp (->key "id") first) ox-and-cs)
         ;; handler returns nil on success otherwise validation errors...
-        handler (fn [{oid "id" :as output}]
-                  (let [[{xition-schema "schema" :as ox} c] (id->x-and-c oid)
-                        schema (embed-schema oid xition-schema)
-                        {v? :valid? es :errors} (validate {} schema {} output)]
+        handler (fn [{ox-id "id" :as output}]
+                  (let [[ox c] (id->x-and-c ox-id)
+                        ox-schema (xition-schema fsm ox)
+                        {v? :valid? es :errors} (validate {:uri->schema (partial uri->schema {(uri-base (parse-uri fsm-schema-id)) fsm-schema})} ox-schema {} output)]
                     (if v?
                       (do
-                        (>!! c (cons [schema output] trail))
+                        (>!! c (cons [ox-schema output] trail))
                         nil)
-                      es)))]
+                      (do
+                        (log/error "failed to validate llm output against transition schemas:" es)
+                        es))))]
     (if-let [action (action-id->action a)]
-      (action trail state-schema handler)
+      (action fsm ix state trail s-schema handler)
       (handler (second (first trail))))))
 
-(defn make-fsm [action-id->action {ss "states" xs "xitions"}]
+(defn make-fsm [action-id->action {ss "states" xs "xitions" :as fsm} & [start]]
   (let [id->x (index-by (->key "id") xs)
         xid->c (map-values (fn [_k _v] (chan)) id->x)
         xs->x-and-cs (fn [_ xs] (mapv (juxt identity (comp xid->c (->key "id"))) xs))
@@ -206,10 +251,10 @@
              (let [[v ic] (alts! cs) ;; check all input channels
                    ix (ic->ix ic)]
              ;; TODO: if we inline xform here, perhaps we can pull more code out of the loop ?
-               (xform action-id->action ix s ox-and-cs v)))
+               (xform action-id->action fsm ix s ox-and-cs v)))
            cs)])
       ss))
-     "start")))
+     (or start "start"))))
 
 
 ;; need:
@@ -217,5 +262,3 @@
 ;; a monitor or callback on each state
 ;; start and end states which are just labels
 ;; sub-fsms = like a sub-routine - can be embedded in a state or a transition - hmmm - schemas must match ?
-
-

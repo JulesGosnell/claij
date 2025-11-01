@@ -4,6 +4,7 @@
    [claij.util :refer [assert-env-var clj->json json->clj]]
    [clj-http.client :refer [post]]
    [clojure-mcp.linting :refer [lint]]
+   [clojure.data.json :refer [read-str]]
    [clojure.core.async :refer [<! <!! >! >!! chan go-loop]]
    [clojure.string :refer [join split trim]]))
 
@@ -57,7 +58,7 @@
 
 (def grok   (partial open-router "grok"   "x-ai"      "grok-code-fast-1" (atom initial-summary)))
 (def gpt    (partial open-router "gpt"    "openai"    "gpt-5-codex"      (atom initial-summary)))
-(def claude (partial open-router "claude" "anthropic" "claude-opus-4.5"  (atom initial-summary)))
+(def claude (partial open-router "claude" "anthropic" "claude-sonnet-4.5"  (atom initial-summary)))
 (def gemini (partial open-router "gemini" "google"    "gemini-2.5-flash" (atom initial-summary)))
 
 ;; we need some protocols
@@ -136,3 +137,21 @@
 ;; (i "Hi, I am your user, Jules. I can talk to you by dropping strings on the pREPL. The results of the evaluation will be echoed back to you. If you reply with a string literal, I will see that echoed back to me. All our conversation must be in terms of Clojure s-exprs as it will all happen via this pREPL. Do you understand ?")
 
 
+;;------------------------------------------------------------------------------
+
+(defn strip-md-json [s]
+  (let [m (re-matches #"(?s)```json\n(.*)\n```" s)]
+    (if m (second m) s)))
+
+(defn open-router-async [provider model schema prompts handler]
+  (post
+   (str api-url "/chat/completions")
+   {:async? true
+    :headers headers
+    :body
+    (clj->json
+     {:model (str provider "/" model)
+      :response_format {:type "json_schema" :json_schema schema}
+      :messages prompts})}
+   (fn [{b :body}] (let [{[{{c "content"} "message"}] "choices"} (read-str b)] (handler (read-str (strip-md-json c)))))
+   (fn [exception] (println "Error:" (.getMessage exception)))))
