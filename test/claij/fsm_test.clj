@@ -75,20 +75,18 @@
         (is      (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-C"] "document" 0})))
         (is (not (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-C"] "document" "test"}))))))
     (testing "$ref to remote schema"
-      (is
-       (:valid?
-        (validate
-         {:draft :draft2020-12
-          :uri->schema
-          (partial
-           uri->schema
-           {(parse-uri (str schema-base-uri "/test-schema"))
-            ;; like the fsm schema
-            {"$defs" {"a-string" {"type" "string"}}}})}
-         ;; like the xition schema - refers to the fsm schema
-         {"$ref" (str schema-base-uri "/test-schema#/$defs/a-string")}
-         {}
-         "test"))))))
+      (let [c2
+            {:draft :draft2020-12
+             :uri->schema
+             (partial
+              uri->schema
+              {(parse-uri (str schema-base-uri "/test-schema"))
+               {"$defs" {"a-string" {"type" "string"}
+                         "a-number" {"type" "number"}}}})}]
+        (is      (:valid? (validate c2 {"$ref" (str schema-base-uri "/test-schema#/$defs/a-string")} {} "test")))
+        (is (not (:valid? (validate c2 {"$ref" (str schema-base-uri "/test-schema#/$defs/a-string")} {} 0))))
+        (is      (:valid? (validate c2 {"$ref" (str schema-base-uri "/test-schema#/$defs/a-number")} {} 0)))
+        (is (not (:valid? (validate c2 {"$ref" (str schema-base-uri "/test-schema#/$defs/a-number")} {} "test"))))))))
 
 ;;------------------------------------------------------------------------------
 ;; what would a code-review-fsm look like :-)
