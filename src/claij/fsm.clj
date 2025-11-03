@@ -59,7 +59,7 @@
     "prompts"
     {"type" "array"
      "items" {"$ref" "#/$defs/prompt"}}
-    
+
     "state"
     {"type" "object"
      "properties"
@@ -90,19 +90,19 @@
     "xition"
     {"type" "object"
      "properties"
-     { "id"
+     {"id"
       {"type" "array"
        "prefixItems"
        [{"type" "string"}
         {"type" "string"}]
        "unevaluatedItems" false}
-      
+
       "description"
       {"type" "string"}
-      
+
       "prompts"
       {"$ref" "#/$defs/prompts"}
-      
+
       "schema" true ;; TODO: we can do better than this - see m3
       }
      "additionalProperties" false
@@ -110,14 +110,17 @@
 
    "type" "object"
    "properties"
-   {"description"
+   {"id"
+    {"type" "string"}
+
+    "description"
     {"type" "string"}
 
     "schema" true ;; TODO: tighten
-    
+
     "prompts"
     {"$ref" "#/$defs/prompts"}
-    
+
     "states"
     {"type" "array"
      "items" {"$ref" "#/$defs/state"}}
@@ -139,21 +142,6 @@
 ;; TODO: consider version...
 (defn xition-id->schema-uri [state-id]
   (str schema-base-uri "/" "FSM-ID" "/" "FSM-VERSION" "/" state-id "/transitions"))
-
-(defn xitions->schema [last-state xs]
-  {"$schema" meta-schema-uri
-   "$id" (xition-id->schema-uri last-state)
-   "oneOf"
-   (mapv
-    (fn [{i "id" s "schema"}]
-      {"properties"
-       {"$schema" {"type" "string"}
-        "$id" {"type" "string"}
-        "id" {"const" i}
-        "document" s}
-       "additionalProperties" false
-       "required" ["$id" "id" "document"]})
-    xs)})
 
 ;;------------------------------------------------------------------------------
 ;; m3 hack city - m3 should make this easier !
@@ -181,31 +169,35 @@
 
 ;;------------------------------------------------------------------------------
 
+(defn expand-schema [id schema]
+  {"$schema" {"type" "string"}
+   "$id" {"type" "string"}
+   "id" {"const" id}
+   "document" schema})
+
 (defn state-schema
   "make the schema for a state - to be valid for a state, you must be valid for one (only) of its output xitions"
-  [{fid "id" fv "version" :as _fsm} {sid "id" :as _state} xs]
-  {"$schema" meta-schema-uri
-   "$$id" (format "%s/%s/%d/%s" schema-base-uri fid (or fv 0) sid)
-   "oneOf"
-   (mapv
-    (fn [{xid "id" s "schema" :as _x}]
-      {"properties"
-       {"$schema" {"type" "string"}
-        "$id" {"type" "string"}
-        "id" {"const" xid}
-        "document" s}})
-    xs)})
+  [{fid "id" fv "version" fs "schema" :as _fsm} {sid "id" :as _state} xs]
+  ;; {"$schema" meta-schema-uri
+  ;;  "$$id" (format "%s/%s/%d/%s" schema-base-uri fid (or fv 0) sid)
+  ;;  "oneOf"
+  ;;  (mapv
+  ;;   (fn [{xid "id" s "schema" :as _x}]
+  ;;     {"properties" (expand-schema xid s)})
+  ;;   xs)}
+
+  (-> fs
+      (dissoc "$$id")
+      (dissoc "$version")
+      (assoc "$id" (fs "$$id")))
+  )
 
 (defn xition-schema
   "make the schema for a transition - embed its schema field in a larger context"
   [{fid "id" fv "version" :as _fsm} {[from to :as xid] "id" s "schema" :as _xition}]
   {"$schema" meta-schema-uri
    "$$id" (format "%s/%s/%d/%s.%s" schema-base-uri fid (or fv 0) from to)
-   "properties"
-   {"$schema" {"type" "string"}
-    "$id" {"type" "string"}
-    "id" {"const" xid}
-    "document" s}})
+   "properties" (expand-schema xid s)})
 
 ;; rename "action" "transform"
 ;; TODO: if we inline cform, we may be able to more work outside and less inside it...
@@ -219,7 +211,7 @@
   (let [s-schema (state-schema fsm state (map first ox-and-cs)) ;; the union of all the states ox schemas - given to the llm
         id->x-and-c (index-by (comp (->key "id") first) ox-and-cs)
         ;; handler returns nil on success otherwise validation errors...
-        handler (fn [{ox-id "id" :as output}]
+        handler (fn [{{ox-id "id"} "content" :as output}]
                   (let [[ox c] (id->x-and-c ox-id)
                         ox-schema (xition-schema fsm ox)
                         {v? :valid? es :errors} (validate {:draft schema-draft :uri->schema (partial uri->schema {(uri-base (parse-uri fsm-schema-id)) fsm-schema})} ox-schema {} output)]
@@ -228,7 +220,7 @@
                         (>!! c (cons [ox-schema output] trail))
                         nil)
                       (do
-                        (log/error "failed to validate llm output against transition schemas:" es)
+                        (log/error "failed to validate llm output against transition schemas:" (pr-str es))
                         es))))]
     (if-let [action (action-id->action a)]
       (action fsm ix state trail s-schema handler)
