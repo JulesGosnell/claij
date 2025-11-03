@@ -1,12 +1,14 @@
 (ns claij.llm.open-router
   (:require
-   [claij.repl :refer [start-prepl]]
-   [claij.util :refer [assert-env-var clj->json json->clj]]
+   [clojure.string :refer [join split trim]]
+   [clojure.tools.logging :as log]
+   [clojure.data.json :refer [read-str]]
+   [clojure.pprint :refer [pprint]]
+   [clojure.core.async :refer [<! <!! >! >!! chan go-loop]]
    [clj-http.client :refer [post]]
    [clojure-mcp.linting :refer [lint]]
-   [clojure.data.json :refer [read-str]]
-   [clojure.core.async :refer [<! <!! >! >!! chan go-loop]]
-   [clojure.string :refer [join split trim]]))
+   [claij.repl :refer [start-prepl]]
+   [claij.util :refer [assert-env-var clj->json json->clj]]))
 
 ;; https://openrouter.ai/docs/quickstart
 
@@ -138,12 +140,20 @@
 
 
 ;;------------------------------------------------------------------------------
+;; new code for fsm...
 
+;; for claude ?
 (defn strip-md-json [s]
   (let [m (re-matches #"(?s)```json\n(.*)\n```" s)]
     (if m (second m) s)))
 
-(defn open-router-async [provider model schema prompts handler]
+(defn unpack [{b :body}] (let [{[{{c :content} :message}] :choices} (read-str b :key-fn keyword)] (read-str c)))
+
+(defn ppr-str [x]
+  (with-out-str (pprint x)))
+
+(defn open-router-async [provider model {uri "$id" uri2 "$$id" :as schema} prompts handler]
+  (log/info "making open-router request:\n" (ppr-str (last prompts)))
   (post
    (str api-url "/chat/completions")
    {:async? true
@@ -151,7 +161,12 @@
     :body
     (clj->json
      {:model (str provider "/" model)
-      :response_format {:type "json_schema" :json_schema schema}
+      :response_format
+      {:type "json_schema"
+       :json_schema
+       {:name (last (split (or uri uri2) #"/"))
+        :strict true
+        :schema schema}}
       :messages prompts})}
-   (fn [{b :body}] (let [{[{{c "content"} "message"}] "choices"} (read-str b)] (handler (read-str (strip-md-json c)))))
-   (fn [exception] (println "Error:" (.getMessage exception)))))
+   (fn [r] (let [d (unpack r)] (log/info "successful open-router request:\n" (ppr-str d)) (handler d)))
+   (fn [exception] (log/error "failed open-router request:\n" (read-str (:body (.getData exception)))))))
