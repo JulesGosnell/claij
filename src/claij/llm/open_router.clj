@@ -154,7 +154,7 @@
   (with-out-str (pprint x)))
 
 (defn open-router-async [provider model {uri "$id" uri2 "$$id" :as schema} prompts handler & [error]]
-  (log/info "making open-router request:\n" (ppr-str prompts))
+  (log/info "making open-router request (" provider "/" model "):\n" (ppr-str prompts))
   (post
    (str api-url "/chat/completions")
    {:async? true
@@ -181,7 +181,7 @@
        (let [d (strip-md-json (unpack r))]
          (try
            (let [j (read-str d)]
-             (log/info "successful open-router response:\n" (ppr-str j))
+             (log/info "successful open-router response (" provider "/" model "):\n" (ppr-str j))
              (handler j))
            (catch Exception e
              (log/error "bad json in response:" d e))))
