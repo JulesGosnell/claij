@@ -46,15 +46,16 @@
 
    "$defs"
    {"prompt"
-    {"type" "object"
-     "properties"
-     {"role"
-      {"type" "string"
-       "enum" ["system" "user" "assistant"]}
-      "content"
-      {"type" "string"}}
-     "additionalProperties" false
-     "required" ["role" "content"]}
+    {"type" "string"}
+    ;; {"type" "object"
+    ;;  "properties"
+    ;;  {"role"
+    ;;   {"type" "string"
+    ;;    "enum" ["system" "user" "assistant"]}
+    ;;   "content"
+    ;;   {"type" "string"}}
+    ;;  "additionalProperties" false
+    ;;  "required" ["role" "content"]}
 
     "prompts"
     {"type" "array"
