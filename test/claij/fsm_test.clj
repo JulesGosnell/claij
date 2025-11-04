@@ -6,8 +6,8 @@
    [clojure.test :refer [deftest testing is]]
    [m3.uri :refer [parse-uri]]
    [m3.validate :refer [validate]]
-   [claij.util :refer [def-m2]]
-   [claij.llm.open-router :refer [open-router-async unpack]]
+   [claij.util :refer [def-m2 index-by ->key]]
+   [claij.llm.open-router :refer [open-router-async unpack ppr-str]]
    [claij.fsm :refer [def-fsm make-fsm state-schema xition-schema schema-base-uri uri->schema]]))
 
 ;;------------------------------------------------------------------------------
@@ -164,7 +164,7 @@
       "code" {"$ref" "#/$defs/code"}
       "notes" {"$ref" "#/$defs/notes"}}
      "additionalProperties" false
-     "required" ["code" "notes"]}
+     "required" ["id" "code" "notes"]}
 
     "response"
     {"description" "use this to respond with your comments during a code review"
@@ -175,7 +175,7 @@
       "notes" {"$ref" "#/$defs/notes"}
       "comments" {"$ref" "#/$defs/comments"}}
      "additionalProperties" false
-     "required" ["code" "notes" "comments"]}
+     "required" ["id" "code" "comments"]}
 
     "summary"
     {"description" "use this to summarise and exit a code review loop"
@@ -185,14 +185,12 @@
       "code" {"$ref" "#/$defs/code"}
       "notes" {"$ref" "#/$defs/notes"}}
      "additionalProperties" false
-     "required" ["code" "notes"]}}
+     "required" ["id" "code" "notes"]}}
 
-   "properties"
-   {"content"
-    {"oneOf"
-   [{"$ref" "#/$defs/request"}
-    {"$ref" "#/$defs/response"}
-    {"$ref" "#/$defs/summary"}]}}})
+   ;; "oneOf" [{"$ref" "#/$defs/request"}
+   ;;          {"$ref" "#/$defs/response"}
+   ;;          {"$ref" "#/$defs/summary"}]
+   })
 
 (def-fsm
   code-review-fsm
@@ -227,29 +225,50 @@
 
    "xitions"
    [{"id" ["" "mc"]
-     "schema" {"type" "string"}}
+     "schema"
+     {"description" "use this to summarise and exit a code review loop"
+      "type" "object"
+      "properties"
+      {"id" {"const" ["" "mc"]}
+       "document" {"type" "string"}}
+      "additionalProperties" false
+      "required" ["id" "document"]}}
     {"id" ["mc" "reviewer"]
      "prompts" []
-     "schema" {"properties" {"content" {"$ref" "https://claij.org/schemas/code-review-schema#/$defs/request"}}}}
+     "schema" {"$ref" "#/$defs/request"}}
     {"id" ["reviewer" "mc"]
      "prompts" []
-     "schema" {"properties" {"content" {"$ref" "https://claij.org/schemas/code-review-schema#/$defs/response"}}}}
+     "schema" {"$ref" "#/$defs/response"}}
     {"id" ["mc" "end"]
      "prompts" []
-     "schema" {"properties" {"content" {"$ref" "https://claij.org/schemas/code-review-schema#/$defs/summary"}}}}]})
+     "schema" {"$ref" "#/$defs/summary"}}]})
 
 (def system-prompts
   [{"role" "system"
     "content" "You are a cog in a larger machine. All your requests and responses must be received/given in JSON. You will be provided with relevant self-explanatory schemas. Please adhere strictly to your output schema. Do not add any additional properties."}])
 
-(defn llm-action
-  ([prompts
-    ox-schema
-    handler]
 
-   ;;(clojure.pprint/pprint ox-schema)
-   ;;(clojure.pprint/pprint prompts)
-   
+(defn make-prompts [{fsm-schema "schema" fsm-prompts "prompts" :as _fsm} {ix-schema "schema" ix-prompts "prompts" :as _ix} {state-prompts "prompts"} memory ox-schema ix-document]
+  (concat
+   [{"role" "system"
+     "content" (str
+                "All your requests and responses will be JSON with accompanying explanatory JSON schemas."
+                "You are being given the following reference JSON schema. Later schemas may refer to $defs in this one:" (write-str fsm-schema) "."
+                "Requests will arrive as [schema, document] pairs - The schema describes the document.You must respond to the contents of the document")}]
+   fsm-prompts
+   ix-prompts
+   state-prompts
+   memory
+   [{"role" "user"
+     "content"
+     (str
+      "Your response must be a single JSON document that is STRICTLY CONFORMANT (please pay particular attention to the \"id\" which must be present as a pair of strings) to this schema:"
+      (write-str ox-schema))}
+    {"role" "user"
+     "content" (write-str [ix-schema ix-document])}]))
+
+(defn llm-action
+  ([prompts ox-schema handler]
    (open-router-async
      ;; "anthropic" "claude-sonnet-4.5" ;; markdown
      ;; "x-ai" "grok-code-fast-1" ;; markdown - should work
@@ -262,24 +281,11 @@
       (if-let [es (handler output)]
         (log/error es)
         nil))))
-  ([{fsm-prompts "prompts" :as _fsm}
-    {ix-schema "schema" ix-prompts "prompts" :as _ix}
-    {state-prompts "prompts"}
-    [input & memory]
+  ([fsm ix state inputs ox-schema handler]
+   (llm-action
+    (make-prompts fsm ix state ox-schema inputs)
     ox-schema
-    handler]
-   (let [prompts
-         (concat
-          system-prompts
-          fsm-prompts
-          [{"role" "user"
-            "content" (format "Your output document must be strictly conformant to this schema: %s" (write-str ox-schema))}]
-          ix-prompts
-          state-prompts
-          [{"role" "user" "content" "The following two json values are arranged in [schema document] pairs. The first is a complete conversational history (newest->oldest). The second is your current input. Please produce your output accordingly"}
-           {"role" "user"  "content" (write-str (vec memory))}
-           {"role" "user"  "content" (write-str input)}])]
-     (llm-action prompts ox-schema handler))))
+    handler)))
 
 (def code-review-actions
   {"llm" llm-action})
@@ -363,20 +369,58 @@
         (testing (str provider "/" model)
           (is (:valid? (validate {:draft :draft7} schema {} (let [p (promise)] (open-router-async provider model schema prompts (partial deliver p)) @p)))))))))
 
+;; ["openai" "gpt-4o"]
+;; - no oneOfs
+;; - no const arrays
+
+;; ["x-ai" "grok-4"]
+
+;; (deftest code-review-schema-test
+;;   (testing "code-review"
+;;     (doseq [[provider model]
+;;             [
+;;              ["openai" "gpt-5-pro"]
+;;              ["google" "gemini-2.5-flash"]
+;;              ["x-ai" "grok-4"]
+;;              ["anthropic" "claude-sonnet-4.5"]
+;;              ]]
+;;       (testing (str provider "/" model)
+;;         (let [schema code-review-schema
+;;               prompts
+;;               [{"role" "system"
+;;                 "content" (str "Your output must be expressed as JSON and MUST BE STRICTLY CONFORMANT (please pay particular attention to the \"id\" which must be present as a pair of strings) to this schema: " (write-str code-review-schema))}
+;;                {"role" "user"
+;;                 "content" (str "Your input is expressed as JSON conforming to this schema: " (write-str {"type" "object" "properties" {"id" {"const" ["" "mc"]} "document" {"type" "string"}}}))}
+;;                {"role" "user"
+;;                 "content" (str "Here is your input - please respond to it as instructed: " (write-str {"id" ["" "mc"] "document" "I have this piece of Clojure code to calculate the fibonacci series - I'd like you to request a code review to improve it?: `(def fibs (lazy-seq (cons 0 (cons 1 (map + fibs (rest fibs))))))`"}))}]]
+;;           (testing (str provider "/" model)
+;;             (let [p (promise)]
+;;               (log/info @(open-router-async provider model schema prompts (partial deliver p) (partial deliver p)))
+;;               (is (:valid? (validate {:draft :draft7} schema {} @p))))))))))
+
+;; need another test with conversational history plus code to integrate this:
 
 (deftest code-review-schema-test
   (testing "code-review"
-    (let [[provider model] ["openai" "gpt-4o"]
-          schema code-review-schema
-          prompts
-          [{"role" "user"
-            "content" "I' going to give you a pair of JSON schema (to help you understand the document) and conformant document (to be understood as my request to you)."}
-           {"role" "user"
-            "content" (write-str
-                       [{"properties" {"id" {"type" "array" "item" {"type" "string"}} "document" {"type" "string"}}}
-                        {"id" ["" "mc"] "document" "I have this piece of Clojure code to calculate the fibonacci series - I'd like you to request a code review to improve it?: `(def fibs (lazy-seq (cons 0 (cons 1 (map + fibs (rest fibs))))))`"}])}]]
+    (doseq [[provider model]
+            [;; ["openai" "gpt-5-pro"]
+             ;; ["google" "gemini-2.5-flash"]
+             ;; ["x-ai" "grok-4"]
+             ["anthropic" "claude-sonnet-4.5"]
+             ]]
       (testing (str provider "/" model)
-        (let [p (promise)]
-          (open-router-async provider model schema prompts (partial deliver p))
-          (println "HERE:" @p)
-          (is (:valid? (validate {:draft :draft7} schema {} @p))))))))
+        (let [schema code-review-schema
+              prompts (make-prompts
+                       code-review-fsm
+                       ((index-by (->key "id") (code-review-fsm "xitions")) ["" "mc"])
+                       ((index-by (->key "id") (code-review-fsm "states"))  "mc")
+                       []
+                       {"oneOf" [{"$ref" "#/$defs/request"}
+                                 {"$ref" "#/$defs/summary"}]}
+                       {"id" ["" "mc"] "document" "I have this piece of Clojure code to calculate the fibonacci series - can we improve it through a code review?: `(def fibs (lazy-seq (cons 0 (cons 1 (map + fibs (rest fibs))))))`"})]
+          (testing (str provider "/" model)
+            (let [p (promise)]
+              (log/info @(open-router-async provider model schema prompts (partial deliver p) (partial deliver p)))
+              (is (:valid? (validate {:draft :draft7} schema {} @p))))))))))
+
+;; the oneOf should not be in the fsm level schema but added by state-schema
