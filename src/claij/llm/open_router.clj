@@ -143,17 +143,18 @@
 ;; new code for fsm...
 
 ;; for claude ?
+
 (defn strip-md-json [s]
-  (let [m (re-matches #"(?s)```json\n(.*)\n```" s)]
+  (let [m (re-matches #"(?s)\s*```json\s*(.*)\s*```\s*" s)]
     (if m (second m) s)))
 
-(defn unpack [{b :body}] (let [{[{{c :content} :message}] :choices} (read-str b :key-fn keyword)] (read-str c)))
+(defn unpack [{b :body}] (let [{[{{c :content} :message}] :choices} (read-str b :key-fn keyword)] c))
 
 (defn ppr-str [x]
   (with-out-str (pprint x)))
 
-(defn open-router-async [provider model {uri "$id" uri2 "$$id" :as schema} prompts handler]
-  (log/info "making open-router request:\n" (ppr-str (last prompts)))
+(defn open-router-async [provider model {uri "$id" uri2 "$$id" :as schema} prompts handler & [error]]
+  (log/info "making open-router request:\n" (ppr-str prompts))
   (post
    (str api-url "/chat/completions")
    {:async? true
@@ -161,12 +162,35 @@
     :body
     (clj->json
      {:model (str provider "/" model)
-      :response_format
-      {:type "json_schema"
-       :json_schema
-       {:name (last (split (or uri uri2) #"/"))
-        :strict true
-        :schema schema}}
+
+      ;; I tried using this stuff but:
+      ;; - oneOf, const arrays, and optional fields not supported
+      ;; - Claude not supported
+      ;; works much better without this rubbish
+
+      ;; :response_format
+      ;; {:type "json_schema"
+      ;;  :json_schema
+      ;;  {:name (last (split (or uri uri2) #"/"))
+      ;;   :strict false ;;true
+      ;;   :schema schema}}
+
       :messages prompts})}
-   (fn [r] (let [d (unpack r)] (log/info "successful open-router request:\n" (ppr-str d)) (handler d)))
-   (fn [exception] (log/error "failed open-router request:\n" (read-str (:body (.getData exception)))))))
+   (fn [r]
+     (try
+       (let [d (strip-md-json (unpack r))]
+         (try
+           (let [j (read-str d)]
+             (log/info "successful open-router response:\n" (ppr-str j))
+             (handler j))
+           (catch Exception e
+             (log/error "bad json in response:" d e))))
+       (catch Throwable t
+         (log/error "something bad happened: " r t))))
+   (fn [exception]
+     (try
+       (let [m (read-str (:body (.getData exception)))]
+         (log/error "failed open-router request:\n" m)
+         (when error (error m)))
+       (catch Throwable t
+         (log/error "something bad happened:" exception t))))))
