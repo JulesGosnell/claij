@@ -274,7 +274,11 @@
 
 (defn end-action
   [fsm ix state [head & tail] _handler]
-  (log/info "FSM completed successfully:" (get head "content")))
+  (let [content (get head "content")
+        data (second content)]
+    (log/info "\n[COMPLETE] FSM Finished")
+    (log/info (str "   Final code:\n" (get-in data ["code" "text"])))
+    (log/info (str "   Summary: " (get data "notes")))))
 
 (def code-review-actions
   {"llm" llm-action
