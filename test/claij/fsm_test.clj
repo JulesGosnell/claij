@@ -52,7 +52,7 @@
               "id" {"const" ["test-state-A" "test-state-B"]}
               "document" {"type" "string"}}}]
         (is (= expected actual))
-        (is      (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-B"] "document" "test"})))
+        (is (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-B"] "document" "test"})))
         (is (not (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-B"] "document" 0}))))))
     ;; (testing "state-schema: "
     ;;   (testing "with values"
@@ -108,9 +108,9 @@
               {(parse-uri (str schema-base-uri "/test-schema"))
                {"$defs" {"a-string" {"type" "string"}
                          "a-number" {"type" "number"}}}})}]
-        (is      (:valid? (validate c2 {"$ref" (str schema-base-uri "/test-schema#/$defs/a-string")} {} "test")))
+        (is (:valid? (validate c2 {"$ref" (str schema-base-uri "/test-schema#/$defs/a-string")} {} "test")))
         (is (not (:valid? (validate c2 {"$ref" (str schema-base-uri "/test-schema#/$defs/a-string")} {} 0))))
-        (is      (:valid? (validate c2 {"$ref" (str schema-base-uri "/test-schema#/$defs/a-number")} {} 0)))
+        (is (:valid? (validate c2 {"$ref" (str schema-base-uri "/test-schema#/$defs/a-number")} {} 0)))
         (is (not (:valid? (validate c2 {"$ref" (str schema-base-uri "/test-schema#/$defs/a-number")} {} "test"))))))))
 
 ;;------------------------------------------------------------------------------
@@ -238,7 +238,7 @@
      "prompts" []
      "schema" {"$ref" "#/$defs/summary"}}]})
 
-(defn make-prompts [{fsm-schema "schema" fsm-prompts "prompts" :as _fsm} {ix-prompts "prompts" :as _ix} {state-prompts "prompts"} trail ]
+(defn make-prompts [{fsm-schema "schema" fsm-prompts "prompts" :as _fsm} {ix-prompts "prompts" :as _ix} {state-prompts "prompts"} trail]
   (concat
    [{"role" "system"
      "content" (join
@@ -262,7 +262,7 @@
      ;; "anthropic" "claude-sonnet-4.5" ;; markdown
      ;; "x-ai" "grok-code-fast-1" ;; markdown - should work
     ;; "openai"    "gpt-5-codex" ;; didn't conform - should work
-    "openai"    "gpt-4o" ;; didn't conform - should work
+    "openai" "gpt-4o" ;; didn't conform - should work
     ;; "google" "gemini-2.5-flash" ;; should work
     prompts
     (fn [output]
@@ -274,12 +274,11 @@
 
 (defn end-action
   [fsm ix state [head & tail] _handler]
-  (log/info "WooHoo!!: we finished the review:" head))
+  (log/info "FSM completed successfully:" (get head "content")))
 
 (def code-review-actions
   {"llm" llm-action
    "end" end-action})
-
 
 ;; TODO:
 ;; - or store schema separately and add to context so we can ref it from the xititions
@@ -396,7 +395,7 @@
               prompts (make-prompts
                        code-review-fsm
                        ((index-by (->key "id") (code-review-fsm "xitions")) ["" "mc"])
-                       ((index-by (->key "id") (code-review-fsm "states"))  "mc")
+                       ((index-by (->key "id") (code-review-fsm "states")) "mc")
 
                        [;; previous conversation
                         ;; ...
