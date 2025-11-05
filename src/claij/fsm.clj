@@ -61,6 +61,19 @@
     {"type" "array"
      "items" {"$ref" "#/$defs/prompt"}}
 
+;; Schema reference constraint - enforces $ref format only for compression
+    "schema-ref"
+    {"type" "object"
+     "properties"
+     {"$ref" {"type" "string"
+              "pattern" "^#/\\$defs/.+"}}
+     "required" ["$ref"]
+     "additionalProperties" false}
+
+    ;; Valid JSON Schema constraint
+    "json-schema"
+    {"$ref" "https://json-schema.org/draft/2020-12/schema"}
+
     "state"
     {"type" "object"
      "properties"
@@ -104,8 +117,7 @@
       "prompts"
       {"$ref" "#/$defs/prompts"}
 
-      "schema" true ;; TODO: we can do better than this - see m3
-      }
+      "schema" {"$ref" "#/$defs/schema-ref"}}
      "additionalProperties" false
      "required" ["id" "schema"]}}
 
@@ -117,7 +129,7 @@
     "description"
     {"type" "string"}
 
-    "schema" true ;; TODO: tighten
+    "schema" {"$ref" "#/$defs/json-schema"}
 
     "prompts"
     {"$ref" "#/$defs/prompts"}
@@ -205,12 +217,11 @@
 ;; $$id is a hack because $id breaks $ref resolution - investigate
 (defn xform [action-id->action {{fsm-schema-id "$$id" :as fsm-schema} "schema" :as fsm} {[from to] "id" :as ix} {a "action" :as state} ox-and-cs [{r "role" [is input] "content" :as head} & trail :as all]]
   (try
-    (log/infof "[%s -> %s]: %s" from to (pr-str all))
+    (log/info (str "-> Transition [" from " -> " to "]"))
 
     (let [s-schema (state-schema fsm state (map first ox-and-cs))
           id->x-and-c (index-by (comp (->key "id") first) ox-and-cs)
           handler (fn [raw-output]
-                    (log/debug "Handler processing output:" raw-output)
                     ;; Extract the actual data map from the LLM response
                     ;; LLM may return: [{"$ref" "..."} {"id" [...] ...} {"$ref" "..."}]
                     ;; We need the map with the "id" key
@@ -232,17 +243,19 @@
                                                                 output)]
                           (if v?
                             (do
-                              (log/debug "Validation succeeded, routing to channel:" c)
+                              (log/info (str "   [OK] Output validated for transition " ox-id))
                               (>!! c (cons {"role" "assistant" "content" [ox-schema output nil]}
                                            (cons {"role" r "content" [is input ox-schema]} trail)))
                               nil)
                             (do
-                              (log/error "Failed to validate LLM output against transition schema:" (pr-str es))
+                              (log/error (str "   [FAIL] Validation failed for transition " ox-id ": " (pr-str es)))
                               es)))
                         (catch Throwable t
                           (log/error t "Error in handler processing")))))]
       (if-let [action (action-id->action a)]
-        (action fsm ix state (cons {"role" r "content" [is input s-schema]} trail) handler)
+        (do
+          (log/info (str "   Action: " a))
+          (action fsm ix state (cons {"role" r "content" [is input s-schema]} trail) handler))
         (handler (second (first trail)))))
     (catch Throwable t
       (log/error t "Error in xform"))))
@@ -253,6 +266,8 @@
         xs->x-and-cs (fn [_ xs] (mapv (juxt identity (comp xid->c (->key "id"))) xs))
         sid->ix-and-cs (map-values xs->x-and-cs (group-by (comp second (->key "id")) xs))
         sid->ox-and-cs (map-values xs->x-and-cs (group-by (comp first (->key "id")) xs))]
+    (log/info (str "\n>> Starting FSM: " (or (get fsm "id") "unnamed")
+                   " (" (count ss) " states, " (count xs) " transitions)"))
     ((into
       {}
       (mapv
@@ -262,11 +277,9 @@
                 ox-and-cs (sid->ox-and-cs id)
                 ic->ix (into {} (mapv (fn [[x c]] [c x]) ix-and-cs))
                 cs (keys ic->ix)]
-            (log/debugf "State %s listening on %d input channels" id (count cs))
             (go-loop []
               (let [[v ic] (alts! cs)
                     ix (ic->ix ic)]
-                (log/debugf "State %s received event on transition %s" id (get ix "id"))
                 (xform action-id->action fsm ix s ox-and-cs v)
                 (recur)))
             cs)])

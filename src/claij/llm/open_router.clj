@@ -58,10 +58,10 @@
 (let [captured-out *out*]
   (defn trc [prefix x] (binding [*out* captured-out] (prn prefix x)) x))
 
-(def grok   (partial open-router "grok"   "x-ai"      "grok-code-fast-1" (atom initial-summary)))
-(def gpt    (partial open-router "gpt"    "openai"    "gpt-5-codex"      (atom initial-summary)))
-(def claude (partial open-router "claude" "anthropic" "claude-sonnet-4.5"  (atom initial-summary)))
-(def gemini (partial open-router "gemini" "google"    "gemini-2.5-flash" (atom initial-summary)))
+(def grok (partial open-router "grok" "x-ai" "grok-code-fast-1" (atom initial-summary)))
+(def gpt (partial open-router "gpt" "openai" "gpt-5-codex" (atom initial-summary)))
+(def claude (partial open-router "claude" "anthropic" "claude-sonnet-4.5" (atom initial-summary)))
+(def gemini (partial open-router "gemini" "google" "gemini-2.5-flash" (atom initial-summary)))
 
 ;; we need some protocols
 ;; say - relate an id to an sexpr
@@ -80,7 +80,6 @@
           (>! output-channel clj)))
       (recur))))
 
-
 ;;------------------------------------------------------------------------------
 ;; in/out transformers
 
@@ -89,17 +88,16 @@
 (defn x-in [user s]
   (str "[" (swap! id inc) " " user " " s "]"))
 
-
 (defmulti x-out :tag)
 
 (defmethod x-out :ret [{[id user v] :val :keys [form ns ms]}]
   ;; returns [tag id user val form ns ms]
   [:ret id user v (second (re-find (re-pattern (str "^\\[" id " " user " (.*)\\]$")) form)) ns ms])
 
-(defmethod x-out :out  [{v :val}]
+(defmethod x-out :out [{v :val}]
   [:out v])
 
-(defmethod x-out :err  [{v :val}]
+(defmethod x-out :err [{v :val}]
   [:err v])
 
 (defmethod x-out :tap [{v :val}]
@@ -126,7 +124,6 @@
 ;;    {:role "user" :content (str "Please append this separator to your response: '" separator "'.")}
 ;;    {:role "user" :content "Please merge your summary and answer tersely into a fresh summary and append to your response after the separator. It will be passed back to you in the next request."}])
 
-
 ;; (comment
 ;;   [{:role "system" :content (str "You're name is:" id ", you are a Clojure developer, talking to a clojure.core.server.prepl")}
 ;;    {:role "user" :content (str "Here is a summary of your conversational state: " old-summary)}
@@ -135,9 +132,7 @@
 ;;    {:role "user" :content (str "Please append this separator to your response: '" separator "'.")}
 ;;    {:role "user" :content "Please merge your summary and answer tersely into a fresh summary and append to your response after the separator. It will be passed back to you in the next request."}])
 
-
 ;; (i "Hi, I am your user, Jules. I can talk to you by dropping strings on the pREPL. The results of the evaluation will be echoed back to you. If you reply with a string literal, I will see that echoed back to me. All our conversation must be in terms of Clojure s-exprs as it will all happen via this pREPL. Do you understand ?")
-
 
 ;;------------------------------------------------------------------------------
 ;; new code for fsm...
@@ -154,7 +149,7 @@
   (with-out-str (pprint x)))
 
 (defn open-router-async [provider model prompts handler & [error]]
-  (log/info "making open-router request (" provider "/" model "):\n" (ppr-str prompts))
+  (log/info (str "      LLM Call: " provider "/" model))
   (post
    (str api-url "/chat/completions")
    {:async? true
@@ -162,35 +157,22 @@
     :body
     (clj->json
      {:model (str provider "/" model)
-
-      ;; I tried using this stuff but:
-      ;; - oneOf, const arrays, and optional fields not supported
-      ;; - Claude not supported
-      ;; works much better without this rubbish
-
-      ;; :response_format
-      ;; {:type "json_schema"
-      ;;  :json_schema
-      ;;  {:name (last (split (or uri uri2) #"/"))
-      ;;   :strict false ;;true
-      ;;   :schema schema}}
-
       :messages prompts})}
    (fn [r]
      (try
        (let [d (strip-md-json (unpack r))]
          (try
            (let [j (read-str d)]
-             (log/info "successful open-router response (" provider "/" model "):\n" (ppr-str j))
+             (log/info "      LLM Response received")
              (handler j))
            (catch Exception e
-             (log/error "bad json in response:" d e))))
+             (log/error "Bad JSON in LLM response:" d e))))
        (catch Throwable t
-         (log/error "something bad happened: " r t))))
+         (log/error t "Error processing LLM response"))))
    (fn [exception]
      (try
        (let [m (read-str (:body (.getData exception)))]
-         (log/error "failed open-router request:\n" m)
+         (log/error (str "      LLM request failed: " (get m "error")))
          (when error (error m)))
        (catch Throwable t
-         (log/error "something bad happened:" exception t))))))
+         (log/error t "Error handling LLM failure"))))))
