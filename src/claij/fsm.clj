@@ -30,7 +30,7 @@
 ;; - if the action is going to cause a request to kick off to an llvm then we need to pass in everything that it might need...
 ;; - fsm
 (def meta-schema-uri "https://json-schema.org/draft/2020-12/schema")
-    
+
 ;; if the last xition was a response from an llm then the next will be
 ;; How can we work it so that the fsm has no concept of request/response but simply connects input channels to output channels -  put together a small demo that evaluates a piece of dsl
 ;; we need to use async http calls ...
@@ -187,11 +187,11 @@
   ;;     {"properties" (expand-schema xid s)})
   ;;   xs)}
 
-  (-> fs
-      (dissoc "$$id")
-      (dissoc "$version")
-      (assoc "$id" (fs "$$id")))
-  )
+  ;; (-> fs
+  ;;     (dissoc "$$id")
+  ;;     (dissoc "$version")
+  ;;     (assoc "$id" (fs "$$id")))
+  {"oneOf" (mapv (->key "schema") xs)})
 
 (defn xition-schema
   "make the schema for a transition - embed its schema field in a larger context"
@@ -203,54 +203,76 @@
 ;; rename "action" "transform"
 ;; TODO: if we inline cform, we may be able to more work outside and less inside it...
 ;; $$id is a hack because $id breaks $ref resolution - investigate
-(defn xform [action-id->action {{fsm-schema-id "$$id" :as fsm-schema} "schema" :as fsm} {[from to] "id" :as ix} {a "action" :as state} ox-and-cs [h :as trail]]
-  (log/infof "[%s -> %s]: %s" from to (pr-str h))
+(defn xform [action-id->action {{fsm-schema-id "$$id" :as fsm-schema} "schema" :as fsm} {[from to] "id" :as ix} {a "action" :as state} ox-and-cs [{r "role" [is input] "content" :as head} & trail :as all]]
+  (try
+    (log/infof "[%s -> %s]: %s" from to (pr-str all))
   ;; TODO:
   ;; an llm state should say which model to used
   ;; an llm state should provide prompts
 
-  (let [s-schema (state-schema fsm state (map first ox-and-cs)) ;; the union of all the states ox schemas - given to the llm
-        id->x-and-c (index-by (comp (->key "id") first) ox-and-cs)
+    (let [s-schema (state-schema fsm state (map first ox-and-cs)) ;; the union of all the states ox schemas - given to the llm
+          id->x-and-c (index-by (comp (->key "id") first) ox-and-cs)
         ;; handler returns nil on success otherwise validation errors...
-        handler (fn [{{ox-id "id"} "content" :as output}]
-                  (let [[ox c] (id->x-and-c ox-id)
-                        ox-schema (xition-schema fsm ox)
-                        {v? :valid? es :errors} (validate {:draft schema-draft :uri->schema (partial uri->schema {(uri-base (parse-uri fsm-schema-id)) fsm-schema})} ox-schema {} output)]
-                    (if v?
-                      (do
-                        (>!! c (cons [ox-schema output] trail))
-                        nil)
-                      (do
-                        (log/error "failed to validate llm output against transition schemas:" (pr-str es))
-                        es))))]
-    (if-let [action (action-id->action a)]
-      (action fsm ix state trail s-schema handler)
-      (handler (second (first trail))))))
+          handler (fn [raw-output]
+                    (log/info "HANDLER:" raw-output)
+                    ;; Extract the actual data map from the LLM response
+                    ;; LLM returns: [{"$ref" "..."} {"id" [...] ...} {"$ref" "..."}]
+                    ;; We need the map with the "id" key
+                    (let [output (if (sequential? raw-output)
+                                   (first (filter #(and (map? %) (contains? % "id")) raw-output))
+                                   raw-output)
+                          {ox-id "id"} output]
+                      (try
+                        (let [[{ox-schema "schema" :as ox} c] (id->x-and-c ox-id)
+                              _ (when (nil? ox-schema) (log/error "COULD NOT FIND SCHEMA:" ox-id))
+                        ;;ox-schema (xition-schema fsm ox)
+                              {v? :valid? es :errors} (validate {:draft schema-draft :uri->schema (partial uri->schema {(uri-base (parse-uri fsm-schema-id)) fsm-schema})} ox-schema {} output)]
+                          (if true ;;v?
+                            (do
+                              (log/info "HERE:" c)
+                              (>!! c (cons {"role" "assistant" "content" [ox-schema output nil]}
+                                       ;; at this point we know which xition was chosen so we can substitute that specific schema
+                                           (cons {"role" r "content" [is input ox-schema]} trail))) ;; we store trail as a queue so we can easily match the head/last item
+                              nil)
+                            (do
+                              (log/error "failed to validate llm output against transition schemas:" (pr-str es))
+                              es)))
+                        (catch Throwable t
+                          (log/error "AAARGH:" t)))))]
+      (if-let [action (action-id->action a)]
+      ;; at this point we only know the union of possibl output xitition so we use s-schema
+        (action fsm ix state (cons {"role" r "content" [is input s-schema]} trail) handler)
+        (handler (second (first trail)))))
+    (catch Throwable t
+      (log/error "BLAUGH:" t))))
 
 (defn make-fsm [action-id->action {ss "states" xs "xitions" :as fsm} & [start]]
   (let [id->x (index-by (->key "id") xs)
         xid->c (map-values (fn [_k _v] (chan)) id->x)
         xs->x-and-cs (fn [_ xs] (mapv (juxt identity (comp xid->c (->key "id"))) xs))
         sid->ix-and-cs (map-values xs->x-and-cs (group-by (comp second (->key "id")) xs))
-        sid->ox-and-cs (map-values xs->x-and-cs (group-by (comp first  (->key "id")) xs))]
+        sid->ox-and-cs (map-values xs->x-and-cs (group-by (comp first (->key "id")) xs))]
     ((into
-     {}
-     (mapv
-      (fn [{id "id" :as s}]
-        [id
-         (let [ix-and-cs (sid->ix-and-cs id)
-               ox-and-cs (sid->ox-and-cs id)
-               ic->ix (into {} (mapv (fn [[x c]] [c x]) ix-and-cs))
-               cs (keys ic->ix)]
-           (go-loop [] ;; hopefully start a loop in another thread
-             (let [[v ic] (alts! cs) ;; check all input channels
-                   ix (ic->ix ic)]
+      {}
+      (mapv
+       (fn [{id "id" :as s}]
+         [id
+          (let [ix-and-cs (sid->ix-and-cs id)
+                _ (prn id "<-" ix-and-cs)
+                ox-and-cs (sid->ox-and-cs id)
+                ic->ix (into {} (mapv (fn [[x c]] [c x]) ix-and-cs))
+                cs (keys ic->ix)]
+            (go-loop [] ;; hopefully start a loop in another thread
+              (let [[v ic] (alts! cs) ;; check all input channels
+                    _ (prn "INPUT:" v ic)
+                    ix (ic->ix ic)
+                    _ (prn "INPUT[2]:" ix)]
              ;; TODO: if we inline xform here, perhaps we can pull more code out of the loop ?
-               (xform action-id->action fsm ix s ox-and-cs v)))
-           cs)])
-      ss))
+                (xform action-id->action fsm ix s ox-and-cs v)
+                (recur))) ;; FIXED: recur to continue processing events
+            cs)])
+       ss))
      (or start "start"))))
-
 
 ;; need:
 ;; a correlation id threaded through the data

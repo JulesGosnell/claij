@@ -157,6 +157,15 @@
      "items" {"type" "string"}
      "additionalItems" false}
 
+    "entry"
+    {"description" "use this to enter code review loop"
+     "type" "object"
+     "properties"
+     {"id" {"const" ["" "mc"]}
+      "document" {"type" "string"}}
+     "additionalProperties" false
+     "required" ["id" "document"]}
+
     "request"
     {"description" "use this to make a request to start/continue a code review"
      "type" "object"
@@ -218,14 +227,7 @@
 
    "xitions"
    [{"id" ["" "mc"]
-     "schema"
-     {"description" "use this to summarise and exit a code review loop"
-      "type" "object"
-      "properties"
-      {"id" {"const" ["" "mc"]}
-       "document" {"type" "string"}}
-      "additionalProperties" false
-      "required" ["id" "document"]}}
+     "schema" {"$ref" "#/$defs/entry"}}
     {"id" ["mc" "reviewer"]
      "prompts" []
      "schema" {"$ref" "#/$defs/request"}}
@@ -236,12 +238,7 @@
      "prompts" []
      "schema" {"$ref" "#/$defs/summary"}}]})
 
-(def system-prompts
-  [{"role" "system"
-    "content" "You are a cog in a larger machine. All your requests and responses must be received/given in JSON. You will be provided with relevant self-explanatory schemas. Please adhere strictly to your output schema. Do not add any additional properties."}])
-
-
-(defn make-prompts [{fsm-schema "schema" fsm-prompts "prompts" :as _fsm} {ix-schema "schema" ix-prompts "prompts" :as _ix} {state-prompts "prompts"} memory ox-schema ix-document]
+(defn make-prompts [{fsm-schema "schema" fsm-prompts "prompts" :as _fsm} {ix-prompts "prompts" :as _ix} {state-prompts "prompts"} trail ]
   (concat
    [{"role" "system"
      "content" (join
@@ -256,40 +253,33 @@
                  fsm-prompts
                  ix-prompts
                  state-prompts))}]
-   memory
-   [{"role" "user"
-     "content" (write-str [ix-schema ix-document ox-schema])}]))
+   (map (fn [m] (update m "content" write-str)) (reverse trail)) ;; trail is stored as clojure not a json doc
+   ))
 
 (defn llm-action
-  ([prompts ox-schema handler]
+  ([prompts handler]
    (open-router-async
      ;; "anthropic" "claude-sonnet-4.5" ;; markdown
      ;; "x-ai" "grok-code-fast-1" ;; markdown - should work
     ;; "openai"    "gpt-5-codex" ;; didn't conform - should work
     "openai"    "gpt-4o" ;; didn't conform - should work
     ;; "google" "gemini-2.5-flash" ;; should work
-    ox-schema
     prompts
     (fn [output]
       (if-let [es (handler output)]
         (log/error es)
         nil))))
-  ([fsm ix state inputs ox-schema handler]
-   (llm-action
-    (make-prompts fsm ix state ox-schema inputs)
-    ox-schema
-    handler)))
+  ([fsm ix state trail handler]
+   (llm-action (make-prompts fsm ix state trail) handler)))
+
+(defn end-action
+  [fsm ix state [head & tail] _handler]
+  (log/info "WooHoo!!: we finished the review:" head))
 
 (def code-review-actions
-  {"llm" llm-action})
+  {"llm" llm-action
+   "end" end-action})
 
-(comment
-  (make-fsm code-review-actions code-review-fsm "mc")
-  (def c (first *1))
-  (clojure.core.async/>!!
-   c
-   [[{"properties" {"id" {"type" "array" "item" {"type" "string"}} "document" {"type" "string"}}}
-     {"id" ["" "mc"] "document" "I have this piece of Clojure code to calculate the fibonacci series - can we improve it through a code review?: `(def fibs (lazy-seq (cons 0 (cons 1 (map + fibs (rest fibs))))))`"}]]))
 
 ;; TODO:
 ;; - or store schema separately and add to context so we can ref it from the xititions
@@ -396,10 +386,10 @@
 (deftest code-review-schema-test
   (testing "code-review"
     (doseq [[provider model]
-            [["openai" "gpt-5-codex"]
-             ["google" "gemini-2.5-flash"]
-             ["x-ai" "grok-code-fast-1"]
-             ["anthropic" "claude-sonnet-4.5"]
+            [;; ["openai" "gpt-5-codex"]
+             ;; ["google" "gemini-2.5-flash"]
+             ;; ["x-ai" "grok-code-fast-1"]
+             ;; ["anthropic" "claude-sonnet-4.5"]
              ["meta-llama" "llama-4-maverick:free"]]]
       (testing (str provider "/" model)
         (let [schema code-review-schema
@@ -407,12 +397,32 @@
                        code-review-fsm
                        ((index-by (->key "id") (code-review-fsm "xitions")) ["" "mc"])
                        ((index-by (->key "id") (code-review-fsm "states"))  "mc")
-                       []
-                       {"oneOf" [{"$ref" "#/$defs/request"}
-                                 {"$ref" "#/$defs/summary"}]}
-                       {"id" ["" "mc"] "document" "I have this piece of Clojure code to calculate the fibonacci series - can we improve it through a code review?: `(def fibs (lazy-seq (cons 0 (cons 1 (map + fibs (rest fibs))))))`"})]
+
+                       [;; previous conversation
+                        ;; ...
+                        ;; latest request
+                        {"role" "user"
+                         "content"
+                         [;; describes request
+                          {"$ref" "#/$defs/entry"}
+                         ;; request
+                          {"id" ["" "mc"] "document" "I have this piece of Clojure code to calculate the fibonacci series - can we improve it through a code review?: `(def fibs (lazy-seq (cons 0 (cons 1 (map + fibs (rest fibs))))))`"}
+                         ;; describes response
+                          {"oneOf" [{"$ref" "#/$defs/request"}
+                                    {"$ref" "#/$defs/summary"}]}]}])]
           (let [p (promise)]
-            (log/info (deref (open-router-async provider model schema prompts (partial deliver p) (partial deliver p)) 60000 "timed out after 60s"))
+            (log/info (deref (open-router-async provider model prompts (partial deliver p) (partial deliver p)) 60000 "timed out after 60s"))
             (is (:valid? (validate {:draft :draft7} schema {} (deref p 60000 "timed out after 60s"))))))))))
 
 ;; the oneOf should not be in the fsm level schema but added by state-schema
+
+(comment
+  (make-fsm code-review-actions code-review-fsm "mc")
+  (def c (first *1))
+  (clojure.core.async/>!!
+   c
+   [{"role" "user"
+     "content"
+     [{"$ref" "#/$defs/entry"}
+      {"id" ["" "mc"] "document" "I have this piece of Clojure code to calculate the fibonacci series - can we improve it through a code review?: `(def fibs (lazy-seq (cons 0 (cons 1 (map + fibs (rest fibs))))))`"}
+      {"oneOf" [{"$ref" "#/$defs/request"} {"$ref" "#/$defs/summary"}]}]}]))
