@@ -6,7 +6,6 @@
    [clojure.pprint :refer [pprint]]
    [clojure.core.async :refer [<! <!! >! >!! chan go-loop]]
    [clj-http.client :refer [post]]
-   [clojure-mcp.linting :refer [lint]]
    [claij.repl :refer [start-prepl]]
    [claij.util :refer [assert-env-var clj->json json->clj]]))
 
@@ -70,15 +69,15 @@
 ;; expel - for when an Ai just can't get the protocols right
 ;; vote - propose/vote/accept
 
-(defn ai [f input-channel output-channel]
-  (go-loop []
-    (when-some [m (<! input-channel)]
-      (let [clj (trc "AI SAYS:" (prn-str (f m)))]
-        (if-let [l (lint clj)]
-          (do
-            (f (trc "LINT SAYS:" (prn-str l))))
-          (>! output-channel clj)))
-      (recur))))
+;; (defn ai [f input-channel output-channel]
+;;   (go-loop []
+;;     (when-some [m (<! input-channel)]
+;;       (let [clj (trc "AI SAYS:" (prn-str (f m)))]
+;;         (if-let [l (lint clj)]
+;;           (do
+;;             (f (trc "LINT SAYS:" (prn-str l))))
+;;           (>! output-channel clj)))
+;;       (recur))))
 
 ;;------------------------------------------------------------------------------
 ;; in/out transformers
@@ -105,16 +104,14 @@
 
 ;;------------------------------------------------------------------------------
 
-(def ai->clj (chan 1024 (map (comp (partial trc "ai->clj:") (partial x-in :gpt)))))
-(def clj->ai (chan 1024 (map (comp (partial trc "clj->ai:") x-out))))
-
-(defmacro i [form] `(>!! ai->clj (pr-str '~form)))
-(defn o [] (<!! clj->ai))
-
-(def stop-prepl (start-prepl ai->clj clj->ai))
-
-(defn start []
-  (ai gpt clj->ai ai->clj))
+;; Unused old code - commented out
+;; (def ai->clj (chan 1024 (map (comp (partial trc "ai->clj:") (partial x-in :gpt)))))
+;; (def clj->ai (chan 1024 (map (comp (partial trc "clj->ai:") x-out))))
+;; (defmacro i [form] `(>!! ai->clj (pr-str '~form)))
+;; (defn o [] (<!! clj->ai))
+;; (def stop-prepl (start-prepl ai->clj clj->ai))
+;; (defn start []
+;;   (ai gpt clj->ai ai->clj))
 
 ;; (comment
 ;;   [{:role "system" :content (str "You're name is:" id ", you are a Clojure developer, talking to a clojure.core.server.prepl - results from the pREPL are returned as tuples: Either `[tag id user val form ns ms]` or `[tag val]` to save tokens")}
