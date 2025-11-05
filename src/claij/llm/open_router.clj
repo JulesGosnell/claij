@@ -153,7 +153,7 @@
 (defn ppr-str [x]
   (with-out-str (pprint x)))
 
-(defn open-router-async [provider model {uri "$id" uri2 "$$id" :as schema} prompts handler & [error]]
+(defn open-router-async [provider model prompts handler & [error]]
   (log/info "making open-router request (" provider "/" model "):\n" (ppr-str prompts))
   (post
    (str api-url "/chat/completions")
