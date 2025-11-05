@@ -1,7 +1,7 @@
 (ns claij.fsm
   (:require
    [clojure.tools.logging :as log]
-   [clojure.core.async :refer [chan go-loop alts! >!!]]
+   [clojure.core.async :refer [chan go-loop alts! >!! close!]]
    [m3.uri :refer [parse-uri uri-base]]
    [m3.validate :refer [validate make-context uri->continuation uri-base->dir]]
    [claij.util :refer [def-m2 def-m1 index-by ->key map-values]]))
@@ -260,31 +260,39 @@
     (catch Throwable t
       (log/error t "Error in xform"))))
 
-(defn make-fsm [action-id->action {ss "states" xs "xitions" :as fsm} & [start]]
+(defn start-fsm [action-id->action {ss "states" xs "xitions" :as fsm} & [start]]
   (let [id->x (index-by (->key "id") xs)
         xid->c (map-values (fn [_k _v] (chan)) id->x)
+        all-channels (vals xid->c) ;; Keep track of all channels for cleanup
         xs->x-and-cs (fn [_ xs] (mapv (juxt identity (comp xid->c (->key "id"))) xs))
         sid->ix-and-cs (map-values xs->x-and-cs (group-by (comp second (->key "id")) xs))
         sid->ox-and-cs (map-values xs->x-and-cs (group-by (comp first (->key "id")) xs))]
     (log/info (str "\n>> Starting FSM: " (or (get fsm "id") "unnamed")
                    " (" (count ss) " states, " (count xs) " transitions)"))
-    ((into
-      {}
-      (mapv
-       (fn [{id "id" :as s}]
-         [id
-          (let [ix-and-cs (sid->ix-and-cs id)
-                ox-and-cs (sid->ox-and-cs id)
-                ic->ix (into {} (mapv (fn [[x c]] [c x]) ix-and-cs))
-                cs (keys ic->ix)]
-            (go-loop []
-              (let [[v ic] (alts! cs)
-                    ix (ic->ix ic)]
-                (xform action-id->action fsm ix s ox-and-cs v)
-                (recur)))
-            cs)])
-       ss))
-     (or start "start"))))
+    (let [start-channels
+          ((into
+            {}
+            (mapv
+             (fn [{id "id" :as s}]
+               [id
+                (let [ix-and-cs (sid->ix-and-cs id)
+                      ox-and-cs (sid->ox-and-cs id)
+                      ic->ix (into {} (mapv (fn [[x c]] [c x]) ix-and-cs))
+                      cs (keys ic->ix)]
+                  (go-loop []
+                    (let [[v ic] (alts! cs)]
+                      (when v ;; nil means channel closed, terminate loop
+                        (let [ix (ic->ix ic)]
+                          (xform action-id->action fsm ix s ox-and-cs v)
+                          (recur)))))
+                  cs)])
+             ss))
+           (or start "start"))
+          stop-fsm (fn []
+                     (log/info (str "\n>> Stopping FSM: " (or (get fsm "id") "unnamed")))
+                     (doseq [c all-channels]
+                       (close! c)))]
+      [start-channels stop-fsm])))
 
 ;; need:
 ;; a correlation id threaded through the data

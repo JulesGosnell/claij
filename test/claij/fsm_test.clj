@@ -9,7 +9,7 @@
    [m3.validate :refer [validate]]
    [claij.util :refer [def-m2 index-by ->key]]
    [claij.llm.open-router :refer [open-router-async unpack ppr-str]]
-   [claij.fsm :refer [def-fsm make-fsm state-schema xition-schema schema-base-uri uri->schema]]))
+   [claij.fsm :refer [def-fsm start-fsm state-schema xition-schema schema-base-uri uri->schema]]))
 
 ;;------------------------------------------------------------------------------
 ;; how do we know when a trail is finished
@@ -195,12 +195,11 @@
       "code" {"$ref" "#/$defs/code"}
       "notes" {"$ref" "#/$defs/notes"}}
      "additionalProperties" false
-     "required" ["id" "code" "notes"]}}
+     "required" ["id" "code" "notes"]}}})
 
    ;; "oneOf" [{"$ref" "#/$defs/request"}
    ;;          {"$ref" "#/$defs/response"}
    ;;          {"$ref" "#/$defs/summary"}]
-   })
 
 (def-fsm
   code-review-fsm
@@ -253,8 +252,7 @@
                  fsm-prompts
                  ix-prompts
                  state-prompts))}]
-   (map (fn [m] (update m "content" write-str)) (reverse trail)) ;; trail is stored as clojure not a json doc
-   ))
+   (map (fn [m] (update m "content" write-str)) (reverse trail)))) ;; trail is stored as clojure not a json doc
 
 (defn llm-action
   ([prompts handler]
@@ -343,14 +341,14 @@
          "additionalProperties" false}
         prompts
         [{"role" "user", "content" "What's the weather like in London?"}]]
-    (doseq [[provider model] [["openai" "gpt-4o"]
+    (doseq [[provider model] [["openai" "gpt-4o"]]]
                               ;; ["x-ai" "grok-code-fast-1"]
                               ;; ["x-ai" "grok-4"]
                               ;; ["google" "gemini-2.5-flash"]
                               ;; failing
                               ;;["openai" "gpt-5-pro"]
                               ;;["anthropic" "claude-sonnet-4.5"] ;; https://forum.bubble.io/t/anthropic-json-mode-tools-via-the-api-connector-tutorial/331283
-                              ]]
+
       (testing "weather"
         (testing (str provider "/" model)
           (is (:valid? (validate {:draft :draft7} schema {} (let [p (promise)] (open-router-async provider model schema prompts (partial deliver p)) @p)))))))))
@@ -420,12 +418,16 @@
 ;; the oneOf should not be in the fsm level schema but added by state-schema
 
 (comment
-  (make-fsm code-review-actions code-review-fsm "mc")
-  (def c (first *1))
+  (def c-and-stop-fsm (start-fsm code-review-actions code-review-fsm "mc"))
+  (def start-channels (first c-and-stop-fsm))
+  (def c (first start-channels)) ;; start-channels is a list, pick the first one
+  (def stop-fsm (second c-and-stop-fsm))
   (clojure.core.async/>!!
    c
    [{"role" "user"
      "content"
      [{"$ref" "#/$defs/entry"}
       {"id" ["" "mc"] "document" "I have this piece of Clojure code to calculate the fibonacci series - can we improve it through a code review?: `(def fibs (lazy-seq (cons 0 (cons 1 (map + fibs (rest fibs))))))`"}
-      {"oneOf" [{"$ref" "#/$defs/request"} {"$ref" "#/$defs/summary"}]}]}]))
+      {"oneOf" [{"$ref" "#/$defs/request"} {"$ref" "#/$defs/summary"}]}]}])
+  ;; When done:
+  (stop-fsm))
