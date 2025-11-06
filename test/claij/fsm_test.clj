@@ -254,24 +254,6 @@
                  state-prompts))}]
    (map (fn [m] (update m "content" write-str)) (reverse trail)))) ;; trail is stored as clojure not a json doc
 
-;;keep this around...
-
-(defn llm-action
-  ([prompts handler]
-   (open-router-async
-     ;; "anthropic" "claude-sonnet-4.5" ;; markdown
-     ;; "x-ai" "grok-code-fast-1" ;; markdown - should work
-    ;; "openai"    "gpt-5-codex" ;; didn't conform - should work
-    "openai" "gpt-4o" ;; didn't conform - should work
-    ;; "google" "gemini-2.5-flash" ;; should work
-    prompts
-    (fn [output]
-      (if-let [es (handler output)]
-        (log/error es)
-        nil))))
-  ([fsm ix state trail handler]
-   (llm-action (make-prompts fsm ix state trail) handler)))
-
 (deftest structured-data-integration-test
   (let [schema
         {"$id" "https://claij.org/schemas/structured-data-integration-test"
@@ -297,7 +279,7 @@
 
       (testing "weather"
         (testing (str provider "/" model)
-          (is (:valid? (validate {:draft :draft7} schema {} (let [p (promise)] (open-router-async provider model schema prompts (partial deliver p)) @p)))))))))
+          (is (:valid? (validate {:draft :draft7} schema {} (let [p (promise)] (open-router-async provider model prompts (partial deliver p) {:schema schema}) @p)))))))))
 
 (deftest code-review-schema-test
   (testing "code-review"
@@ -385,7 +367,7 @@
                        (handler (event-map input-data)))
 
           p (promise)
-
+          
           end-action (fn [_fsm _ix _state [{[_input-schema input-data _output-schema] "content"} & _tail] _handler]
                        (deliver p input-data))
 
@@ -403,3 +385,35 @@
 
         (finally
           (stop-fsm))))))
+
+;;keep this around...
+
+(defn llm-action
+  ([prompts handler]
+   (open-router-async
+     ;; "anthropic" "claude-sonnet-4.5" ;; markdown
+     ;; "x-ai" "grok-code-fast-1" ;; markdown - should work
+    ;; "openai"    "gpt-5-codex" ;; didn't conform - should work
+    "openai" "gpt-4o" ;; didn't conform - should work
+    ;; "google" "gemini-2.5-flash" ;; should work
+    prompts
+    (fn [output]
+      (if-let [es (handler output)]
+        (log/error es)
+        nil))))
+  ([fsm ix state trail handler]
+   (llm-action (make-prompts fsm ix state trail) handler)))
+
+
+
+(comment
+  (let [p (promise)
+        end-action (fn [_fsm _ix _state [{[_input-schema input-data _output-schema] "content"} & _tail] _handler] (deliver p input-data))
+        code-review-actions {"llm" llm-action "end" end-action}
+        [submit stop-fsm] (start-fsm code-review-actions code-review-fsm "mc")]
+    (submit "Please review this fibonacci code: (defn fib [n] (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))")
+
+    (println (deref p (* 5 60 1000) false))
+
+    (stop-fsm)))
+    
