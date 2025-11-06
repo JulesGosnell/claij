@@ -215,7 +215,7 @@
 ;; rename "action" "transform"
 ;; TODO: if we inline cform, we may be able to more work outside and less inside it...
 ;; $$id is a hack because $id breaks $ref resolution - investigate
-(defn xform [action-id->action {{fsm-schema-id "$$id" :as fsm-schema} "schema" :as fsm} {[from to] "id" :as ix} {a "action" :as state} ox-and-cs [{r "role" [is input] "content" :as head} & trail :as all]]
+(defn xform [context {{fsm-schema-id "$$id" :as fsm-schema} "schema" :as fsm} {[from to] "id" :as ix} {a "action" :as state} ox-and-cs [{r "role" [is input] "content" :as head} & trail :as all]]
   (try
     (log/info (str "-> Transition [" from " -> " to "]"))
 
@@ -252,10 +252,10 @@
                               es)))
                         (catch Throwable t
                           (log/error t "Error in handler processing")))))]
-      (if-let [action (action-id->action a)]
+      (if-let [action (get-in context [:id->action a])]
         (do
           (log/info (str "   Action: " a))
-          (action fsm ix state (cons {"role" r "content" [is input s-schema]} trail) handler))
+          (action context fsm ix state (cons {"role" r "content" [is input s-schema]} trail) handler))
         (handler (second (first trail)))))
     (catch Throwable t
       (log/error t "Error in xform"))))
@@ -292,11 +292,15 @@
 ;; Decision needed on the desired semantics.
 
 (defn start-fsm
-  "Start an FSM with the given actions. The start state is automatically inferred
-   from the entry transition (the transition with 'start' as the source state).
+  "Start an FSM with context and FSM definition. The start state is automatically 
+   inferred from the entry transition (the transition with 'start' as the source state).
+   
+   Context should contain:
+   - :id->action - Map of action-id to action function
+   - Other keys as needed by actions (e.g. :store, :provider, :model)
    
    NOTE: Currently assumes exactly one transition from 'start'. See TODO above."
-  [action-id->action {ss "states" xs "xitions" :as fsm}]
+  [context {ss "states" xs "xitions" :as fsm}]
   (let [;; Create channels and mappings
         id->x (index-by (->key "id") xs)
         id->s (index-by (->key "id") ss)
@@ -340,7 +344,7 @@
           (let [[v ic] (alts! cs)]
             (when v
               (let [ix (ic->ix ic)]
-                (xform action-id->action fsm ix s ox-and-cs v)
+                (xform context fsm ix s ox-and-cs v)
                 (recur)))))))
 
     ;; Return interface

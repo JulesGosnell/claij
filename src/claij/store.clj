@@ -108,6 +108,31 @@
                                {:builder-fn rs/as-unqualified-kebab-maps})]
     (into {} (map (juxt :id :version) results))))
 
+(defn fsm-list-all
+  "List all FSMs with their latest version and description.
+   
+   Returns a sequence of maps with keys:
+   - \"id\" - FSM identifier
+   - \"version\" - Latest version number  
+   - \"description\" - Description from FSM schema (if present)"
+  [conn]
+  (let [;; Get all distinct FSM IDs with their latest version
+        query "SELECT id, MAX(version) as version FROM fsm GROUP BY id ORDER BY id"
+        id-versions (jdbc/execute! conn [query]
+                                   {:builder-fn rs/as-unqualified-kebab-maps})
+
+        ;; Load each FSM's document to extract description
+        fsms (mapv (fn [{:keys [id version]}]
+                     (let [doc (fsm-load-version conn id version)
+                           description (get-in doc ["schema" "description"] "No description")]
+                       {"id" id
+                        "version" version
+                        "description" description}))
+                   id-versions)]
+
+    (log/info (str "Listed " (count fsms) " FSMs from store"))
+    fsms))
+
 (defn make-json-bytes-loader
   "Create a loader function that returns the given data"
   [data]

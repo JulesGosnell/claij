@@ -363,17 +363,19 @@
            request2-data response2-data
            response2-data summary-data}
 
-          llm-action (fn [_fsm _ix _state [{[_input-schema input-data _output-schema] "content"} & _tail] handler]
+          llm-action (fn [_context _fsm _ix _state [{[_input-schema input-data _output-schema] "content"} & _tail] handler]
                        (handler (event-map input-data)))
 
           p (promise)
 
-          end-action (fn [_fsm _ix _state [{[_input-schema input-data _output-schema] "content"} & _tail] _handler]
+          end-action (fn [_context _fsm _ix _state [{[_input-schema input-data _output-schema] "content"} & _tail] _handler]
                        (deliver p input-data))
 
           code-review-actions {"llm" llm-action "end" end-action}
 
-          [submit stop-fsm] (start-fsm code-review-actions code-review-fsm)]
+          context {:id->action code-review-actions}
+
+          [submit stop-fsm] (start-fsm context code-review-fsm)]
 
       (try
         (submit text)
@@ -401,14 +403,15 @@
       (if-let [es (handler output)]
         (log/error es)
         nil))))
-  ([fsm ix state trail handler]
+  ([context fsm ix state trail handler]
    (llm-action (make-prompts fsm ix state trail) handler)))
 
 (comment
   (let [p (promise)
-        end-action (fn [_fsm _ix _state [{[_input-schema input-data _output-schema] "content"} & _tail] _handler] (deliver p input-data))
+        end-action (fn [_context _fsm _ix _state [{[_input-schema input-data _output-schema] "content"} & _tail] _handler] (deliver p input-data))
         code-review-actions {"llm" llm-action "end" end-action}
-        [submit stop-fsm] (start-fsm code-review-actions code-review-fsm)]
+        context {:id->action code-review-actions}
+        [submit stop-fsm] (start-fsm context code-review-fsm)]
     (submit "Please review this fibonacci code: (defn fib [n] (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))")
 
     (println (deref p (* 5 60 1000) false))
