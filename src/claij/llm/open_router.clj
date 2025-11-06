@@ -11,13 +11,13 @@
 
 ;; https://openrouter.ai/docs/quickstart
 
-(def api-key (assert-env-var "OPENROUTER_API_KEY"))
+(defn api-key [] (assert-env-var "OPENROUTER_API_KEY"))
 
 (def api-base "https://openrouter.ai")
 (def api-url (str api-base "/api/v1"))
 
-(def headers
-  {"Authorization" (str "Bearer " api-key)
+(defn headers []
+  {"Authorization" (str "Bearer " (api-key))
    "content-type" "application/json"})
 
 (def separator "041083c4-7bb7-4cb7-884b-3dc4b2bd0413")
@@ -28,7 +28,7 @@
         answer
         (post
          (str api-url "/chat/completions")
-         {:headers headers
+         {:headers (headers)
           :body
           (clj->json
            {:model (str provider "/" model)
@@ -150,7 +150,7 @@
   (post
    (str api-url "/chat/completions")
    {:async? true
-    :headers headers
+    :headers (headers)
     :body
     (clj->json
      {:model (str provider "/" model)
