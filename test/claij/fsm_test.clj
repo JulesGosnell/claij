@@ -161,7 +161,7 @@
     {"description" "use this to enter code review loop"
      "type" "object"
      "properties"
-     {"id" {"const" ["" "mc"]}
+     {"id" {"const" ["start" "mc"]}
       "document" {"type" "string"}}
      "additionalProperties" false
      "required" ["id" "document"]}
@@ -373,7 +373,7 @@
 
           code-review-actions {"llm" llm-action "end" end-action}
 
-          [submit stop-fsm] (start-fsm code-review-actions code-review-fsm "mc")]
+          [submit stop-fsm] (start-fsm code-review-actions code-review-fsm)]
 
       (try
         (submit text)
@@ -408,7 +408,7 @@
   (let [p (promise)
         end-action (fn [_fsm _ix _state [{[_input-schema input-data _output-schema] "content"} & _tail] _handler] (deliver p input-data))
         code-review-actions {"llm" llm-action "end" end-action}
-        [submit stop-fsm] (start-fsm code-review-actions code-review-fsm "mc")]
+        [submit stop-fsm] (start-fsm code-review-actions code-review-fsm)]
     (submit "Please review this fibonacci code: (defn fib [n] (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))")
 
     (println (deref p (* 5 60 1000) false))
