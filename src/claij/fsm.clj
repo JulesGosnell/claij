@@ -261,7 +261,9 @@
       (log/error t "Error in xform"))))
 
 (defn start-fsm [action-id->action {ss "states" xs "xitions" :as fsm} & [start]]
-  (let [id->x (index-by (->key "id") xs)
+  (let [start-state (or start "start")
+        id->x (index-by (->key "id") xs)
+        id->s (index-by (->key "id") ss)
         xid->c (map-values (fn [_k _v] (chan)) id->x)
         all-channels (vals xid->c) ;; Keep track of all channels for cleanup
         xs->x-and-cs (fn [_ xs] (mapv (juxt identity (comp xid->c (->key "id"))) xs))
@@ -269,30 +271,38 @@
         sid->ox-and-cs (map-values xs->x-and-cs (group-by (comp first (->key "id")) xs))]
     (log/info (str "\n>> Starting FSM: " (or (get fsm "id") "unnamed")
                    " (" (count ss) " states, " (count xs) " transitions)"))
-    (let [start-channels
-          ((into
-            {}
-            (mapv
-             (fn [{id "id" :as s}]
-               [id
-                (let [ix-and-cs (sid->ix-and-cs id)
-                      ox-and-cs (sid->ox-and-cs id)
-                      ic->ix (into {} (mapv (fn [[x c]] [c x]) ix-and-cs))
-                      cs (keys ic->ix)]
-                  (go-loop []
-                    (let [[v ic] (alts! cs)]
-                      (when v ;; nil means channel closed, terminate loop
-                        (let [ix (ic->ix ic)]
-                          (xform action-id->action fsm ix s ox-and-cs v)
-                          (recur)))))
-                  cs)])
-             ss))
-           (or start "start"))
+    ;; Start all the state loops
+    (doseq [{id "id" :as s} ss]
+      (let [ix-and-cs (sid->ix-and-cs id)
+            ox-and-cs (sid->ox-and-cs id)
+            ic->ix (into {} (mapv (fn [[x c]] [c x]) ix-and-cs))
+            cs (keys ic->ix)]
+        (go-loop []
+          (let [[v ic] (alts! cs)]
+            (when v ;; nil means channel closed, terminate loop
+              (let [ix (ic->ix ic)]
+                (xform action-id->action fsm ix s ox-and-cs v)
+                (recur)))))))
+    ;; Create the submit function
+    (let [entry-xition-id ["" start-state]
+          entry-xition (id->x entry-xition-id)
+          entry-channel (xid->c entry-xition-id)
+          entry-schema (get entry-xition "schema")
+          start-state-obj (id->s start-state)
+          output-xitions (map first (sid->ox-and-cs start-state))
+          output-schema (state-schema fsm start-state-obj output-xitions)
+          submit (fn [document]
+                   (let [input-data {"id" entry-xition-id
+                                     "document" document}
+                         message [{"role" "user"
+                                   "content" [entry-schema input-data output-schema]}]]
+                     (>!! entry-channel message)
+                     (log/info (str "   Submitted document to FSM: " start-state))))
           stop-fsm (fn []
                      (log/info (str "\n>> Stopping FSM: " (or (get fsm "id") "unnamed")))
                      (doseq [c all-channels]
                        (close! c)))]
-      [start-channels stop-fsm])))
+      [submit stop-fsm])))
 
 ;; need:
 ;; a correlation id threaded through the data
