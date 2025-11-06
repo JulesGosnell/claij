@@ -145,31 +145,44 @@
 (defn ppr-str [x]
   (with-out-str (pprint x)))
 
-(defn open-router-async [provider model prompts handler & [error]]
+(defn open-router-async
+  "Call OpenRouter API asynchronously. Optionally accepts a JSON schema for structured output.
+  Args:
+    provider - Provider name (e.g., 'openai')
+    model - Model name (e.g., 'gpt-4o')
+    prompts - Vector of message maps with :role and :content
+    handler - Function to call with successful response
+    schema - (Optional) JSON Schema for structured output
+    error - (Optional) Function to call on error"
+  [provider model prompts handler & [{:keys [schema error]}]]
   (log/info (str "      LLM Call: " provider "/" model))
-  (post
-   (str api-url "/chat/completions")
-   {:async? true
-    :headers (headers)
-    :body
-    (clj->json
-     {:model (str provider "/" model)
-      :messages prompts})}
-   (fn [r]
-     (try
-       (let [d (strip-md-json (unpack r))]
-         (try
-           (let [j (read-str d)]
-             (log/info "      LLM Response received")
-             (handler j))
-           (catch Exception e
-             (log/error "Bad JSON in LLM response:" d e))))
-       (catch Throwable t
-         (log/error t "Error processing LLM response"))))
-   (fn [exception]
-     (try
-       (let [m (read-str (:body (.getData exception)))]
-         (log/error (str "      LLM request failed: " (get m "error")))
-         (when error (error m)))
-       (catch Throwable t
-         (log/error t "Error handling LLM failure"))))))
+  (let [body-map (cond-> {:model (str provider "/" model)
+                          :messages prompts}
+                   schema (assoc :response_format
+                                 {:type "json_schema"
+                                  :json_schema {:name "response"
+                                                :strict true
+                                                :schema schema}}))]
+    (post
+     (str api-url "/chat/completions")
+     {:async? true
+      :headers (headers)
+      :body (clj->json body-map)}
+     (fn [r]
+       (try
+         (let [d (strip-md-json (unpack r))]
+           (try
+             (let [j (read-str d)]
+               (log/info "      LLM Response received")
+               (handler j))
+             (catch Exception e
+               (log/error "Bad JSON in LLM response:" d e))))
+         (catch Throwable t
+           (log/error t "Error processing LLM response"))))
+     (fn [exception]
+       (try
+         (let [m (read-str (:body (.getData exception)))]
+           (log/error (str "      LLM request failed: " (get m "error")))
+           (when error (error m)))
+         (catch Throwable t
+           (log/error t "Error handling LLM failure")))))))

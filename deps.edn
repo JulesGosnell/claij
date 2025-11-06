@@ -52,11 +52,6 @@
                       org.testcontainers/postgresql {:mvn/version "1.20.4"}}
          :main-opts ["-m" "kaocha.runner"]}
 
-  :store-test {:extra-paths ["test"]
-               :extra-deps {org.testcontainers/testcontainers {:mvn/version "1.20.4"}
-                            org.testcontainers/postgresql {:mvn/version "1.20.4"}}
-               :main-opts ["-m" "claij.run-store-test"]}
-
   :coverage {:extra-paths ["test"]
              :extra-deps {cloverage/cloverage {:mvn/version "1.2.4"}}
              :main-opts ["-m" "cloverage.coverage"
