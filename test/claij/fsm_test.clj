@@ -225,7 +225,7 @@
      "action" "end"}]
 
    "xitions"
-   [{"id" ["" "mc"]
+   [{"id" ["start" "mc"]
      "schema" {"$ref" "#/$defs/entry"}}
     {"id" ["mc" "reviewer"]
      "prompts" []
@@ -319,7 +319,7 @@
 
           ;; These are the data payloads that will be in the trail
           entry-data
-          {"id" ["" "mc"]
+          {"id" ["start" "mc"]
            "document" text}
 
           request1-data
@@ -367,7 +367,7 @@
                        (handler (event-map input-data)))
 
           p (promise)
-          
+
           end-action (fn [_fsm _ix _state [{[_input-schema input-data _output-schema] "content"} & _tail] _handler]
                        (deliver p input-data))
 
@@ -404,8 +404,6 @@
   ([fsm ix state trail handler]
    (llm-action (make-prompts fsm ix state trail) handler)))
 
-
-
 (comment
   (let [p (promise)
         end-action (fn [_fsm _ix _state [{[_input-schema input-data _output-schema] "content"} & _tail] _handler] (deliver p input-data))
@@ -416,4 +414,4 @@
     (println (deref p (* 5 60 1000) false))
 
     (stop-fsm)))
-    
+
