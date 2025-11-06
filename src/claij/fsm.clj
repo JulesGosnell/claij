@@ -284,7 +284,7 @@
                 (xform action-id->action fsm ix s ox-and-cs v)
                 (recur)))))))
     ;; Create the submit function
-    (let [entry-xition-id ["" start-state]
+    (let [entry-xition-id ["start" start-state]
           entry-xition (id->x entry-xition-id)
           entry-channel (xid->c entry-xition-id)
           entry-schema (get entry-xition "schema")
