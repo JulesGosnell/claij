@@ -254,6 +254,8 @@
                  state-prompts))}]
    (map (fn [m] (update m "content" write-str)) (reverse trail)))) ;; trail is stored as clojure not a json doc
 
+;;keep this around...
+
 (defn llm-action
   ([prompts handler]
    (open-router-async
@@ -269,62 +271,6 @@
         nil))))
   ([fsm ix state trail handler]
    (llm-action (make-prompts fsm ix state trail) handler)))
-
-(defn end-action
-  [fsm ix state [head & tail] _handler]
-  (let [content (get head "content")
-        data (second content)]
-    (log/info "\n[COMPLETE] FSM Finished")
-    (log/info (str "   Final code:\n" (get-in data ["code" "text"])))
-    (log/info (str "   Summary: " (get data "notes")))))
-
-(def code-review-actions
-  {"llm" llm-action
-   "end" end-action})
-
-;; TODO:
-;; - or store schema separately and add to context so we can ref it from the xititions
-;; - pass whole schema to request
-;; - get it all working
-;; - throw a retrospective flag on end state to queue this workflow for a trtro
-
-;;------------------------------------------------------------------------------
-
-;; (clj-http.client/post
-;;  (str api-url "/chat/completions")
-;;  {:async? true
-;;   :headers headers
-;;   :body
-;;   (clojure.data.json/write-str
-;;    {:model (str provider "/" model)
-;;     :response_format
-;;     {:type "json_schema"
-;;      :json_schema
-;;      {:name "weather"
-;;       :strict true
-;;       :schema {"type" "object",
-;;                "properties"
-;;                {"location"
-;;                 {"type" "string", "description" "City or location name"},
-;;                 "temperature"
-;;                 {"type" "number", "description" "Temperature in Celsius"},
-;;                 "conditions"
-;;                 {"type" "string", "description" "Weather conditions description"}},
-;;                "required" ["location" "temperature" "conditions"],
-;;                "additionalProperties" false}}}
-;;     :messages {"role" "user", "content" "What's the weather like in London?"}})}
-;;  (fn [{b :body}] (let [{[{{c "content"} "message"}] "choices"} (clojure.data.json/read-str b)] (handler (clojure.data.json/read-str (strip-md-json c)))))
-;;  (fn [exception] (println "Error:" (.getMessage exception))))
-
-;; (defn unpack [{b :body}]
-;;   (let [{[{{c "content"} "message"}] "choices"} (clojure.data.json/read-str (clojure.string/trim b))]
-;;     c
-;;     ;;(clojure.data.json/read-str (strip-md-json c))
-;;     ))
-
-(defn trace [m v]
-  (prn m v)
-  v)
 
 (deftest structured-data-integration-test
   (let [schema
@@ -352,37 +298,6 @@
       (testing "weather"
         (testing (str provider "/" model)
           (is (:valid? (validate {:draft :draft7} schema {} (let [p (promise)] (open-router-async provider model schema prompts (partial deliver p)) @p)))))))))
-
-;; ["openai" "gpt-4o"]
-;; - no oneOfs
-;; - no const arrays
-
-;; ["x-ai" "grok-4"]
-
-;; (deftest code-review-schema-test
-;;   (testing "code-review"
-;;     (doseq [[provider model]
-;;             [
-;;              ["openai" "gpt-5-pro"]
-;;              ["google" "gemini-2.5-flash"]
-;;              ["x-ai" "grok-4"]
-;;              ["anthropic" "claude-sonnet-4.5"]
-;;              ]]
-;;       (testing (str provider "/" model)
-;;         (let [schema code-review-schema
-;;               prompts
-;;               [{"role" "system"
-;;                 "content" (str "Your output must be expressed as JSON and MUST BE STRICTLY CONFORMANT (please pay particular attention to the \"id\" which must be present as a pair of strings) to this schema: " (write-str code-review-schema))}
-;;                {"role" "user"
-;;                 "content" (str "Your input is expressed as JSON conforming to this schema: " (write-str {"type" "object" "properties" {"id" {"const" ["" "mc"]} "document" {"type" "string"}}}))}
-;;                {"role" "user"
-;;                 "content" (str "Here is your input - please respond to it as instructed: " (write-str {"id" ["" "mc"] "document" "I have this piece of Clojure code to calculate the fibonacci series - I'd like you to request a code review to improve it?: `(def fibs (lazy-seq (cons 0 (cons 1 (map + fibs (rest fibs))))))`"}))}]]
-;;           (testing (str provider "/" model)
-;;             (let [p (promise)]
-;;               (log/info @(open-router-async provider model schema prompts (partial deliver p) (partial deliver p)))
-;;               (is (:valid? (validate {:draft :draft7} schema {} @p))))))))))
-
-;; need another test with conversational history plus code to integrate this:
 
 (deftest code-review-schema-test
   (testing "code-review"
@@ -415,19 +330,76 @@
             (log/info (deref (open-router-async provider model prompts (partial deliver p) (partial deliver p)) 60000 "timed out after 60s"))
             (is (:valid? (validate {:draft :draft7} schema {} (deref p 60000 "timed out after 60s"))))))))))
 
-;; the oneOf should not be in the fsm level schema but added by state-schema
+(deftest code-review-fsm-mock-test
+  (testing "code-review FSM with mock LLM actions"
+    (let [text
+          "Please review this fibonacci code: (defn fib [n] (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))"
 
-(comment
-  (def c-and-stop-fsm (start-fsm code-review-actions code-review-fsm "mc"))
-  (def start-channels (first c-and-stop-fsm))
-  (def c (first start-channels)) ;; start-channels is a list, pick the first one
-  (def stop-fsm (second c-and-stop-fsm))
-  (clojure.core.async/>!!
-   c
-   [{"role" "user"
-     "content"
-     [{"$ref" "#/$defs/entry"}
-      {"id" ["" "mc"] "document" "I have this piece of Clojure code to calculate the fibonacci series - can we improve it through a code review?: `(def fibs (lazy-seq (cons 0 (cons 1 (map + fibs (rest fibs))))))`"}
-      {"oneOf" [{"$ref" "#/$defs/request"} {"$ref" "#/$defs/summary"}]}]}])
-  ;; When done:
-  (stop-fsm))
+          ;; These are the data payloads that will be in the trail
+          entry-data
+          {"id" ["" "mc"]
+           "document" text}
+
+          request1-data
+          {"id" ["mc" "reviewer"]
+           "code" {"language" {"name" "clojure"}
+                   "text" "(defn fib [n]\n  (if (<= n 1)\n    n\n    (+ (fib (- n 1)) (fib (- n 2)))))"}
+           "notes" "Here's a recursive fibonacci. Please review for improvements."}
+
+          response1-data
+          {"id" ["reviewer" "mc"]
+           "code" {"language" {"name" "clojure"}
+                   "text" "(def fib\n  (memoize\n    (fn [n]\n      (if (<= n 1)\n        n\n        (+ (fib (- n 1)) (fib (- n 2)))))))"}
+           "comments" ["Consider using memoization to avoid redundant calculations"
+                       "The algorithm is correct but inefficient for large n"]
+           "notes" "Added memoization to improve performance."}
+
+          request2-data
+          {"id" ["mc" "reviewer"]
+           "code" {"language" {"name" "clojure"}
+                   "text" "(def fib\n  (memoize\n    (fn [n]\n      (if (<= n 1)\n        n\n        (+ (fib (- n 1)) (fib (- n 2)))))))"}
+           "notes" "Incorporated memoization. Please review again."}
+
+          response2-data
+          {"id" ["reviewer" "mc"]
+           "code" {"language" {"name" "clojure"}
+                   "text" "(def fib\n  (memoize\n    (fn [n]\n      (if (<= n 1)\n        n\n        (+ (fib (- n 1)) (fib (- n 2)))))))"}
+           "comments" []
+           "notes" "Looks good! The memoization solves the performance issue."}
+
+          summary-data
+          {"id" ["mc" "end"]
+           "code" {"language" {"name" "clojure"}
+                   "text" "(def fib\n  (memoize\n    (fn [n]\n      (if (<= n 1)\n        n\n        (+ (fib (- n 1)) (fib (- n 2)))))))"}
+           "notes" "Code review complete. Added memoization for performance."}
+
+          ;; Map from input data to output data
+          event-map
+          {entry-data request1-data
+           request1-data response1-data
+           response1-data request2-data
+           request2-data response2-data
+           response2-data summary-data}
+
+          llm-action (fn [_fsm _ix _state [{[_input-schema input-data _output-schema] "content"} & _tail] handler]
+                       (handler (event-map input-data)))
+
+          p (promise)
+
+          end-action (fn [_fsm _ix _state [{[_input-schema input-data _output-schema] "content"} & _tail] _handler]
+                       (deliver p input-data))
+
+          code-review-actions {"llm" llm-action "end" end-action}
+
+          [submit stop-fsm] (start-fsm code-review-actions code-review-fsm "mc")]
+
+      (try
+        (submit text)
+
+        (is (= summary-data (deref p 5000 false)) "FSM should complete with summary")
+
+        (catch Throwable t
+          (is false "event submission failed"))
+
+        (finally
+          (stop-fsm))))))
