@@ -359,10 +359,9 @@
                                      (log/error e "Error operating on channel"))))
 
         ;; Create interface functions
-        submit (fn [document]
-                 (let [input-data {"id" entry-xition-id
-                                   "document" document}
-                       message [{"role" "user"
+        submit (fn [input-data]
+                 ;; Accept complete entry data with id, don't wrap it
+                 (let [message [{"role" "user"
                                  "content" [entry-schema input-data output-schema]}]]
                    (safe-channel-operation #(>!! entry-channel %) message)
                    (log/info (str "   Submitted document to FSM: " start-state))))
