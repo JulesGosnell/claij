@@ -87,7 +87,8 @@
                 (handler {"id" ["mc" "reviewer"]
                           "code" {"language" {"name" "clojure"}
                                   "text" "(defn fib [n] (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))"}
-                          "notes" "Please review this fibonacci implementation"})
+                          "notes" "Please review this fibonacci implementation"
+                          "llm" {"provider" "openai" "model" "gpt-4o"}})
 
                 ;; Reviewer responds
                 (= xid ["mc" "reviewer"])
