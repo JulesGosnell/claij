@@ -36,7 +36,6 @@
 
         schema (get ix "schema")]
 
-    (log/info (str "      LLM Call: " provider "/" model))
     (open-router-async provider model all-prompts handler {:schema schema})))
 
 (defn triage-action
@@ -44,8 +43,6 @@
    
    Queries the store for FSM metadata and presents them to the LLM for selection."
   [{:keys [store provider model]} fsm ix state trail handler]
-  (log/info "   Triage: Loading available FSMs from store")
-
   ;; Extract user's problem description from the trail
   (let [[{[_input-schema input-data _output-schema] "content"}] trail
         user-text (get input-data "document")
@@ -53,7 +50,7 @@
         ;; Query store for all FSM [id, version, description] triples
         available-fsms (store/fsm-list-all store)
 
-        _ (log/info (str "   Triage: Found " (count available-fsms) " available FSMs"))
+        _ (log/info (str "   Triage: " (count available-fsms) " FSMs available"))
 
         ;; Format FSM list for LLM
         fsm-list (if (empty? available-fsms)
@@ -73,21 +70,17 @@
     (if (empty? available-fsms)
       ;; No FSMs available - fail gracefully
       (do
-        (log/error "   Triage: No FSMs available in store")
+        (log/error "   Triage: No FSMs in store")
         (handler {"id" ["triage" "generate"]
                   "requirements" (str "No existing FSMs found. Need to implement: " user-text)}))
       ;; Query LLM for selection
-      (do
-        (log/info "   Triage: Consulting LLM for FSM selection")
-        (open-router-async provider model prompts handler {:schema (get ix "schema")})))))
+      (open-router-async provider model prompts handler {:schema (get ix "schema")}))))
 
 (defn reuse-action
   "Loads the chosen FSM, starts it, delegates the user's text, waits for result.
    
    Creates a child context with a custom end action to capture the result."
   [context fsm ix state trail handler]
-  (log/info "   Reuse: Delegating to chosen FSM")
-
   ;; Extract the chosen FSM info and original user text
   (let [[{[_input-schema input-data _output-schema] "content"} original-request] trail
         fsm-id (get input-data "fsm-id")
@@ -96,7 +89,7 @@
 
         {:keys [store]} context]
 
-    (log/info (str "   Reuse: Loading FSM: " fsm-id " v" fsm-version))
+    (log/info (str "   Reuse: " fsm-id " v" fsm-version))
 
     ;; Load FSM from store
     (let [loaded-fsm (store/fsm-load-version store fsm-id fsm-version)
@@ -114,7 +107,7 @@
           [submit stop-fsm] (start-fsm child-context loaded-fsm)]
 
       ;; Submit the original user text to the child FSM
-      (log/info (str "   Reuse: Submitting to child FSM: " fsm-id))
+      (log/info (str "   [>>] Submitting to child FSM"))
       (submit original-text)
 
       ;; Wait for the child FSM to complete
@@ -123,12 +116,12 @@
 
         (if (= result ::timeout)
           (do
-            (log/error "   Reuse: Child FSM timed out")
+            (log/error "   [X] Child FSM timeout")
             (handler {"id" ["reuse" "end"]
                       "success" false
                       "output" "Child FSM execution timed out"}))
           (do
-            (log/info "   Reuse: Child FSM completed successfully")
+            (log/info "   [OK] Child FSM complete")
             (handler {"id" ["reuse" "end"]
                       "success" true
                       "output" result})))))))
@@ -156,7 +149,7 @@
    This allows FSM delegation where child FSMs can have custom end actions."
   [{:keys [result-promise]} fsm ix state trail handler]
   (let [[{[_input-schema input-data _output-schema] "content"}] trail]
-    (log/info "   End: Complete")
+    (log/info "   [OK] End")
     (when result-promise
       (deliver result-promise input-data))
     ;; Call handler anyway to allow FSM to complete properly

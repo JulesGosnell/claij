@@ -7,7 +7,7 @@
    [clojure.core.async :refer [<! <!! >! >!! chan go-loop]]
    [clj-http.client :refer [post]]
    [claij.repl :refer [start-prepl]]
-   [claij.util :refer [assert-env-var clj->json json->clj]]))
+   [claij.util :refer [assert-env-var clj->json json->clj make-retrier]]))
 
 ;; https://openrouter.ai/docs/quickstart
 
@@ -147,15 +147,21 @@
 
 (defn open-router-async
   "Call OpenRouter API asynchronously. Optionally accepts a JSON schema for structured output.
+  Automatically retries on JSON parse errors with feedback to the LLM.
+  
   Args:
     provider - Provider name (e.g., 'openai')
     model - Model name (e.g., 'gpt-4o')
     prompts - Vector of message maps with :role and :content
     handler - Function to call with successful response
     schema - (Optional) JSON Schema for structured output
-    error - (Optional) Function to call on error"
-  [provider model prompts handler & [{:keys [schema error]}]]
-  (log/info (str "      LLM Call: " provider "/" model))
+    error - (Optional) Function to call on error
+    retry-count - (Internal) Current retry attempt number
+    max-retries - Maximum number of retries for malformed JSON (default: 3)"
+  [provider model prompts handler & [{:keys [schema error retry-count max-retries]
+                                      :or {retry-count 0 max-retries 3}}]]
+  (log/info (str "      LLM Call: " provider "/" model
+                 (when (> retry-count 0) (str " (retry " retry-count "/" max-retries ")"))))
   (let [body-map (cond-> {:model (str provider "/" model)
                           :messages prompts}
                    schema (assoc :response_format
@@ -173,16 +179,39 @@
          (let [d (strip-md-json (unpack r))]
            (try
              (let [j (read-str d)]
-               (log/info "      LLM Response received")
+               (log/info "      [OK] LLM Response: Valid JSON received")
                (handler j))
              (catch Exception e
-               (log/error "Bad JSON in LLM response:" d e))))
+               (let [retrier (make-retrier max-retries)]
+                 (retrier
+                  retry-count
+                   ;; Retry operation: send error feedback and try again
+                  (fn []
+                    (let [error-msg (str "We could not unmarshal your JSON - it must be badly formed.\n\n"
+                                         "Here is the exception from clojure.data.json/read-str:\n"
+                                         (.getMessage e) "\n\n"
+                                         "Here is your malformed response:\n" d "\n\n"
+                                         "Please try again. Your response should only contain the relevant JSON document.")
+                          retry-prompts (conj (vec prompts) {"role" "user" "content" error-msg})]
+                      (log/warn (str "      [X] JSON Parse Error: " (.getMessage e)))
+                      (log/info (str "      [>>] Sending error feedback to LLM"))
+                      (open-router-async provider model retry-prompts handler
+                                         {:schema schema
+                                          :error error
+                                          :retry-count (inc retry-count)
+                                          :max-retries max-retries})))
+                   ;; Max retries handler
+                  (fn []
+                    (log/debug (str "Final malformed response: " d))
+                    (when error (error {:error "max-retries-exceeded"
+                                        :raw-response d
+                                        :exception (.getMessage e)}))))))))
          (catch Throwable t
            (log/error t "Error processing LLM response"))))
      (fn [exception]
        (try
          (let [m (read-str (:body (.getData exception)))]
-           (log/error (str "      LLM request failed: " (get m "error")))
+           (log/error (str "      [X] LLM Request Failed: " (get m "error")))
            (when error (error m)))
          (catch Throwable t
            (log/error t "Error handling LLM failure")))))))

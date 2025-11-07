@@ -4,7 +4,7 @@
    [clojure.core.async :refer [chan go-loop alts! >!! close!]]
    [m3.uri :refer [parse-uri uri-base]]
    [m3.validate :refer [validate make-context uri->continuation uri-base->dir]]
-   [claij.util :refer [def-m2 def-m1 index-by ->key map-values]]))
+   [claij.util :refer [def-m2 def-m1 index-by ->key map-values make-retrier]]))
 
 ;; the plan
 ;; to transition we need a json document - a "proposal"
@@ -217,46 +217,79 @@
 ;; $$id is a hack because $id breaks $ref resolution - investigate
 (defn xform [context {{fsm-schema-id "$$id" :as fsm-schema} "schema" :as fsm} {[from to] "id" :as ix} {a "action" :as state} ox-and-cs [{r "role" [is input] "content" :as head} & trail :as all]]
   (try
-    (log/info (str "-> Transition [" from " -> " to "]"))
+    (log/info (str "=> [" from " -> " to "]"))
 
     (let [s-schema (state-schema fsm state (map first ox-and-cs))
           id->x-and-c (index-by (comp (->key "id") first) ox-and-cs)
-          handler (fn [raw-output]
-                    ;; Extract the actual data map from the LLM response
-                    ;; LLM may return: [{"$ref" "..."} {"id" [...] ...} {"$ref" "..."}]
-                    ;; We need the map with the "id" key
-                    (let [output (if (sequential? raw-output)
-                                   (first (filter #(and (map? %) (contains? % "id")) raw-output))
-                                   raw-output)
-                          {ox-id "id"} output]
-                      (try
-                        (let [[{ox-schema "schema" :as ox} c] (id->x-and-c ox-id)
-                              _ (when (nil? ox-schema) (log/error "Could not find schema for transition:" ox-id))
-                              ;; Create validation schema that includes $defs from fsm-schema
-                              ;; so that $ref fragments can be resolved
-                              validation-schema (assoc (select-keys fsm-schema ["$defs" "$schema" "$$id"])
-                                                       "allOf" [ox-schema])
-                              {v? :valid? es :errors} (validate {:draft schema-draft
-                                                                 :uri->schema (partial uri->schema {(uri-base (parse-uri fsm-schema-id)) fsm-schema})}
-                                                                validation-schema
-                                                                {}
-                                                                output)]
-                          (if v?
-                            (do
-                              (log/info (str "   [OK] Output validated for transition " ox-id))
-                              (>!! c (cons {"role" "assistant" "content" [ox-schema output nil]}
-                                           (cons {"role" r "content" [is input ox-schema]} trail)))
-                              nil)
-                            (do
-                              (log/error (str "   [FAIL] Validation failed for transition " ox-id ": " (pr-str es)))
-                              es)))
-                        (catch Throwable t
-                          (log/error t "Error in handler processing")))))]
+          retry-count (atom 0)
+          max-retries 3
+          retrier (make-retrier max-retries)
+          initial-trail (cons {"role" r "content" [is input s-schema]} trail)
+
+          ;; Handler validates output and retries on failure
+          ;; Closes over initial-trail and extends it on retry
+          handler
+          (fn handler
+            ([raw-output] (handler raw-output initial-trail))
+            ([raw-output current-trail]
+             (let [;; Extract the actual data map from the LLM response
+                   output (if (sequential? raw-output)
+                            (first (filter #(and (map? %) (contains? % "id")) raw-output))
+                            raw-output)
+                   {ox-id "id"} output]
+               (try
+                 (let [[{ox-schema "schema" :as ox} c] (id->x-and-c ox-id)
+                       _ (when (nil? ox-schema)
+                           (log/error (str "   [X] Schema Lookup Failed: transition " ox-id)))
+                       ;; Create validation schema
+                       validation-schema (assoc (select-keys fsm-schema ["$defs" "$schema" "$$id"])
+                                                "allOf" [ox-schema])
+                       {v? :valid? es :errors} (validate {:draft schema-draft
+                                                          :uri->schema (partial uri->schema {(uri-base (parse-uri fsm-schema-id)) fsm-schema})}
+                                                         validation-schema
+                                                         {}
+                                                         output)]
+                   (if v?
+                     ;; SUCCESS - Put on channel and extend trail
+                     (do
+                       (log/info (str "   [OK] Validation: " ox-id))
+                       (>!! c (cons {"role" "assistant" "content" [ox-schema output nil]}
+                                    (cons {"role" r "content" [is input ox-schema]} trail)))
+                       nil)
+                     ;; FAILURE - Retry with error feedback
+                     (retrier
+                      @retry-count
+                       ;; Retry operation
+                      (fn []
+                        (log/error (str "   [X] Validation Failed: " ox-id " (attempt " (inc @retry-count) "/" max-retries ")"))
+                        (swap! retry-count inc)
+                        (let [error-msg (str "Your response failed schema validation.\n\n"
+                                             "Validation errors: " (pr-str es) "\n\n"
+                                             "Please review the schema and provide a corrected response.")
+                              error-schema {"type" "string"}
+                               ;; Build error trail entry: [input-schema, error-message, output-schema]
+                              error-trail (cons {"role" "user"
+                                                 "content" [error-schema error-msg ox-schema]}
+                                                current-trail)]
+                          (log/info "      [>>] Sending validation error feedback to LLM")
+                           ;; Call action again with error in trail
+                          (if-let [action (get-in context [:id->action a])]
+                            (action context fsm ix state error-trail handler)
+                            (handler (second (first error-trail)) error-trail))))
+                       ;; Max retries exceeded
+                      (fn []
+                        (log/error (str "   [X] Max Retries Exceeded: Validation failed after " max-retries " attempts"))
+                        (log/error (str "   Final output: " (pr-str output)))
+                        (log/debug (str "   Validation errors: " (pr-str es)))))))
+                 (catch Throwable t
+                   (log/error t "Error in handler processing"))))))]
+
+      ;; Call action with handler
       (if-let [action (get-in context [:id->action a])]
         (do
           (log/info (str "   Action: " a))
-          (action context fsm ix state (cons {"role" r "content" [is input s-schema]} trail) handler))
-        (handler (second (first trail)))))
+          (action context fsm ix state initial-trail handler))
+        (handler (second (first initial-trail)))))
     (catch Throwable t
       (log/error t "Error in xform"))))
 
@@ -318,18 +351,25 @@
         output-xitions (map first (sid->ox-and-cs start-state))
         output-schema (state-schema fsm start-state-obj output-xitions)
 
+        ;; Error handling for channel operations
+        safe-channel-operation (fn [op ch]
+                                 (try
+                                   (op ch)
+                                   (catch Exception e
+                                     (log/error e "Error operating on channel"))))
+
         ;; Create interface functions
         submit (fn [document]
                  (let [input-data {"id" entry-xition-id
                                    "document" document}
                        message [{"role" "user"
                                  "content" [entry-schema input-data output-schema]}]]
-                   (>!! entry-channel message)
+                   (safe-channel-operation #(>!! entry-channel %) message)
                    (log/info (str "   Submitted document to FSM: " start-state))))
         stop-fsm (fn []
                    (log/info (str "\n>> Stopping FSM: " (or (get fsm "id") "unnamed")))
                    (doseq [c all-channels]
-                     (close! c)))]
+                     (safe-channel-operation close! c)))]
 
     (log/info (str "\n>> Starting FSM: " (or (get fsm "id") "unnamed")
                    " (" (count ss) " states, " (count xs) " transitions)"))
