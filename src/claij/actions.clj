@@ -87,7 +87,7 @@
         fsm-version (get input-data "fsm-version")
         original-text (get-in original-request ["content" 1 "document"])
 
-        {:keys [store]} context]
+        {:keys [store provider model]} context]
 
     (log/info (str "   Reuse: " fsm-id " v" fsm-version))
 
@@ -106,9 +106,16 @@
           ;; Start the child FSM
           [submit stop-fsm] (start-fsm child-context loaded-fsm)]
 
-      ;; Submit the original user text to the child FSM
-      (log/info (str "   [>>] Submitting to child FSM"))
-      (submit original-text)
+      ;; Construct entry message based on FSM requirements
+      ;; For code-review FSM, include llms list; for others, just pass text
+      (let [entry-msg (if (= fsm-id "code-review")
+                        {"id" ["start" "mc"]
+                         "document" original-text
+                         "llms" [{"provider" provider "model" model}]}
+                        original-text)]
+
+        (log/info (str "   [>>] Submitting to child FSM"))
+        (submit entry-msg))
 
       ;; Wait for the child FSM to complete
       (let [result (deref child-result 60000 ::timeout)]

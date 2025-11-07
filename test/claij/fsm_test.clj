@@ -157,14 +157,30 @@
      "items" {"type" "string"}
      "additionalItems" false}
 
+    "llm"
+    {"description" "specification of an LLM to use"
+     "type" "object"
+     "properties"
+     {"provider" {"type" "string"}
+      "model" {"type" "string"}}
+     "additionalProperties" false
+     "required" ["provider" "model"]}
+
+    "llms"
+    {"description" "list of available LLMs"
+     "type" "array"
+     "items" {"$ref" "#/$defs/llm"}
+     "minItems" 1}
+
     "entry"
     {"description" "use this to enter code review loop"
      "type" "object"
      "properties"
      {"id" {"const" ["start" "mc"]}
-      "document" {"type" "string"}}
+      "document" {"type" "string"}
+      "llms" {"$ref" "#/$defs/llms"}}
      "additionalProperties" false
-     "required" ["id" "document"]}
+     "required" ["id" "document" "llms"]}
 
     "request"
     {"description" "use this to make a request to start/continue a code review"
@@ -172,9 +188,10 @@
      "properties"
      {"id" {"const" ["mc" "reviewer"]}
       "code" {"$ref" "#/$defs/code"}
-      "notes" {"$ref" "#/$defs/notes"}}
+      "notes" {"$ref" "#/$defs/notes"}
+      "llm" {"$ref" "#/$defs/llm"}}
      "additionalProperties" false
-     "required" ["id" "code" "notes"]}
+     "required" ["id" "code" "notes" "llm"]}
 
     "response"
     {"description" "use this to respond with your comments during a code review"
@@ -211,6 +228,8 @@
      "action" "llm"
      "prompts"
      ["You are an MC orchestrating a code review."
+      "You have been provided with a list of available LLMs. When you request a review, you must specify which LLM to use by including the 'llm' field with the provider and model."
+      "You can choose different LLMs for different review rounds - use your judgment about which LLM is best suited for each review."
       "You should always request at least one review, then merge any useful code changes and/or refactor to take any useful comments into consideration and ask for further review."
       "Keep requesting and reacting to reviews until you are satisfied that you are no longer turning up useful issues. Then please summarise your findings with the final version of the code."]}
     {"id" "reviewer"
@@ -320,16 +339,21 @@
     (let [text
           "Please review this fibonacci code: (defn fib [n] (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))"
 
+          llms
+          [{"provider" "openai" "model" "gpt-4o"}]
+
           ;; These are the data payloads that will be in the trail
           entry-data
           {"id" ["start" "mc"]
-           "document" text}
+           "document" text
+           "llms" llms}
 
           request1-data
           {"id" ["mc" "reviewer"]
            "code" {"language" {"name" "clojure"}
                    "text" "(defn fib [n]\n  (if (<= n 1)\n    n\n    (+ (fib (- n 1)) (fib (- n 2)))))"}
-           "notes" "Here's a recursive fibonacci. Please review for improvements."}
+           "notes" "Here's a recursive fibonacci. Please review for improvements."
+           "llm" {"provider" "openai" "model" "gpt-4o"}}
 
           response1-data
           {"id" ["reviewer" "mc"]
@@ -343,7 +367,8 @@
           {"id" ["mc" "reviewer"]
            "code" {"language" {"name" "clojure"}
                    "text" "(def fib\n  (memoize\n    (fn [n]\n      (if (<= n 1)\n        n\n        (+ (fib (- n 1)) (fib (- n 2)))))))"}
-           "notes" "Incorporated memoization. Please review again."}
+           "notes" "Incorporated memoization. Please review again."
+           "llm" {"provider" "openai" "model" "gpt-4o"}}
 
           response2-data
           {"id" ["reviewer" "mc"]
@@ -381,7 +406,7 @@
           [submit stop-fsm] (start-fsm context code-review-fsm)]
 
       (try
-        (submit text)
+        (submit entry-data)
 
         (is (= summary-data (deref p 5000 false)) "FSM should complete with summary")
 
@@ -395,19 +420,25 @@
 
 (defn llm-action
   ([prompts handler]
+   (llm-action "openai" "gpt-4o" prompts handler))
+  ([provider model prompts handler]
    (open-router-async
-     ;; "anthropic" "claude-sonnet-4.5" ;; markdown
-     ;; "x-ai" "grok-code-fast-1" ;; markdown - should work
-    ;; "openai"    "gpt-5-codex" ;; didn't conform - should work
-    "openai" "gpt-4o" ;; didn't conform - should work
-    ;; "google" "gemini-2.5-flash" ;; should work
+    provider model
     prompts
     (fn [output]
       (if-let [es (handler output)]
         (log/error es)
         nil))))
   ([context fsm ix state trail handler]
-   (llm-action (make-prompts fsm ix state trail) handler)))
+   ;; Extract provider and model from the input message
+   (let [[{[_input-schema input-data _output-schema] "content"} & _tail] trail
+         {provider "provider" model "model"} (get input-data "llm")
+         ;; Default to gpt-4o if no llm specified (for backward compatibility)
+         provider (or provider "openai")
+         model (or model "gpt-4o")
+         prompts (make-prompts fsm ix state trail)]
+     (log/info (str "   Using LLM: " provider "/" model))
+     (llm-action provider model prompts handler))))
 
 (comment
   (let [p (promise)
@@ -428,7 +459,17 @@
            end-action# (fn [_context# _fsm# _ix# _state# [{[_input-schema# input-data# _output-schema#] "content"} & _tail#] _handler#] (deliver p# input-data#))
            code-review-actions# {"llm" llm-action "end" end-action#}
            context# {:id->action code-review-actions#}
-           [submit# stop-fsm#] (start-fsm context# code-review-fsm)]
-       (submit# (str "Please review this code: " ~code-str))
+           [submit# stop-fsm#] (start-fsm context# code-review-fsm)
+           ;; Define available LLMs
+           ;; TODO - extract this map to somewhere from whencce it can be shared
+           llms# [{"provider" "openai" "model" "gpt-5-codex"}
+                  {"provider" "x-ai" "model" "grok-code-fast-1"}
+                  {"provider" "anthropic" "model" "claude-sonnet-4.5"}
+                  {"provider" "google" "model" "gemini-2.5-flash"}]
+           ;; Construct entry message with document and llms
+           entry-msg# {"id" ["start" "mc"]
+                       "document" (str "Please review this code: " ~code-str)
+                       "llms" llms#}]
+       (submit# entry-msg#)
        (println (deref p# (* 5 60 1000) false))
        (stop-fsm#))))
