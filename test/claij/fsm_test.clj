@@ -157,6 +157,11 @@
      "items" {"type" "string"}
      "additionalItems" false}
 
+    "concerns"
+    {"description" "a list of code quality concerns to review"
+     "type" "array"
+     "items" {"type" "string"}}
+
     "llm"
     {"description" "specification of an LLM to use"
      "type" "object"
@@ -178,9 +183,10 @@
      "properties"
      {"id" {"const" ["start" "mc"]}
       "document" {"type" "string"}
-      "llms" {"$ref" "#/$defs/llms"}}
+      "llms" {"$ref" "#/$defs/llms"}
+      "concerns" {"$ref" "#/$defs/concerns"}}
      "additionalProperties" false
-     "required" ["id" "document" "llms"]}
+     "required" ["id" "document" "llms" "concerns"]}
 
     "request"
     {"description" "use this to make a request to start/continue a code review"
@@ -189,9 +195,13 @@
      {"id" {"const" ["mc" "reviewer"]}
       "code" {"$ref" "#/$defs/code"}
       "notes" {"$ref" "#/$defs/notes"}
+      "concerns" {"description" "specific concerns for this review (max 3 to avoid overwhelming the reviewer)"
+                  "type" "array"
+                  "items" {"type" "string"}
+                  "maxItems" 3}
       "llm" {"$ref" "#/$defs/llm"}}
      "additionalProperties" false
-     "required" ["id" "code" "notes" "llm"]}
+     "required" ["id" "code" "notes" "concerns" "llm"]}
 
     "response"
     {"description" "use this to respond with your comments during a code review"
@@ -228,17 +238,39 @@
      "action" "llm"
      "prompts"
      ["You are an MC orchestrating a code review."
-      "You have been provided with a list of available LLMs. When you request a review, you must specify which LLM to use by including the 'llm' field with the provider and model."
-      "You can choose different LLMs for different review rounds - use your judgment about which LLM is best suited for each review."
-      "You should always request at least one review, then merge any useful code changes and/or refactor to take any useful comments into consideration and ask for further review."
-      "Keep requesting and reacting to reviews until you are satisfied that you are no longer turning up useful issues. Then please summarise your findings with the final version of the code."]}
+      "You have been provided with a list of code quality concerns and a list of available LLMs."
+      "Your role is to distribute the concerns effectively across multiple LLM reviewers to ensure thorough code review."
+      ""
+      "CONCERN DISTRIBUTION:"
+      "- Review the provided concerns list carefully"
+      "- Identify which concerns are most relevant to the code being reviewed"
+      "- Distribute 2-3 relevant concerns to each LLM when requesting a review"
+      "- You can assign different concerns to different LLMs based on their strengths"
+      "- When you request a review, include the specific concerns in the 'concerns' field along with the 'llm' field specifying provider and model"
+      ""
+      "ITERATION STRATEGY:"
+      "- Continue requesting reviews until all important concerns have been addressed"
+      "- After each review, incorporate useful suggestions and request further review if needed"
+      "- Stop iterating when: (1) all concerns are addressed AND (2) no new useful issues are being discovered"
+      "- Then summarize your findings with the final version of the code"]}
     {"id" "reviewer"
      "action" "llm"
      "prompts"
-     ["You are a code reviewer"
-      "You will be requested to review some code. Please give the following careful consideration - clarity, simplicity, beauty, efficiency, intuitiveness, laconicity, idiomaticity, correctness, security, and maintainability - along with measures of your own choice."
-      "You can change the code, add your comments to the review, along with general notes in your response."
-      "Please do not feel that you have to find fault. If you like the code, just respond thus so that the MC can terminate the review."]}
+     ["You are a code reviewer."
+      "You will receive code to review along with a list of specific concerns to focus on."
+      "The MC (coordinator) has selected these concerns as most relevant for this review."
+      ""
+      "YOUR TASK:"
+      "- Give careful attention to the specific concerns provided in the request"
+      "- Review the code for issues related to these concerns"
+      "- You can also note other significant issues you discover"
+      "- You may modify the code to demonstrate improvements"
+      "- Add your specific comments about issues found"
+      "- Include general notes about the review in your response"
+      ""
+      "IMPORTANT:"
+      "- If the code looks good and addresses all concerns, say so clearly"
+      "- Don't feel obligated to find problems if none exist"]}
 
     {"id" "end"
      "action" "end"}]
@@ -334,6 +366,25 @@
     ;; Test passes vacuously when no models configured
     (is true "No models configured for testing")))
 
+;; Example concerns list distilled from CLAIJ coding guidelines
+;; These can be used as a starting point for code review
+(def example-code-review-concerns
+  ["Simplicity: Always ask 'can this be simpler?' Avoid unnecessary complexity"
+   "Naming: Use short, clear, symmetric names. Prefer Anglo-Saxon over Latin/Greek (e.g., 'get' not 'retrieve')"
+   "No boilerplate: Every line should earn its place. No defensive programming unless clearly justified"
+   "Functional style: Use pure functions, immutable data, and composition"
+   "Small functions: Keep functions focused and under ~20 lines when possible for LLM-assisted development"
+   "Performance: Avoid reflection by using type hints (enable *warn-on-reflection*)"
+   "YAGNI: Don't build for imagined futures. Code only what's needed now"
+   "Idiomatic Clojure: Use threading macros (-> ->>), destructuring, and sequence abstractions"
+   "Data-driven design: Represent concepts as data (maps, vectors) not objects"
+   "Principle of least surprise: Code should do what it looks like it does. No hidden side effects"
+   "Minimize dependencies: Use one library when one will do. Prefer standard library solutions"
+   "Namespace imports: Use :refer [symbols] for explicit imports. Avoid namespace aliases except for log/json/async"
+   "Separation of concerns: Keep each function focused on one responsibility"
+   "Error handling: Fail fast and explicitly. Use ex-info for rich error context"
+   "Comments: Sparse but pragmatic. Comment the 'why' not the 'what'"])
+
 (deftest code-review-fsm-mock-test
   (testing "code-review FSM with mock LLM actions"
     (let [text
@@ -342,17 +393,26 @@
           llms
           [{"provider" "openai" "model" "gpt-4o"}]
 
+          ;; Sample concerns for this review
+          concerns
+          ["Simplicity: Can this be simpler?"
+           "Performance: Avoid reflection, consider algorithmic efficiency"
+           "Functional style: Use pure functions and immutable data"]
+
           ;; These are the data payloads that will be in the trail
           entry-data
           {"id" ["start" "mc"]
            "document" text
-           "llms" llms}
+           "llms" llms
+           "concerns" concerns}
 
           request1-data
           {"id" ["mc" "reviewer"]
            "code" {"language" {"name" "clojure"}
                    "text" "(defn fib [n]\n  (if (<= n 1)\n    n\n    (+ (fib (- n 1)) (fib (- n 2)))))"}
            "notes" "Here's a recursive fibonacci. Please review for improvements."
+           "concerns" ["Performance: Avoid reflection, consider algorithmic efficiency"
+                       "Functional style: Use pure functions and immutable data"]
            "llm" {"provider" "openai" "model" "gpt-4o"}}
 
           response1-data
@@ -368,6 +428,7 @@
            "code" {"language" {"name" "clojure"}
                    "text" "(def fib\n  (memoize\n    (fn [n]\n      (if (<= n 1)\n        n\n        (+ (fib (- n 1)) (fib (- n 2)))))))"}
            "notes" "Incorporated memoization. Please review again."
+           "concerns" ["Simplicity: Can this be simpler?"]
            "llm" {"provider" "openai" "model" "gpt-4o"}}
 
           response2-data
@@ -473,3 +534,23 @@
        (submit# entry-msg#)
        (println (deref p# (* 5 60 1000) false))
        (stop-fsm#))))
+
+;; ideas:
+;; benchmark fsm - mc throws problems at different llms and marks them according to concern
+;; rewrite all code
+;; brevity concern
+;; mcp tools and schemas
+
+;; concerns
+;; simplicity
+;; brevity - less is better
+;; generality - internal reuse
+;; symmetry
+;; intuitiveness - principle of least surprise
+;; idiomaticity ? - external reuse
+;; leverage - can we deliver more with less
+;; dynamicity
+;; metaness - self-descriptiveness
+
+
+
