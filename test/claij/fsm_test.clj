@@ -288,24 +288,77 @@
      "prompts" []
      "schema" {"$ref" "#/$defs/summary"}}]})
 
-(defn make-prompts [{fsm-schema "schema" fsm-prompts "prompts" :as _fsm} {ix-prompts "prompts" :as _ix} {state-prompts "prompts"} trail]
-  (concat
-   [{"role" "system"
-     "content" (join
-                "\n"
-                (concat
-                 ["All your requests and responses will be in JSON."
-                  "You are being given the following reference JSON schema. Later schemas may refer to $defs in this one:" (write-str fsm-schema) "."
-                  "Requests will arrive as [INPUT-SCHEMA, DOCUMENT, OUTPUT-SCHEMA] triples."
-                  "The INPUT-SCHEMA describes the structure of the DOCUMENT."
-                  "You must respond to the contents of the DOCUMENT."
-                  "Your response must be a single JSON document that is STRICTLY CONFORMANT (please pay particular attention to the \"id\" which must be present as a pair of strings) to the OUTPUT-SCHEMA:"]
-                 fsm-prompts
-                 ix-prompts
-                 state-prompts))}]
-   (map (fn [m] (update m "content" write-str)) (reverse trail)))) ;; trail is stored as clojure not a json doc
+;; LLM Configuration Registry
+;; Maps [provider model] to configuration including model-specific prompts
+(def llm-configs
+  "Configuration for different LLM providers and models.
+   Each entry maps [provider model] to a config map with:
+   - :prompts - vector of prompt maps with :role and :content
+   - Future: could include :temperature, :max-tokens, etc."
+  {["anthropic" "claude-sonnet-4.5"]
+   {:prompts [{:role "system"
+               :content "CRITICAL: Your response must be ONLY valid JSON - no explanatory text before or after."}
+              {:role "system"
+               :content "CRITICAL: Ensure your JSON is complete - do not truncate. Check that all braces and brackets are closed."}
+              {:role "system"
+               :content "CRITICAL: Be concise in your response to avoid hitting token limits."}]}
 
-(deftest structured-data-integration-test
+   ;; OpenAI models - generally work well with standard prompts
+   ["openai" "gpt-4o"] {}
+   ["openai" "gpt-5-codex"] {}
+
+   ;; xAI models
+   ["x-ai" "grok-code-fast-1"] {}
+   ["x-ai" "grok-4"] {}
+
+   ;; Google models
+   ["google" "gemini-2.5-flash"] {}})
+
+(defn make-prompts
+  "Build prompt messages from FSM configuration and conversation trail.
+   Optionally accepts provider/model for LLM-specific prompts."
+  ([fsm ix state trail]
+   (make-prompts fsm ix state trail nil nil))
+  ([{fsm-schema "schema" fsm-prompts "prompts" :as _fsm}
+    {ix-prompts "prompts" :as _ix}
+    {state-prompts "prompts"}
+    trail
+    provider
+    model]
+   (let [;; Look up LLM-specific configuration
+         llm-config (get llm-configs [provider model] {})
+         llm-prompts (get llm-config :prompts [])
+
+         ;; Separate system and user prompts from LLM config
+         llm-system-prompts (mapv :content (filter #(= (:role %) "system") llm-prompts))
+         llm-user-prompts (mapv :content (filter #(= (:role %) "user") llm-prompts))]
+
+     (concat
+      ;; Build system message with all system-level prompts
+      [{"role" "system"
+        "content" (join
+                   "\n"
+                   (concat
+                    ["All your requests and responses will be in JSON."
+                     "You are being given the following reference JSON schema. Later schemas may refer to $defs in this one:" (write-str fsm-schema) "."
+                     "Requests will arrive as [INPUT-SCHEMA, DOCUMENT, OUTPUT-SCHEMA] triples."
+                     "The INPUT-SCHEMA describes the structure of the DOCUMENT."
+                     "You must respond to the contents of the DOCUMENT."
+                     "Your response must be a single JSON document that is STRICTLY CONFORMANT (please pay particular attention to the \"id\" which must be present as a pair of strings) to the OUTPUT-SCHEMA:"]
+                    fsm-prompts
+                    ix-prompts
+                    state-prompts
+                    llm-system-prompts))}]
+
+      ;; Add any LLM-specific user prompts
+      (when (seq llm-user-prompts)
+        [{"role" "user"
+          "content" (join "\n" llm-user-prompts)}])
+
+      ;; Add conversation trail
+      (map (fn [m] (update m "content" write-str)) (reverse trail))))))
+
+(deftest weather-schema-test
   (let [schema
         {"$id" "https://claij.org/schemas/structured-data-integration-test"
          "type" "object",
@@ -497,7 +550,8 @@
          ;; Default to gpt-4o if no llm specified (for backward compatibility)
          provider (or provider "openai")
          model (or model "gpt-4o")
-         prompts (make-prompts fsm ix state trail)]
+         ;; Pass provider/model to make-prompts for LLM-specific customization
+         prompts (make-prompts fsm ix state trail provider model)]
      (log/info (str "   Using LLM: " provider "/" model))
      (llm-action provider model prompts handler))))
 
@@ -532,25 +586,13 @@
                        "document" (str "Please review this code: " ~code-str)
                        "llms" llms#}]
        (submit# entry-msg#)
-       (println (deref p# (* 5 60 1000) false))
+       (pprint (deref p# (* 5 60 1000) false))
        (stop-fsm#))))
 
 ;; ideas:
-;; benchmark fsm - mc throws problems at different llms and marks them according to concern
-;; rewrite all code
-;; brevity concern
-;; mcp tools and schemas
-
-;; concerns
-;; simplicity
-;; brevity - less is better
-;; generality - internal reuse
-;; symmetry
-;; intuitiveness - principle of least surprise
-;; idiomaticity ? - external reuse
-;; leverage - can we deliver more with less
-;; dynamicity
-;; metaness - self-descriptiveness
+;; - mcp tools and schemas
+;; - benchmark fsm - mc throws problems at different llms and marks them according to concern
+;; - rewrite all code once ll coordination is improved
 
 
 
