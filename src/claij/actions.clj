@@ -107,11 +107,16 @@
           [submit stop-fsm] (start-fsm child-context loaded-fsm)]
 
       ;; Construct entry message based on FSM requirements
-      ;; For code-review FSM, include llms list; for others, just pass text
+      ;; For code-review FSM, include llms list and default concerns
       (let [entry-msg (if (= fsm-id "code-review")
                         {"id" ["start" "mc"]
                          "document" original-text
-                         "llms" [{"provider" provider "model" model}]}
+                         "llms" [{"provider" provider "model" model}]
+                         "concerns" ["Simplicity: Can this be simpler?"
+                                     "Performance: Consider efficiency and avoid reflection"
+                                     "Functional style: Use pure functions and immutable data"
+                                     "Idiomatic Clojure: Follow language conventions"
+                                     "Clarity: Code should be easy to understand"]}
                         original-text)]
 
         (log/info (str "   [>>] Submitting to child FSM"))
