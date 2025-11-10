@@ -18,7 +18,11 @@
         (recur)))
     (go-loop []
       (when-some [line (try (.readLine out-reader) (catch java.io.IOException _ nil))]
-        (>! output-chan line)
+        ;; Only pass through lines that look like JSON (start with '{')
+        ;; This filters out logging and debug output from the MCP server
+        ;;(when (and line (re-matches #"\s*\{.*" line))
+          (>! output-chan line)
+          ;;)
         (recur)))
     (fn stop []
       (.close in-writer)
@@ -45,7 +49,6 @@
   (when-not (not-empty command)
     (throw (IllegalArgumentException. "Full command must be non-empty")))
   (start-process-bridge command args input-chan output-chan))
-
 
 (comment
   (require '[clojure.core.async :refer [chan >!! <!!]])
@@ -230,6 +233,4 @@
       :text "Message sent successfully to general"}]
     :structuredContent
     {:result "Message sent successfully to general"}
-    :isError false}}
-
-  )
+    :isError false}})

@@ -7,13 +7,13 @@
     (System/getenv "ANTHROPIC_API_KEY")
 
     :mcpServers
-    {"clojure-tools"
+    {"claij-clojure-tools"
      {:command "bash"
-      :args ["-c" "cd /home/jules/src/m3 && ./bin/mcp-claude.sh"]
+      :args ["-c" "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"]
       :transport "stdio"}
-     "clojure-language-server"
+     "claij-language-server"
      {:command "bash"
-      :args ["-c" "cd /home/jules/src/m3 && ./bin/mcp-language-server.sh"]
+      :args ["-c" "cd /home/jules/src/claij && ./bin/mcp-language-server.sh"]
       :transport "stdio"}
      "emacs"
      {:command "socat"
