@@ -7,23 +7,16 @@
   (testing "MCP agent read and echo sequence"
     (let [config {:command "bash" :args [] :transport "stdio"}
           input-chan (chan)
-          output-chan (chan)
-          outputs (atom [])
+          output-chan (timeout 200)
           stop (start-mcp-bridge config input-chan output-chan)]
-      (go-loop []
-        (when-some [msg (<! output-chan)]
-          (swap! outputs conj msg)
-          (recur)))
       (>!! input-chan "read x")
       (>!! input-chan "x")
       (>!! input-chan "echo $x")
-      (<!! (timeout 200))
-      (is (= "x" (last @outputs)) "Should receive 'x' after read x and echo")
+      (is (= "x" (<!! output-chan)) "Should receive 'x' after read x and echo")
       (>!! input-chan "read y")
       (>!! input-chan "y")
       (>!! input-chan "echo $y")
-      (<!! (timeout 200))
-      (is (= "y" (last @outputs)) "Should receive 'y' after read y and echo")
+      (is (= "y" (<!! output-chan)) "Should receive 'y' after read y and echo")
       (stop)))
 
   (testing "MCP agent invalid config"
@@ -37,17 +30,11 @@
   (testing "MCP agent empty input"
     (let [config {:command "bash" :args [] :transport "stdio"}
           input-chan (chan)
-          output-chan (chan)
-          outputs (atom [])
+          output-chan (timeout 200)
           stop (start-mcp-bridge config input-chan output-chan)]
-      (go-loop []
-        (when-some [msg (<! output-chan)]
-          (swap! outputs conj msg)
-          (recur)))
       (>!! input-chan "")
       (>!! input-chan "echo hello")
-      (<!! (timeout 200))
-      (is (= "hello" (last @outputs)) "Empty input should not crash, echo should work")
+      (is (= "hello" (<!! output-chan)) "Empty input should not crash, echo should work")
       (stop)))
 
   (testing "MCP agent stop immediately"
