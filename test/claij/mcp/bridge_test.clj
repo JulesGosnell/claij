@@ -1,0 +1,65 @@
+(ns claij.mcp.bridge-test
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [clojure.core.async :refer [chan go-loop <! >!! <!! timeout]]
+   [claij.mcp.bridge :refer [start-process-bridge json-string? start-mcp-bridge]]))
+
+(deftest bridge-test
+
+  (testing "start-process-bridge:"
+    (testing "Process read and echo sequence"
+      (let [input-chan (chan)
+            output-chan (timeout 200)
+            stop (start-process-bridge "bash" [] input-chan output-chan)]
+        (>!! input-chan "read x")
+        (>!! input-chan "x")
+        (>!! input-chan "echo $x")
+        (is (= "x" (<!! output-chan)) "Should receive 'x' after read x and echo")
+        (>!! input-chan "read y")
+        (>!! input-chan "y")
+        (>!! input-chan "echo $y")
+        (is (= "y" (<!! output-chan)) "Should receive 'y' after read y and echo")
+        (stop)))
+
+    (testing "MCP agent empty input"
+      (let [input-chan (chan)
+            output-chan (timeout 200)
+            stop (start-process-bridge "bash" [] input-chan output-chan)]
+        (>!! input-chan "")
+        (>!! input-chan "echo hello")
+        (is (= "hello" (<!! output-chan)) "Empty input should not crash, echo should work")
+        (stop)))
+
+    (testing "Process stop immediately"
+      (let [input-chan (chan)
+            output-chan (chan)
+            stop (start-process-bridge "bash" [] input-chan output-chan)]
+        (stop)
+        (is (nil? (<!! (timeout 200))) "Stop should clean up without errors")))
+
+    (testing "Process multiple output lines"
+      (let [input-chan (chan)
+            output-chan (chan)
+            outputs (atom [])
+            stop (start-process-bridge "bash" [] input-chan output-chan)]
+        (go-loop []
+          (when-some [msg (<! output-chan)]
+            (swap! outputs conj msg)
+            (recur)))
+        (>!! input-chan "ls")
+        (<!! (timeout 200))
+        (is (pos? (count @outputs)) "Should receive at least one line from ls")
+        (stop))))
+
+  (testing "json-string?"
+    (is (json-string? "{}"))
+    (is (not (json-string? "foo"))))
+
+  (testing "start-mcp-bridge"
+    (testing "MCP agent invalid config"
+      (is (thrown? IllegalArgumentException (start-mcp-bridge {:command "" :args [] :transport "stdio"} (chan) (chan)))
+          "Empty command should throw")
+      (is (thrown? IllegalArgumentException (start-mcp-bridge {:command "bash" :args "not-a-vector" :transport "stdio"} (chan) (chan)))
+          "Non-vector args should throw")
+      (is (thrown? IllegalArgumentException (start-mcp-bridge {:command "bash" :args [] :transport nil} (chan) (chan)))
+          "Nil transport should throw"))))
