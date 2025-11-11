@@ -663,3 +663,19 @@ If the answer concerns you, refactor.
 
 
 run the testsuite before deciding that whatever you have done works
+
+don't waste code stating the obvious
+validate at the edges not all over the middle
+
+
+rules for writing tests
+-----------------------
+
+one x_test.clj file per x.clj
+require uses :refers instead of :as
+one deftest x-test (same name as module)
+in same order as in x, one testing per function in x
+may have sub-testings for specific use-cases for given fn
+;; keep tests as simple as possible
+son't state the obvious
+

@@ -18,6 +18,10 @@
 
 (def mcp-schema
   {"$schema" "http://json-schema.org/draft-07/schema#",
+
+   ;; TODO: we shouldn't have to add this....
+   "$$id" (str schema-base-uri "/" "mcp.json")
+   
    "definitions"
    {"PrimitiveSchemaDefinition"
     {"anyOf"
