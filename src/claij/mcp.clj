@@ -1,18 +1,10 @@
 (ns claij.mcp
   (:require
    [clojure.tools.logging :as log]
-   [clojure.string :refer [join]]
    [clojure.data.json :refer [write-str read-str]]
-   [clojure.pprint :refer [pprint]]
-   [clojure.test :refer [deftest testing is]]
-   [clojure.core.async :refer [chan go go-loop <! >! close!]]
-   [m3.uri :refer [parse-uri]]
-   [m3.validate :refer [validate]]
-   [claij.util :refer [def-m2 index-by ->key]]
-   [claij.llm.open-router :refer [open-router-async unpack ppr-str]]
-   [claij.fsm :refer [def-fsm start-fsm state-schema xition-schema schema-base-uri uri->schema]]
-   [claij.mcp.bridge :refer [start-mcp-bridge]]
-   [claij.mcp.config :refer [config]]))
+   [clojure.core.async :refer [chan go go-loop <! >!]]
+   [claij.fsm :refer [def-fsm schema-base-uri]]
+   [claij.mcp.bridge :refer [start-mcp-bridge]]))
 
 ;; https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/refs/heads/main/schema/2025-06-18/schema.json
 
