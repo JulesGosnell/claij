@@ -1672,124 +1672,124 @@
 
 ;; these should be initialised LAZILY !
 
-(def mcp-services
-  (atom
-   (map-values
-    (fn [_ config]
-      (let [n 100
-            ic (chan n (map write-str))
-            oc (chan n (comp (map read-str) (filter (complement notification?))))
-            stop (start-mcp-bridge config ic oc)
-            _ (>!! ic mcp-initialise-request)
-            r (<!! oc)]
-        [r ic oc stop]))
-    (mcp-config "mcpServers"))))
+;; (def mcp-services
+;;   (atom
+;;    (map-values
+;;     (fn [_ config]
+;;       (let [n 100
+;;             ic (chan n (map write-str))
+;;             oc (chan n (comp (map read-str) (filter (complement notification?))))
+;;             stop (start-mcp-bridge config ic oc)
+;;             _ (>!! ic mcp-initialise-request)
+;;             r (<!! oc)]
+;;         [r ic oc stop]))
+;;     (mcp-config "mcpServers"))))
 
-;; how do we hook this up ?
+;; ;; how do we hook this up ?
 
-(defn dispatcher [ic oc]
-  ;; connect fsm -> mcp
-  ;; (go-loop []
-  ;;   (when-some [{id "id" r "request"} (<! ic)]
-  ;;     (let [[i] (@mcp-services id)]
-  ;;       (>! i (write-str r))))
-  ;;   (recur))
-  ;; connect mcp -> fsm
-  (go-loop []
-    (let [id->s @mcp-services
-          oc->id (reduce-kv (fn [acc id [_ic oc _stop]] (assoc acc oc id)) {} id->s) ;wasteful...
-          [event c] (alts! (map second (vals id->s)))]
-      (>! oc {"id" (oc->id c) "response" (read-str event)}))
-    (recur)))
-
-
-;; TODO: add descriptions
-
-(def-fsm mcp-fsm
-  {"schema" mcp-schema
-   "id" "mcp"
-
-   "prompts" ["Coordinate MCP interactions."]
-
-   "states"
-   [;; entry point
-    {"id" "start"}
-
-    ;; calls llm with text from start and list of extant mcp services asking fr an mcp request
-    {"id" "info"
-     "prompts" ["This is a mp of [id : initialisation-response] of the available mcp services:"
-                (write-str (map-values (fn [_k [ir]] ir) @mcp-services))
-                "If you would like to make an MCP request please build one conformnt to your output schema and return it"]
-     "action" "llm"}
-
-    ;; receives an mcp request, dispatches onto service, returns an mcp response
-    {"id" "mcp"
-     "action" "mcp"
-     "prompts" ["Process an MCP non-Initialize request."]}
-
-    ;; exit point
-    {"id" "end"}]
-
-   "xitions"
-   [{"id" ["start" "info"]
-     "schema" {"type" "string"}}
-
-    {"id" ["info" "mcp"]
-     "schema" {"properties"
-               {"id"
-                {"description" "The id of the mcp sevice that you want to talk to."
-                 "type" "string"}
-                "request"
-                {"description" "The MCP request that you want to send"
-                 "type"
-                 {"$ref" "#/definitions/JSONRPCRequest"}}}}}
-
-    {"id" ["mcp" "info"]
-     "schema" {"properties"
-               {"id"
-                {"description" "The id of the mcp sevice that you talked to."
-                 "type" "string"}
-                "response"
-                {"description" "The MCP response that you received"
-                 "type"
-                 {"$ref" "#/definitions/JSONRPCResponse"}}}}}
-
-    {"id" ["info" "end"]
-     "schema" true}
-
-    ;; TODO: looks like we might need to plumb start and end types of sub-fsms into super-fsms and not assume that they are just (type string}
-    ]})
-
-;; TODO: instead of piping everything backwards and forwards with
-;; go-loops, we should be able to plumb all this together with async
-;; constructs or even just plug channels directly in instead of doing
-;; a->b->c
-
-(defn mcp-action [context fsm ix state [[_is {id "id" r "request"} _os]] handler]
-  (let [[_ir ic _oc _stop] (mcp-services id)]
-    (>!! ic r)))
+;; (defn dispatcher [ic oc]
+;;   ;; connect fsm -> mcp
+;;   ;; (go-loop []
+;;   ;;   (when-some [{id "id" r "request"} (<! ic)]
+;;   ;;     (let [[i] (@mcp-services id)]
+;;   ;;       (>! i (write-str r))))
+;;   ;;   (recur))
+;;   ;; connect mcp -> fsm
+;;   (go-loop []
+;;     (let [id->s @mcp-services
+;;           oc->id (reduce-kv (fn [acc id [_ic oc _stop]] (assoc acc oc id)) {} id->s) ;wasteful...
+;;           [event c] (alts! (map second (vals id->s)))]
+;;       (>! oc {"id" (oc->id c) "response" (read-str event)}))
+;;     (recur)))
 
 
-;; TODO:
-;; connect dispatcher
-;; logging would be helpful
-;; complete integration of llm-action
-;; get this working !
+;; ;; TODO: add descriptions
 
-;; long-term
-;; mcp-services may be restarted - the fsm needs to refresh them each time we go into init state - prompts may need to understand dereffables
-;; shrink (shake-out) schema ? - not sure we can do that now all requests go through same state...
-;; keep an eye on billing to see if mcp too expensive
+;; (def-fsm mcp-fsm
+;;   {"schema" mcp-schema
+;;    "id" "mcp"
 
-;; tidy up
-;; test
-;; worry about parallel invocations
-;; shrink schema use with DSL
+;;    "prompts" ["Coordinate MCP interactions."]
 
-(def mcp-actions
-  {
-   ;; "llm" llm-action ;; TODO - needs parameters in state - check this
-   "mcp" mcp-action})
+;;    "states"
+;;    [;; entry point
+;;     {"id" "start"}
+
+;;     ;; calls llm with text from start and list of extant mcp services asking fr an mcp request
+;;     {"id" "info"
+;;      "prompts" ["This is a mp of [id : initialisation-response] of the available mcp services:"
+;;                 (write-str (map-values (fn [_k [ir]] ir) @mcp-services))
+;;                 "If you would like to make an MCP request please build one conformnt to your output schema and return it"]
+;;      "action" "llm"}
+
+;;     ;; receives an mcp request, dispatches onto service, returns an mcp response
+;;     {"id" "mcp"
+;;      "action" "mcp"
+;;      "prompts" ["Process an MCP non-Initialize request."]}
+
+;;     ;; exit point
+;;     {"id" "end"}]
+
+;;    "xitions"
+;;    [{"id" ["start" "info"]
+;;      "schema" {"type" "string"}}
+
+;;     {"id" ["info" "mcp"]
+;;      "schema" {"properties"
+;;                {"id"
+;;                 {"description" "The id of the mcp sevice that you want to talk to."
+;;                  "type" "string"}
+;;                 "request"
+;;                 {"description" "The MCP request that you want to send"
+;;                  "type"
+;;                  {"$ref" "#/definitions/JSONRPCRequest"}}}}}
+
+;;     {"id" ["mcp" "info"]
+;;      "schema" {"properties"
+;;                {"id"
+;;                 {"description" "The id of the mcp sevice that you talked to."
+;;                  "type" "string"}
+;;                 "response"
+;;                 {"description" "The MCP response that you received"
+;;                  "type"
+;;                  {"$ref" "#/definitions/JSONRPCResponse"}}}}}
+
+;;     {"id" ["info" "end"]
+;;      "schema" true}
+
+;;     ;; TODO: looks like we might need to plumb start and end types of sub-fsms into super-fsms and not assume that they are just (type string}
+;;     ]})
+
+;; ;; TODO: instead of piping everything backwards and forwards with
+;; ;; go-loops, we should be able to plumb all this together with async
+;; ;; constructs or even just plug channels directly in instead of doing
+;; ;; a->b->c
+
+;; (defn mcp-action [context fsm ix state [[_is {id "id" r "request"} _os]] handler]
+;;   (let [[_ir ic _oc _stop] (mcp-services id)]
+;;     (>!! ic r)))
+
+
+;; ;; TODO:
+;; ;; connect dispatcher
+;; ;; logging would be helpful
+;; ;; complete integration of llm-action
+;; ;; get this working !
+
+;; ;; long-term
+;; ;; mcp-services may be restarted - the fsm needs to refresh them each time we go into init state - prompts may need to understand dereffables
+;; ;; shrink (shake-out) schema ? - not sure we can do that now all requests go through same state...
+;; ;; keep an eye on billing to see if mcp too expensive
+
+;; ;; tidy up
+;; ;; test
+;; ;; worry about parallel invocations
+;; ;; shrink schema use with DSL
+
+;; (def mcp-actions
+;;   {
+;;    ;; "llm" llm-action ;; TODO - needs parameters in state - check this
+;;    "mcp" mcp-action})
 
 (comment
 
