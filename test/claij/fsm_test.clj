@@ -36,7 +36,7 @@
 
 ;;------------------------------------------------------------------------------
 
-(deftest fms-test
+(deftest fsm-test
   (let [fsm {"id" "test-fsm" "version" 0}
         state {"id" "test-state-A"}
         xition-1 {"id" ["test-state-A" "test-state-B"] "schema" {"type" "string"}}
