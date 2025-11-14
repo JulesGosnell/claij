@@ -1,4 +1,4 @@
-# CLAIJ
+# CLAIJ - "...an elastic collection of LLMs able to coordinate on the execution of a self-improving process..."
 
 [![CI](https://github.com/JulesGosnell/claij/actions/workflows/ci.yml/badge.svg)](https://github.com/JulesGosnell/claij/actions/workflows/ci.yml)
 
