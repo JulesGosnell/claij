@@ -6,7 +6,7 @@
    [claij.actions :as actions]
    [claij.triage :refer [start-triage]]
    [claij.store :as store]
-   [claij.fsm-test :refer [code-review-fsm]]
+   [claij.fsm.code-review-fsm :refer [code-review-fsm]]
    [next.jdbc :as jdbc])
   (:import
    [org.testcontainers.containers PostgreSQLContainer]))
