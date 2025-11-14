@@ -117,7 +117,9 @@
       "prompts"
       {"$ref" "#/$defs/prompts"}
 
-      "schema" {"$ref" "#/$defs/schema-ref"}}
+      "schema" true
+      ;;{"$ref" "#/$defs/schema-ref"}
+      }
      "additionalProperties" false
      "required" ["id" "schema"]}}
 
