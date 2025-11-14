@@ -358,7 +358,7 @@
       ;; Add conversation trail
       (map (fn [m] (update m "content" write-str)) (reverse trail))))))
 
-(deftest weather-schema-test
+(deftest ^:integration weather-schema-test
   (let [schema
         {"$id" "https://claij.org/schemas/structured-data-integration-test"
          "type" "object",
