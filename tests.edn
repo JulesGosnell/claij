@@ -1,10 +1,13 @@
 #kaocha/v1
  {:tests [{:id :unit
            :test-paths ["test"]
-           :source-paths ["src"]}
+           :source-paths ["src"]
+           :kaocha.filter/skip-meta [:integration]}
           {:id :integration
-           :test-paths ["test-integration"]
-           :source-paths ["src"]}]
-  :plugins [:kaocha.plugin/profiling]
+           :test-paths ["test" "test-integration"]
+           :source-paths ["src"]
+           :kaocha.filter/focus-meta [:integration]}]
+  :plugins [:kaocha.plugin/profiling
+            :kaocha.plugin/filter] ;; This enables metadata filtering!
   :color? true
   :randomize? false}
