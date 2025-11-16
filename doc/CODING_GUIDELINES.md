@@ -616,6 +616,51 @@ When evaluating solutions, prefer in this order:
   ...)
 ```
 
+## Making Design Decisions
+
+**When choosing between multiple solution approaches:**
+
+Always consider future directions and evolution of the code:
+- Think beyond the immediate requirement to likely next steps
+- Choose solutions that don't paint you into a corner
+- Prefer approaches that enable future flexibility
+
+**Example decision process:**
+
+When choosing between lazy initialization approaches:
+1. List the options (delay, atom with explicit lifecycle, lazy in action)
+2. Consider immediate needs (testing, clean startup)
+3. **Consider future needs** (restart capability, health checks, monitoring)
+4. Choose the option that best supports both present and future
+5. Document why in comments or commit message
+
+**Document your reasoning:**
+```clojure
+;; We chose Option 1 (explicit lifecycle) over delays because:
+;; 1. Immediate: Allows testing with minimal services
+;; 2. Future: Enables service restart and health monitoring
+;; 3. Trade-off: Slightly more code, but clearer semantics
+
+(defonce mcp-services (atom {}))
+
+(defn start-service! [id config]
+  ;; Can be called multiple times to restart
+  ...)
+```
+
+**Questions to ask:**
+- "Which approach better supports adding X feature later?"
+- "Which approach is easier to extend without breaking?"
+- "Which approach gives us more options down the road?"
+- "What would we have to throw away if requirements change?"
+
+**Balance:**
+- Don't over-engineer for hypothetical futures (YAGNI still applies)
+- DO consider one or two likely next steps
+- DO choose extensible patterns over limiting ones
+- DON'T build features you don't need yet
+- DO build in a way that makes those features easier when needed
+
 ## What to Avoid
 
 **Anti-patterns:**

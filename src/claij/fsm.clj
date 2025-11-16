@@ -381,12 +381,13 @@
             ox-and-cs (sid->ox-and-cs id)
             ic->ix (into {} (mapv (fn [[x c]] [c x]) ix-and-cs))
             cs (keys ic->ix)]
-        (go-loop []
-          (let [[v ic] (alts! cs)]
-            (when v
-              (let [ix (ic->ix ic)]
-                (xform context fsm ix s ox-and-cs v)
-                (recur)))))))
+        ;; (go-loop []
+        ;;   (let [[v ic] (alts! cs)]
+        ;;     (when v
+        ;;       (let [ix (ic->ix ic)]
+        ;;         (xform context fsm ix s ox-and-cs v)
+        ;;         (recur)))))
+        ))
 
     ;; Return interface
     [submit stop-fsm]))
