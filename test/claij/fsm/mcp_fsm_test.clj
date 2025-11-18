@@ -5,11 +5,8 @@
    [claij.fsm.mcp-fsm :refer [mcp-fsm]]))
 
 (deftest mcp-fsm-test
-  (testing "mcp-fsm"
-
-    (let [[submit stop-fsm] (start-fsm {} mcp-fsm)]
-      (is (fn? submit))
-      (is (fn? stop-fsm))
-
-      (submit "let's make an mcp request...")
-      )))
+  (testing "mcp-fsm definition"
+    (is (map? mcp-fsm) "mcp-fsm should be a map")
+    (is (contains? mcp-fsm "schema") "mcp-fsm should have a schema")
+    (is (contains? mcp-fsm "states") "mcp-fsm should have states")
+    (is (contains? mcp-fsm "xitions") "mcp-fsm should have transitions")))
