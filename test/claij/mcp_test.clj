@@ -413,26 +413,49 @@
       "The Claude instructions document for the current project hosting the REPL",
       "mimeType" "text/markdown"}]}})
 
+
+(def read-resources-request
+  {"jsonrpc" "2.0" "id" 12345 "method" "resources/read" "params" {"uri" "custom://project-info"}})
+
+(def read-resources-response
+  {"jsonrpc" "2.0",
+   "id" 12345,
+   "result"
+   {"contents"
+    [{"uri" "custom://project-info",
+      "mimeType" "text/markdown",
+      "text" "..."}]}}) ;; text broke cider...
+
 ;;------------------------------------------------------------------------------
 
 (defn list-changed? [m]
   (when-let [[_ capability] (re-matches #"notifications/([^/]+)/list_changed" m)]
     capability))
 
-(defn handle [context {m "method" {cs "capabilities" :as r} "result" :as e}]
+(defn merge-resources [c rs]
+  (let [id->index (reduce (fn [acc [n {id "uri"}]] (assoc acc id n)) {} (map vector (range) c))]
+    (reduce
+     (fn [acc {id "uri" t "text"}]
+       (assoc-in acc [(id->index id) "text"] t))
+     c
+     rs)))
+
+(defn handle [context {m "method" {contents "contents" cs "capabilities" :as r} "result" :as e}]
   (cond
-      ;; initialise cache
+    ;; initialise cache
     cs [(update context "state" (partial reduce-kv (fn [acc k {lc "listChanged" s "subscribe"}] (if (or lc s) (assoc acc k nil) acc))) cs) nil]
-      ;; invalidate cache item
+    ;; refresh resource contents
+    contents [(update-in context ["state" "resources"] merge-resources contents) nil]
+    ;; invalidate cache item
     m  [(assoc-in context ["state" (list-changed? m)] nil) nil]
-      ;; refresh cache item
+    ;; refresh cache item
     r  [(update context "state" merge r) nil]
-
+    
     :else
-      ;; pass through
+    ;; pass through
     [context e]
-
-      ;;TODO: subscriptions
+    
+    ;;TODO: subscriptions
     ))
 
 (defn handle-event [old-context old-event]
@@ -444,6 +467,34 @@
 ;;------------------------------------------------------------------------------
 
 (deftest mcp-test
+
+  (testing "merge resources"
+    (is (=
+         [{"uri" "custom://readme",
+           "name" "README.md",
+           "description"
+           "A README document for the current Clojure project hosting the REPL",
+           "mimeType" "text/markdown"}
+          {"uri" "custom://project-info",
+           "name" "Clojure Project Info",
+           "description"
+           "Information about the current Clojure project structure, attached REPL environment and dependencies",
+           "mimeType" "text/markdown"
+           "text" "..."}]
+         (merge-resources
+          [{"uri" "custom://readme",
+            "name" "README.md",
+            "description"
+            "A README document for the current Clojure project hosting the REPL",
+            "mimeType" "text/markdown"}
+           {"uri" "custom://project-info",
+            "name" "Clojure Project Info",
+            "description"
+            "Information about the current Clojure project structure, attached REPL environment and dependencies",
+            "mimeType" "text/markdown"}]
+          [{"uri" "custom://project-info",
+            "mimeType" "text/markdown",
+            "text" "..."}]))))
 
   (testing "initialize response"
     (is (=
@@ -473,6 +524,11 @@
     (is (=
          [{"state" (get list-resources-response "result")} nil]
          (handle {} list-resources-response))))
+
+  (testing "read resources response"
+    (is (=
+         [{"state" {"resources" [{"uri" "custom://project-info" "text" "..."}]}} nil]
+         (handle {"state" {"resources" [{"uri" "custom://project-info"}]}} read-resources-response))))
 
   ;; we need to go back and flesh out the resources
 
@@ -600,55 +656,6 @@
 ;;  "custom://project-summary"
 ;;  "custom://claude")
 
-(def resources-read-request
-  {"jsonrpc" "2.0" "id" 12345 "method" "resources/read" "params" {"uri" "custom://project-info"}})
-
-(def resources-read-response
-  {"jsonrpc" "2.0",
-   "id" 12345,
-   "result"
-   {"contents"
-    [{"uri" "custom://project-info",
-      "mimeType" "text/markdown",
-      "text" "..."}]}}) ;; text broke cider...
-
-;; how should we massage this into cache...
-
-(defn merge-resources [c rs]
-  (let [id->index (reduce (fn [acc [n {id "uri"}]] (assoc acc id n)) {} (map vector (range) c))]
-    (reduce
-     (fn [acc {id "uri" t "text"}]
-       (assoc-in acc [(id->index id) "text"] t))
-     c
-     rs)))
-
-(deftest merge-resources-test
-  (is (=
-       [{"uri" "custom://readme",
-         "name" "README.md",
-         "description"
-         "A README document for the current Clojure project hosting the REPL",
-         "mimeType" "text/markdown"}
-        {"uri" "custom://project-info",
-         "name" "Clojure Project Info",
-         "description"
-         "Information about the current Clojure project structure, attached REPL environment and dependencies",
-         "mimeType" "text/markdown"
-         "text" "..."}]
-       (merge-resources
-        [{"uri" "custom://readme",
-          "name" "README.md",
-          "description"
-          "A README document for the current Clojure project hosting the REPL",
-          "mimeType" "text/markdown"}
-         {"uri" "custom://project-info",
-          "name" "Clojure Project Info",
-          "description"
-          "Information about the current Clojure project structure, attached REPL environment and dependencies",
-          "mimeType" "text/markdown"}]
-        [{"uri" "custom://project-info",
-          "mimeType" "text/markdown",
-          "text" "..."}]))))
 
 (comment
   (def n 100)
@@ -658,7 +665,7 @@
   (def stop (start-mcp-bridge config ic oc))
   (>!! ic initialise-request)
   (>!! ic initialised-notification)
-  (>!! ic resources-read-request)
+  (>!! ic read-resources-request)
   
   (<!! oc) ;; many times
   )
