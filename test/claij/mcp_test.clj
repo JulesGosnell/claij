@@ -600,9 +600,26 @@
           {}
           [initialize-response list-tools-response list-prompts-response list-resources-response tools-list-changed-notification prompts-list-changed-notification resources-list-changed-notification]))))
 
-  ;; TODO:
-  ;; create an mcp schema with all cache stuff stripped out
-  ;; or could we wire up a mcp-cache fsm to handle all of this ?
+  ;; subscriptions:
+  
+  ;; I tried the following subscription:
+  
+  {"jsonrpc" "2.0"
+   "id" 10
+   "method" "resources/subscribe"
+   "params"
+   {"uri" "custom://readme"}}
+  
+  ;; and got the following error:
+  
+  {"jsonrpc" "2.0",
+   "id" 10,
+   "error"
+   {"code" -32601,
+    "message" "Method not found: resources/subscribe"}}
+  
+  ;; so it looks like clojure-mcp does not support subscriptions...
+  
   )
 
 ;;------------------------------------------------------------------------------
@@ -670,4 +687,8 @@
   (<!! oc) ;; many times
   )
 
-
+;;------------------------------------------------------------------------------
+;; TODO:
+;; create an mcp schema with all cache stuff stripped out
+;; integrate with mcp-fsm
+;; tidy up
