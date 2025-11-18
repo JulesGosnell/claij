@@ -9,7 +9,8 @@
    [clj-http.client :refer [get] :rename {get http-get}]
    [claij.fsm :refer [def-fsm schema-base-uri start-fsm]]
    ;;[claij.llm :refer [llm-action]]
-   [claij.mcp.bridge :refer [start-mcp-bridge]]))
+   [claij.mcp.bridge :refer [start-mcp-bridge]]
+   [claij.mcp :refer [initialise-request initialised-notification]]))
 
 (def-m2
   mcp-schema
@@ -48,23 +49,6 @@
 
 ;; a map of id: [input-channel output-channel stop]
 
-(def mcp-initialise-request
-  {:jsonrpc "2.0"
-   :id 1
-   :method "initialize"
-   :params
-   {:protocolVersion "2025-06-18"
-    :capabilities
-    {:elicitation {}}
-    :clientInfo
-    {:name "claij"
-     :version "1.0-SNAPSHOT"}}})
-
-(def mcp-initialized-notification
-  {:jsonrpc "2.0"
-   :method "notifications/initialized"
-   :params {}})
-
 ;; TODO: think about what we should do with notifications... maybe
 ;; store them until someone shows an interest in that service.... or
 ;; just throw them all away... Otherwise we would have to pile them
@@ -82,9 +66,9 @@
                          ;; we'll start by discarding notifications - later on these should be collapsed into the initial states...
                          (filter (complement notification?))))
         stop (start-mcp-bridge config ic oc)
-        _ (>!! ic mcp-initialise-request)
+        _ (>!! ic initialise-request)
         r (<!! oc)
-        _ (>!! ic mcp-initialized-notification)]
+        _ (>!! ic initialised-notification)]
     [r ic oc stop]))
 
 (def mcp-services
