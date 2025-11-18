@@ -1668,6 +1668,20 @@
    :method "notifications/initialized"
    :params {}})
 
+(def list-tools-request
+  {"jsonrpc" "2.0"
+   "id" 2
+   "method" "tools/list"})
+
+(def list-prompts-request
+  {"jsonrpc" "2.0"
+   "id" 3
+   "method" "prompts/list"})
+
+(def list-resources-request
+  {"jsonrpc" "2.0"
+   "id" 4
+   "method" "resources/list"})
 
 ;; TODO: think about what we should do with notifications... maybe
 ;; store them until someone shows an interest in that service.... or
