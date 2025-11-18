@@ -21,7 +21,6 @@
 
 ;; can we generate this fsm directly from the schema url ? much less code to maintain...
 
-
 ;; temporarily copied from .config/Claude/claude_desktop_config.json
 
 (def mcp-config
@@ -35,7 +34,7 @@
      "args" ["-c", "cd /home/jules/src/m3 && ./bin/mcp-clojure-tools.sh"],
      "transport" "stdio"},
     "m3-clojure-language-server"
-    {"command"  "bash",
+    {"command" "bash",
      "args" ["-c", "cd /home/jules/src/m3 && ./bin/mcp-language-server.sh"],
      "transport" "stdio"},
     "claij-clojure-tools"
@@ -43,10 +42,9 @@
      "args" ["-c", "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"],
      "transport" "stdio"},
     "claij-clojure-language-server"
-    {"command"  "bash",
+    {"command" "bash",
      "args" ["-c", "cd /home/jules/src/claij && ./bin/mcp-language-server.sh"],
-     "transport" "stdio"}
-    }})
+     "transport" "stdio"}}})
 
 ;; a map of id: [input-channel output-channel stop]
 
@@ -61,6 +59,11 @@
     :clientInfo
     {:name "claij"
      :version "1.0-SNAPSHOT"}}})
+
+(def mcp-initialized-notification
+  {:jsonrpc "2.0"
+   :method "notifications/initialized"
+   :params {}})
 
 ;; TODO: think about what we should do with notifications... maybe
 ;; store them until someone shows an interest in that service.... or
@@ -80,7 +83,8 @@
                          (filter (complement notification?))))
         stop (start-mcp-bridge config ic oc)
         _ (>!! ic mcp-initialise-request)
-        r (<!! oc)]
+        r (<!! oc)
+        _ (>!! ic mcp-initialized-notification)]
     [r ic oc stop]))
 
 (def mcp-services
@@ -93,7 +97,7 @@
    "id" "mcp"
 
    "description" "Coordinate M[odel] C[ontext] P[rotocol] interactions."
-   
+
    "prompts" ["You are involved in an interaction with an M[odel] C[ontext] P[rotocol] service"]
 
    "states"
@@ -180,7 +184,6 @@
 ;;   (let [[_ir ic _oc _stop] (mcp-services id)]
 ;;     (>!! ic r)))
 
-
 ;; ;; TODO:
 ;; ;; connect dispatcher
 ;; ;; logging would be helpful
@@ -205,13 +208,9 @@
 (comment
 
   (start-fsm
-   {:id->action mcp-actions}
+   {:id->action mcp-actions})
 
-
-  )
-
-  ;; double check that the fsm schema is only included once in our state - on entry to the fsm
+;; double check that the fsm schema is only included once in our state - on entry to the fsm
 
   ;; hmmm... how will LLM know which schema we are $ref-ing if we keep switcing schemas - we may have to qualify refs... (i.e. use external ones)
-  
-)
+  )
