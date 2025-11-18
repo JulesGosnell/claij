@@ -633,38 +633,43 @@
 
 ;; I'd like to get this working but it keeps throwing exceptions - I don't think 'stop' is cleaning up properly
 
-;; (deftest ^:integration mcp-walk-through-test
-;;   (let [n 100
-;;         config {"command" "bash", "args" ["-c", "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"], "transport" "stdio"}
-;;         ic (chan n (map write-str))
-;;         oc (chan n (comp (map read-str) (remove list-changed?))) ;; TODO - verify that the reducer is having desired effect
-;;         stop (start-mcp-bridge config ic oc)]
+(deftest ^:integration mcp-walk-through-test
+  (let [n 100
+        config {"command" "bash", "args" ["-c", "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"], "transport" "stdio"}
+        ic (chan n (map write-str))
+        oc (chan n (comp (remove list-changed?) (map read-str))) ;; TODO - verify that the reducer is having desired effect
+        stop (start-mcp-bridge config ic oc)]
 
-;;     (try
+    (try
 
-;;       (>!! ic initialise-request)
-;;       (>!! ic initialised-notification)
-;;       (>!! ic list-tools-request)
-;;       (>!! ic list-prompts-request)
-;;       (>!! ic list-resources-request)
+      (>!! ic initialise-request)
+      (>!! ic initialised-notification)
+      (>!! ic list-tools-request)
+      (>!! ic list-prompts-request)
+      (>!! ic list-resources-request)
 
-;;       (defn make-read-resource-request [id uri]
-;;         {"jsonrpc" "2.0" "id" id "method" "resources/read" "params" {"uri" uri}})
+      (defn make-read-resource-request [id uri]
+        {"jsonrpc" "2.0" "id" id "method" "resources/read" "params" {"uri" uri}})
 
-;;       (def resource-read-requests
-;;         (map
-;;          (fn [n {uri "uri" :as resource}] (make-read-resource-request (+ n 5) uri))
-;;          (range)
-;;          (get-in list-resources-response ["result" "resources"])))
+      (def resource-read-requests
+        (map
+         (fn [n {uri "uri" :as resource}] (make-read-resource-request (+ n 5) uri))
+         (range)
+         (get-in list-resources-response ["result" "resources"])))
 
-;;       (doseq [r resource-read-requests] (>!! ic r))
+      (doseq [r resource-read-requests] (>!! ic r))
 
-;;       (catch Throwable t (log/error "should not have happened:" t))
+      (catch Throwable t (log/error "should not have happened:" t))
 
-;;       (finally
+      (finally
+        (log/info "stopping bridge...")
 
-;;         (stop)
-;;         (is true)))))
+        ;; TODO: we should NOT need this !
+        
+        (Thread/sleep 1000)
+        (stop)
+        (log/info "bridge stopped")
+        (is true)))))
 
 ;; list of available resources:
 ;; ("custom://readme"
