@@ -10,4 +10,6 @@
     (let [[submit stop-fsm] (start-fsm {} mcp-fsm)]
       (is (fn? submit))
       (is (fn? stop-fsm))
+
+      (submit "let's make an mcp request...")
       )))
