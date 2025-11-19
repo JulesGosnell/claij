@@ -368,11 +368,11 @@
                    (safe-channel-operation #(>!! entry-channel %) message)
                    (log/info (str "   Submitted document to FSM: " start-state))))
         stop-fsm (fn []
-                   (log/info (str "\n>> Stopping FSM: " (or (get fsm "id") "unnamed")))
+                   (log/info (str "stopping fsm: " (or (get fsm "id") "unnamed")))
                    (doseq [c all-channels]
                      (safe-channel-operation close! c)))]
 
-    (log/info (str "\n>> Starting FSM: " (or (get fsm "id") "unnamed")
+    (log/info (str "starting fsm: " (or (get fsm "id") "unnamed")
                    " (" (count ss) " states, " (count xs) " transitions)"))
 
     ;; Start all the state loops
@@ -381,12 +381,13 @@
             ox-and-cs (sid->ox-and-cs id)
             ic->ix (into {} (mapv (fn [[x c]] [c x]) ix-and-cs))
             cs (keys ic->ix)]
-        (go-loop []
-          (let [[v ic] (alts! cs)]
-            (when v
-              (let [ix (ic->ix ic)]
-                (xform context fsm ix s ox-and-cs v)
-                (recur)))))))
+        (when (seq cs)
+          (go-loop []
+            (let [[v ic] (alts! cs)]
+              (when v
+                (let [ix (ic->ix ic)]
+                  (xform context fsm ix s ox-and-cs v)
+                  (recur))))))))
 
     ;; Return interface
     [submit stop-fsm]))
