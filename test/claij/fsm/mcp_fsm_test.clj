@@ -29,8 +29,11 @@
 ;; MCP Actions
 ;;------------------------------------------------------------------------------
 
-(defn wrap [id message]
-  {"id" id "message" message})
+(defn wrap
+  ([id document message]
+   {"id" id "document" document "message" message})
+  ([id message]
+   {"id" id "message" message}))
 
 (defn unwrap [{m "message"}]
   m)
@@ -44,6 +47,7 @@
 
 (def mcp-state (atom nil))
 
+(def mcp-request-id (atom -1))
 
 ;; put mcp service in context
 ;; pass through original request
@@ -61,23 +65,47 @@
            :output oc
            :stop stop)
     (handler
-     (let [{m "method" :as message} (take! oc 5000 initialise-request)]
+     (let [{m "method" :as message} (take! oc 5000 (assoc initialise-request "id" (swap! mcp-request-id inc)))]
        (cond
          (= m "initialize")
-         (wrap ["starting" "servicing"] message)
+         (wrap ["starting" "shedding"] d message)
 
          ;; (list-changed? m)
          ;; (wrap ["starting" "starting"] message)
          )))))
 
-(defn service-action [context fsm ix state [{[is {m "message"} os]  "content"} :as trail] handler]
+;; these messages should go out on the fsm in a look but reflexive xitions are not working...yet...
+(defn hack [oc]
+  (let [{method "method" :as message} (<!! oc)]
+    (if (and method (list-changed? method))
+      (do
+        (log/warn "shedding:" (pr-str message))
+        (hack oc))
+      message)))
+
+(defn shed-action [context fsm ix state [{[is {{im "method" :as message} "message" document "document" :as event} os]  "content"} :as trail] handler]
+  (log/info "shed-action:" (pr-str message))
+  (let [{ic :input oc :output} @mcp-state]
+    (>!! ic message)
+    (handler (wrap ["shedding" "initing"] document (hack oc)))))
+
+(defn init-action [context fsm ix state [{[is {{im "method" :as message} "message" document "document" :as event} os]  "content"} :as trail] handler]
+  ;; TODO: put the initialise-response we receive into the cache
+  (log/info "init-action:" (pr-str message))
+  (handler (wrap ["initing" "servicing"] document initialised-notification)))
+
+(defn service-action [context fsm ix state [{[is {m "message" document "document"} os]  "content"} :as trail] handler]
   (log/info "service-action:" (pr-str m))
   (let [{ic :input oc :output} @mcp-state]
     (>!! ic m)
     ;; diagram says we should consider a timeout here...
-    (let [{{cs "capabilities"} "result" method "method" :as oe} (<!! oc)
-          oid (cond cs "initialising" :else "caching")]
-      (handler (wrap ["servicing" oid] oe)))))
+    (let [{method "method" :as oe} (take! oc 2000 {})]
+      (handler
+       (cond
+         method
+         (wrap ["servicing" "caching"] document oe)
+         :else
+         {"id" ["servicing" "llm"] "document" document})))))
 
 (defn cache-action [context fsm ix state [{[is {m "message"} os]  "content"} :as trail] handler]
   (log/info "cache-action:" (pr-str m))
@@ -114,10 +142,9 @@
   ;;     )
   )
 
-(defn initialise-action [context fsm ix state [{[is {m "message"} os]  "content"} :as trail] handler]
-  (log/info "initialise-action:" (pr-str m))
-  (handler (wrap ["initialising" "servicing"] initialised-notification)))
-
+(defn llm-action  [context fsm ix state [{[is document os]  "content"} :as trail] handler]
+  (log/info "llm-action:" (pr-str document))
+  (handler (wrap ["llm" "end"] nil)))
 
 
 (defn end-action [context & args]
@@ -125,9 +152,11 @@
 
 (def mcp-actions
   {"start" start-action
+   "shed" shed-action
+   "init" init-action
    "service" service-action
    "cache" cache-action
-   "initialise" initialise-action
+   "llm" llm-action
    "end"   end-action})  
 
 ;;------------------------------------------------------------------------------
@@ -149,9 +178,11 @@
    "states"
    [;;{"id" "start"}
     {"id" "starting" "action" "start"}
+    {"id" "shedding" "action" "shed"}
+    {"id" "initing" "action" "init"}
     {"id" "servicing" "action" "service"}
     {"id" "caching" "action" "cache"}
-    {"id" "initialising" "action" "initialise"}
+    {"id" "llm" "action" "llm"}
     {"id" "end" "action" "end"}]
 
    "xitions"
@@ -165,14 +196,46 @@
       "additionalProperties" false
       "required" ["id" "document"]}}
 
-    {"id" ["starting" "servicing"]
+    {"id" ["starting" "shedding"]
+     "description" "Shed unwanted list-changed messages."
      "schema"
      {"type" "object"
       "properties"
-      {"id" {"const" ["starting" "servicing"]}
+      {"id" {"const" ["starting" "shedding"]}
+       "document" {"type" "string"}
        "message" true}
       "additionalProperties" false
-      "required" ["id" "message"]}}
+      "required" ["id" "document" "message"]}}
+
+    ;; {"id" ["shedding" "shedding"]
+    ;;  "description" "Shed unwanted list-changed messages."
+    ;;  "schema"
+    ;;  {"type" "object"
+    ;;   "properties"
+    ;;   {"id" {"const" ["shedding" "shedding"]}
+    ;;    "message" true}
+    ;;   "additionalProperties" false
+    ;;   "required" ["id" "message"]}}
+
+    {"id" ["shedding" "initing"]
+     "schema"
+     {"type" "object"
+      "properties"
+      {"id" {"const" ["shedding" "initing"]}
+       "document" {"type" "string"}
+       "message" true}
+      "additionalProperties" false
+      "required" ["id" "document" "message"]}}
+
+    {"id" ["initing" "servicing"]
+     "schema"
+     {"type" "object"
+      "properties"
+      {"id" {"const" ["initing" "servicing"]}
+       "document" {"type" "string"}
+       "message" true}
+      "additionalProperties" false
+      "required" ["id" "document" "message"]}}
 
     {"id" ["servicing" "caching"]
      "schema"
@@ -192,32 +255,23 @@
       "additionalProperties" false
       "required" ["id" "message"]}}
 
-    {"id" ["servicing" "initialising"]
+    {"id" ["servicing" "llm"]
      "schema"
      {"type" "object"
       "properties"
-      {"id" {"const" ["servicing" "initialising"]}
-       "message" true}
+      {"id" {"const" ["servicing" "llm"]}
+       "document" {"type" "string"}}
       "additionalProperties" false
-      "required" ["id" "message"]}}
-
-    {"id" ["initialising" "servicing"]
-     "schema"
-     {"type" "object"
-      "properties"
-      {"id" {"const" ["initialising" "servicing"]}
-       "message" true}
-      "additionalProperties" false
-      "required" ["id" "message"]}}
+      "required" ["id" "document"]}}
     
-    {"id" ["starting" "end"]
+    {"id" ["llm" "end"]
      "schema" true}]})
 
 ;;==============================================================================
 ;; TESTS
 ;;==============================================================================
 
-(deftest mcp-fsm-test
+(deftest ^:integration mcp-fsm-test
 
   (testing "walk the fsm"
     (let [context {:id->action mcp-actions}
