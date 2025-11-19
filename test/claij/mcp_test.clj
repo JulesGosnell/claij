@@ -3,11 +3,24 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.tools.logging :as log]
    [clojure.data.json :refer [write-str read-str]]
-   [clojure.core.async :refer [chan <!! >!! go-loop <!]]
+   [clojure.core.async :refer [chan <!! >!!] :as async]
    [claij.mcp.bridge :refer [start-mcp-bridge]]
-   [claij.mcp :refer [initialise-request initialised-notification list-tools-request list-prompts-request list-resources-request]]))
+   [claij.fsm :refer [def-fsm]]
+   [claij.mcp :refer [initialise-request initialised-notification list-tools-request list-prompts-request list-resources-request mcp-schema]]))
 
 ;; send:
+
+;; start
+
+;; x17
+(def tools-list-changed-notification
+  {"jsonrpc" "2.0", "method" "notifications/tools/list_changed"})
+;; x 2
+(def resources-list-changed-notification
+  {"jsonrpc" "2.0", "method" "notifications/resources/list_changed"})
+;; x 8
+(def prompts-list-changed-notification
+  {"jsonrpc" "2.0", "method" "notifications/prompts/list_changed"})
 
 ;; (>!! ic initialise-request)
 ;; (>!! ic initialised-notification)
@@ -15,18 +28,11 @@
 ;; (>!! ic list-prompts-request)
 ;; (>!! ic list-resources-request)
 
-;; x16
-(def tools-list-changed-notification
-  {"jsonrpc" "2.0", "method" "notifications/tools/list_changed"})
-;; x 5
-(def resources-list-changed-notification
-  {"jsonrpc" "2.0", "method" "notifications/resources/list_changed"})
-;; x 8
-(def prompts-list-changed-notification
-  {"jsonrpc" "2.0", "method" "notifications/prompts/list_changed"})
+
+
 
 ;; initialize reponse - x1
-(def initialize-response
+(def initialise-response
   {"jsonrpc" "2.0",
    "id" 1,
    "result"
@@ -499,7 +505,7 @@
   (testing "initialize response"
     (is (=
          [{"state" {"tools" nil "prompts" nil "resources" nil}} nil]
-         (handle nil initialize-response))))
+         (handle nil initialise-response))))
 
   (testing "tools list changed notification"
     (is (= [{"state" {"tools" nil "prompts" [] "resources" []}} nil] (handle {"state" {"tools" [] "prompts" [] "resources" []}} tools-list-changed-notification))))
@@ -544,7 +550,7 @@
          (reduce
           handle-event
           {}
-          [initialize-response])))
+          [initialise-response])))
 
     (is (=
          {"state" {"tools" (get-in list-tools-response ["result" "tools"])
@@ -553,7 +559,7 @@
          (reduce
           handle-event
           {}
-          [initialize-response list-tools-response])))
+          [initialise-response list-tools-response])))
 
     (is (=
          {"state" {"tools"   (get-in list-tools-response   ["result" "tools"])
@@ -562,7 +568,7 @@
          (reduce
           handle-event
           {}
-          [initialize-response list-tools-response list-prompts-response])))
+          [initialise-response list-tools-response list-prompts-response])))
 
     (is (=
          {"state" {"tools"     (get-in list-tools-response     ["result" "tools"])
@@ -571,7 +577,7 @@
          (reduce
           handle-event
           {}
-          [initialize-response list-tools-response list-prompts-response list-resources-response])))
+          [initialise-response list-tools-response list-prompts-response list-resources-response])))
 
     (is (=
          {"state" {"tools" nil
@@ -580,7 +586,7 @@
          (reduce
           handle-event
           {}
-          [initialize-response list-tools-response list-prompts-response list-resources-response tools-list-changed-notification])))
+          [initialise-response list-tools-response list-prompts-response list-resources-response tools-list-changed-notification])))
 
     (is (=
          {"state" {"tools" nil
@@ -589,7 +595,7 @@
          (reduce
           handle-event
           {}
-          [initialize-response list-tools-response list-prompts-response list-resources-response tools-list-changed-notification prompts-list-changed-notification])))
+          [initialise-response list-tools-response list-prompts-response list-resources-response tools-list-changed-notification prompts-list-changed-notification])))
 
     (is (=
          {"state" {"tools" nil
@@ -598,7 +604,7 @@
          (reduce
           handle-event
           {}
-          [initialize-response list-tools-response list-prompts-response list-resources-response tools-list-changed-notification prompts-list-changed-notification resources-list-changed-notification]))))
+          [initialise-response list-tools-response list-prompts-response list-resources-response tools-list-changed-notification prompts-list-changed-notification resources-list-changed-notification]))))
 
   ;; subscriptions:
   
@@ -685,12 +691,61 @@
   (def ic (chan n (map write-str)))
   (def oc (chan n (map read-str)))
   (def stop (start-mcp-bridge config ic oc))
-  (>!! ic initialise-request)
+  (map (fn [n] (<!! oc)) (range 27))
+  (async/alt!! oc ([v] v) (async/timeout 5000) ([_] :timeout))
+  (>!! ic initialise-request) ;; 1
+  (<!! oc) ;; -> initialise-response - 1
   (>!! ic initialised-notification)
-  (>!! ic read-resources-request)
+  (async/alt!! oc ([v] v) (async/timeout 5000) ([_] :timeout))
+  (>!! ic list-tools-request)
+  (<!! oc) ;; -> list-tools-response - 1
+  (>!! ic list-prompts-request)
+  (<!! oc) ;; -> list-prompts-response - 1
+  (>!! ic list-resources-request)
+  (<!! oc) ;; -> list-resources-response - 1
+  (>!! ic {"jsonrpc" "2.0" "id" 10 "method" "resources/read" "params" {"uri" "custom://readme"}})
+  (assoc-in (<!! oc) ["result" "contents" 0 "text"] "...")
+  (>!! ic {"jsonrpc" "2.0" "id" 10 "method" "resources/read" "params" {"uri" "custom://project-info"}})
+  (assoc-in (<!! oc) ["result" "contents" 0 "text"] "...")
   
   (<!! oc) ;; many times
   )
+
+;;------------------------------------------------------------------------------
+
+;; (def-fsm new-mcp-fsm
+;;   {"schema" mcp-schema
+;;    "id" "new-mcp"
+
+;;    "prompts" []
+
+;;    "states"
+;;    [{"id" "start"}
+;;     {"id" "started"}
+;;     {"id" "initialise"}
+;;     {"id" "initialised"}
+;;     {"id" "service"}
+;;     {"id" "cache"}
+;;     {"id" "llm"}
+;;     {"id" "end"}]
+
+;;    "xitions"
+;;    [{"id" ["start"       "started"]} ;;
+;;     {"id" ["started"     "end"]} ;; [label="list\nchanged"]
+;;     {"id" ["started"     "initialise"]} ;; [label="timeout"]
+;;     {"id" ["initialise"  "service"]} ;; [label="initialise\n request"] // has id
+;;     {"id" ["service"     "initialised"]} ;; [label="initialise\n response"] // has id
+;;     {"id" ["initialised" "service"]} ;; [label="initialise\n notification"] // no id/response - we need to send this and then expect the mcp service to be ready - stupid - lucky it is synchronous
+;;     {"id" ["service"     "cache"]} ;; [label="timeout"] // there is no response to an initialise notification
+;;     {"id" ["cache"       "service"]} ;; [label="list\nrequest"]
+;;     {"id" ["service"     "cache"]} ;; [label="list\nresponse"]
+;;     {"id" ["cache"       "service"]} ;; [label="read-request"]
+;;     {"id" ["service"     "cache"]} ;; [label="read-response"]
+;;     {"id" ["cache"       "llm"]} ;; [label="warmed"]
+;;     {"id" ["llm"         "service"]} ;; [label="tools\nrequest"]
+;;     {"id" ["service"     "llm"]} ;; [label="tools\nreponse"]
+;;     {"id" ["llm"         "end"]} ;; [label="finished"]
+;;     ]})
 
 ;;------------------------------------------------------------------------------
 ;; TODO:

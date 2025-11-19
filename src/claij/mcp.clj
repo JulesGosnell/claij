@@ -1738,7 +1738,7 @@
 
 ;;     ;; calls llm with text from start and list of extant mcp services asking fr an mcp request
 ;;     {"id" "info"
-;;      "prompts" ["This is a mp of [id : initialisation-response] of the available mcp services:"
+;;      "prompts" ["This is a map of [id : initialisation-response] of the available mcp services:"
 ;;                 (write-str (map-values (fn [_k [ir]] ir) @mcp-services))
 ;;                 "If you would like to make an MCP request please build one conformnt to your output schema and return it"]
 ;;      "action" "llm"}
