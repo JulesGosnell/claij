@@ -232,59 +232,52 @@
           ;; Closes over initial-trail and extends it on retry
           handler
           (fn handler
-            ([raw-output] (handler raw-output initial-trail))
-            ([raw-output current-trail]
-             (let [;; Extract the actual data map from the LLM response
-                   output (if (sequential? raw-output)
-                            (first (filter #(and (map? %) (contains? % "id")) raw-output))
-                            raw-output)
-                   {ox-id "id"} output]
-               (try
-                 (let [[{ox-schema "schema" :as ox} c] (id->x-and-c ox-id)
-                       _ (when (nil? ox-schema)
-                           (log/error (str "   [X] Schema Lookup Failed: transition " ox-id)))
-                       ;; Create validation schema
-                       validation-schema (assoc (select-keys fsm-schema ["$defs" "$schema" "$$id"])
-                                                "allOf" [ox-schema])
-                       {v? :valid? es :errors} (validate {:draft schema-draft
-                                                          :uri->schema (partial uri->schema {(uri-base (parse-uri fsm-schema-id)) fsm-schema})}
-                                                         validation-schema
-                                                         {}
-                                                         output)]
-                   (if v?
+            ([event] (handler event initial-trail))
+            ([{ox-id "id" :as event} current-trail]
+             (try
+               (let [[{ox-schema "schema" :as ox} c] (id->x-and-c ox-id)
+                     _ (when (nil? ox) (log/error "no output xition:" (prn-str ox-id)))
+                     {v? :valid? es :errors}
+                     (validate
+                      {:draft schema-draft
+                       :uri->schema (partial uri->schema {(uri-base (parse-uri fsm-schema-id)) fsm-schema})}
+                      ox-schema
+                      {}
+                      event)]
+                 (if v?
                      ;; SUCCESS - Put on channel and extend trail
-                     (do
-                       (log/info (str "   [OK] Validation: " ox-id))
-                       (>!! c (cons {"role" "assistant" "content" [ox-schema output nil]}
-                                    (cons {"role" r "content" [is input ox-schema]} trail)))
-                       nil)
+                   (do
+                     (log/info (str "   [OK] Validation: " ox-id))
+                     (>!! c (cons {"role" "assistant" "content" [ox-schema event nil]}
+                                  (cons {"role" r "content" [is input ox-schema]} trail)))
+                     nil)
                      ;; FAILURE - Retry with error feedback
-                     (retrier
-                      @retry-count
+                   (retrier
+                    @retry-count
                        ;; Retry operation
-                      (fn []
-                        (log/error (str "   [X] Validation Failed: " ox-id " (attempt " (inc @retry-count) "/" max-retries ")"))
-                        (swap! retry-count inc)
-                        (let [error-msg (str "Your response failed schema validation.\n\n"
-                                             "Validation errors: " (pr-str es) "\n\n"
-                                             "Please review the schema and provide a corrected response.")
-                              error-schema {"type" "string"}
-                               ;; Build error trail entry: [input-schema, error-message, output-schema]
-                              error-trail (cons {"role" "user"
-                                                 "content" [error-schema error-msg ox-schema]}
-                                                current-trail)]
-                          (log/info "      [>>] Sending validation error feedback to LLM")
+                    (fn []
+                      (log/error (str "   [X] Validation Failed: " ox-id " (attempt " (inc @retry-count) "/" max-retries ")"))
+                      (swap! retry-count inc)
+                      (let [error-msg (str "Your response failed schema validation.\n\n"
+                                           "Validation errors: " (pr-str es) "\n\n"
+                                           "Please review the schema and provide a corrected response.")
+                            error-schema {"type" "string"}
+                               ;; Build error trail entry: [input-schema, error-message, event-schema]
+                            error-trail (cons {"role" "user"
+                                               "content" [error-schema error-msg ox-schema]}
+                                              current-trail)]
+                        (log/info "      [>>] Sending validation error feedback to LLM")
                            ;; Call action again with error in trail
-                          (if-let [action (get-in context [:id->action a])]
-                            (action context fsm ix state error-trail handler)
-                            (handler (second (first error-trail)) error-trail))))
+                        (if-let [action (get-in context [:id->action a])]
+                          (action context fsm ix state error-trail handler)
+                          (handler (second (first error-trail)) error-trail))))
                        ;; Max retries exceeded
-                      (fn []
-                        (log/error (str "   [X] Max Retries Exceeded: Validation failed after " max-retries " attempts"))
-                        (log/error (str "   Final output: " (pr-str output)))
-                        (log/debug (str "   Validation errors: " (pr-str es)))))))
-                 (catch Throwable t
-                   (log/error t "Error in handler processing"))))))]
+                    (fn []
+                      (log/error (str "   [X] Max Retries Exceeded: Validation failed after " max-retries " attempts"))
+                      (log/error (str "   Final output: " (pr-str event)))
+                      (log/debug (str "   Validation errors: " (pr-str es)))))))
+               (catch Throwable t
+                 (log/error t "Error in handler processing")))))]
 
       ;; Call action with handler
       (if-let [action (get-in context [:id->action a])]

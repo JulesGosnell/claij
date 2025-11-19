@@ -1654,7 +1654,7 @@
 (def initialise-request
   {:jsonrpc "2.0"
    :id 1
-   :method "initialize"
+   "method" "initialize"
    :params
    {:protocolVersion "2025-06-18"
     :capabilities
@@ -1869,3 +1869,34 @@
 
   )
 
+;;------------------------------------------------------------------------------
+
+(defn merge-resources [c rs]
+  (let [id->index (reduce (fn [acc [n {id "uri"}]] (assoc acc id n)) {} (map vector (range) c))]
+    (reduce
+     (fn [acc {id "uri" t "text"}]
+       (assoc-in acc [(id->index id) "text"] t))
+     c
+     rs)))
+
+(defn list-changed? [m]
+  (when-let [[_ capability] (re-matches #"notifications/([^/]+)/list_changed" m)]
+    capability))
+
+(defn handle [context {m "method" {contents "contents" cs "capabilities" :as r} "result" :as e}]
+  (cond
+    ;; initialise cache
+    cs [(update context "state" (partial reduce-kv (fn [acc k {lc "listChanged" s "subscribe"}] (if (or lc s) (assoc acc k nil) acc))) cs) nil]
+    ;; refresh resource contents
+    contents [(update-in context ["state" "resources"] merge-resources contents) nil]
+    ;; invalidate cache item
+    m  [(assoc-in context ["state" (list-changed? m)] nil) nil]
+    ;; refresh cache item
+    r  [(update context "state" merge r) nil]
+    
+    :else
+    ;; pass through
+    [context e]
+    
+    ;;TODO: subscriptions
+    ))
