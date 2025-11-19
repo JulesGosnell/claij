@@ -6,7 +6,7 @@
    [clojure.core.async :refer [chan <!! >!!] :as async]
    [claij.mcp.bridge :refer [start-mcp-bridge]]
    [claij.fsm :refer [def-fsm]]
-   [claij.mcp :refer [initialise-request initialised-notification list-tools-request list-prompts-request list-resources-request mcp-schema]]))
+   [claij.mcp :refer [initialise-request initialised-notification list-tools-request list-prompts-request list-resources-request mcp-schema handle list-changed? merge-resources]]))
 
 ;; send:
 
@@ -434,36 +434,6 @@
 
 ;;------------------------------------------------------------------------------
 
-(defn list-changed? [m]
-  (when-let [[_ capability] (re-matches #"notifications/([^/]+)/list_changed" m)]
-    capability))
-
-(defn merge-resources [c rs]
-  (let [id->index (reduce (fn [acc [n {id "uri"}]] (assoc acc id n)) {} (map vector (range) c))]
-    (reduce
-     (fn [acc {id "uri" t "text"}]
-       (assoc-in acc [(id->index id) "text"] t))
-     c
-     rs)))
-
-(defn handle [context {m "method" {contents "contents" cs "capabilities" :as r} "result" :as e}]
-  (cond
-    ;; initialise cache
-    cs [(update context "state" (partial reduce-kv (fn [acc k {lc "listChanged" s "subscribe"}] (if (or lc s) (assoc acc k nil) acc))) cs) nil]
-    ;; refresh resource contents
-    contents [(update-in context ["state" "resources"] merge-resources contents) nil]
-    ;; invalidate cache item
-    m  [(assoc-in context ["state" (list-changed? m)] nil) nil]
-    ;; refresh cache item
-    r  [(update context "state" merge r) nil]
-    
-    :else
-    ;; pass through
-    [context e]
-    
-    ;;TODO: subscriptions
-    ))
-
 (defn handle-event [old-context old-event]
   (let [[new-context new-event] (handle old-context old-event)]
     (if new-event
@@ -679,7 +649,7 @@
 
 ;; list of available resources:
 ;; ("custom://readme"
-;;  "custom://project-info"
+;;  "custom://project-info"<
 ;;  "custom://llm-code-style"
 ;;  "custom://project-summary"
 ;;  "custom://claude")
