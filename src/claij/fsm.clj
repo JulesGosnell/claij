@@ -111,6 +111,9 @@
         {"type" "string"}]
        "unevaluatedItems" false}
 
+      "label"
+      {"type" "string"}
+
       "description"
       {"type" "string"}
 
