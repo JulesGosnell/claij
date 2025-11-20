@@ -100,5 +100,5 @@ I've just added some code that allows me to view CLAIJ's FSMs as a graph diagram
 ## A Multi-LLM Code Review FSM.
 - ![Code Review FSM](doc/code-review-fsm.svg)
 
-## First cut at an MCP integration that uses the FSM platform to manage the MCP protocol itself
+## WIP - An MCP integration that uses the FSM platform to manage the MCP protocol itself
 - ![MCP FSM](doc/mcp-fsm.svg)
