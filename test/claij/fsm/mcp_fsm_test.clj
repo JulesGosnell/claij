@@ -188,6 +188,7 @@
    "xitions"
    [{"id" ["start" "starting"]
      "description" "starts the MCP service. Returns an initialise-request."
+     "label" "document"
      "schema"
      {"type" "object"
       "properties"
@@ -198,6 +199,7 @@
 
     {"id" ["starting" "shedding"]
      "description" "Shed unwanted list-changed messages."
+     "label" "initialise\nrequest\n(timeout)"
      "schema"
      {"type" "object"
       "properties"
@@ -209,6 +211,7 @@
 
     ;; {"id" ["shedding" "shedding"]
     ;;  "description" "Shed unwanted list-changed messages."
+    ;;  "label" "list\nchanged"
     ;;  "schema"
     ;;  {"type" "object"
     ;;   "properties"
@@ -218,6 +221,7 @@
     ;;   "required" ["id" "message"]}}
 
     {"id" ["shedding" "initing"]
+     "label" "initialise\nresponse"
      "schema"
      {"type" "object"
       "properties"
@@ -228,6 +232,7 @@
       "required" ["id" "document" "message"]}}
 
     {"id" ["initing" "servicing"]
+     "label" "initialise\nnotification"
      "schema"
      {"type" "object"
       "properties"
@@ -238,6 +243,7 @@
       "required" ["id" "document" "message"]}}
 
     {"id" ["servicing" "caching"]
+     "label" "list_changed,\nlist_response,\nread_response"
      "schema"
      {"type" "object"
       "properties"
@@ -247,6 +253,7 @@
       "required" ["id" "message"]}}
 
     {"id" ["caching" "servicing"]
+     "label" "list_request,\nread_request"
      "schema"
      {"type" "object"
       "properties"
@@ -256,6 +263,7 @@
       "required" ["id" "message"]}}
 
     {"id" ["servicing" "llm"]
+     "label" "tools\nreponse"
      "schema"
      {"type" "object"
       "properties"
@@ -265,6 +273,7 @@
       "required" ["id" "document"]}}
     
     {"id" ["llm" "end"]
+     "label" "ouput"
      "schema" true}]})
 
 ;;==============================================================================
