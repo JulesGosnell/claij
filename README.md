@@ -92,3 +92,10 @@ If I can get this going, then theoretically we have an elastic collection of LLM
 **Watch this space...**
 
 BTW - I am looking for a job at the moment - so if you have a Clojure project, particularly one using Agents etc., on which you think I might be able to be useful, please [get in touch](https://www.linkedin.com/in/jules-gosnell-15952a1/)
+
+### Visualisation
+
+I've just added some code that allows me to view CLAIJ's FSMs as a graph diagram - here are a couple of examples:
+
+- ![MCP FSM](doc/mcp-fsm.svg)
+- ![Code Review FSM](doc/code-review-fsm.svg)
