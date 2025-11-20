@@ -97,7 +97,7 @@ BTW - I am looking for a job at the moment - so if you have a Clojure project, p
 
 I've just added some code that allows me to view CLAIJ's FSMs as a graph diagram - So, to be clear, these are visual representations of runnable FSMs. As soon as I have MCP working and an FSM-FSM for building FSMs, I will build out and document an FSM library. Here are a couple of examples:
 
-## A Multi-LLM Code Review FSM.
+## A Working Multi-LLM Code Review FSM.
 - ![Code Review FSM](doc/code-review-fsm.svg)
 
 ## WIP - An MCP integration that uses the FSM platform to manage the MCP protocol itself
