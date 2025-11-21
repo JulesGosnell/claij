@@ -19,6 +19,8 @@ I started with a gut-feeling: *The whole is greater than the sum of its parts*. 
 
 I had a couple of other intuitions:
 
+- A single LLM may halucinate but a group of LLMs are unlikely to share the same halucination.
+
 - An LLM is like a junior developer
   - The more structure I can give them, the better they will perform
   - The fewer concerns I ask them to worry about, the better job they will do on the stuff I really want focused on
