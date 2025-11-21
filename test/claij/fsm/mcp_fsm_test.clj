@@ -15,7 +15,14 @@
    [claij.util :refer [def-m2]]
    [claij.fsm :refer [def-fsm start-fsm]]
    [claij.mcp.bridge :refer [start-mcp-bridge]]
-   [claij.mcp :refer [mcp-schema initialise-request initialised-notification handle list-changed?]]))
+   [claij.mcp :refer [mcp-schema
+                      initialise-request
+                      initialised-notification
+                      list-changed?
+                      merge-resources
+                      initialize-mcp-cache
+                      invalidate-mcp-cache-item
+                      refresh-mcp-cache-item]]))
 
 ;;==============================================================================
 ;; PRODUCTION CODE
@@ -87,9 +94,13 @@
     (handler context (wrap ["shedding" "initing"] document (hack oc)))))
 
 (defn init-action [context fsm ix state [{[is {{im "method" :as message} "message" document "document" :as event} os] "content"} :as trail] handler]
-  ;; TODO: put the initialise-response we receive into the cache
   (log/info "init-action:" (pr-str message))
-  (handler context (wrap ["initing" "servicing"] document initialised-notification)))
+  ;; Extract capabilities from initialization response and set up cache
+  (let [capabilities (get-in message ["result" "capabilities"])
+        updated-context (if capabilities
+                          (update context "state" initialize-mcp-cache capabilities)
+                          context)]
+    (handler updated-context (wrap ["initing" "servicing"] document initialised-notification))))
 
 (defn service-action [context fsm ix state [{[is {m "message" document "document"} os] "content"} :as trail] handler]
   (log/info "service-action:" (pr-str m))
@@ -108,37 +119,33 @@
 (defn cache-action [context fsm ix state [{[is {m "message"} os] "content"} :as trail] handler]
   (log/info "cache-action:" (pr-str m))
 
-  (let [{m "method" {contents "contents" cs "capabilities" :as r} "result" :as message} m
-        [oc oe] (cond
-                  ;; ;; initialise cache
-                  ;; cs [(update context "state" (partial reduce-kv (fn [acc k {lc "listChanged" s "subscribe"}] (if (or lc s) (assoc acc k nil) acc))) cs) nil]
-                  ;; ;; refresh resource contents
-                  ;; contents [(update-in context ["state" "resources"] merge-resources contents) nil]
+  (let [{method "method" {contents "contents" :as r} "result"} m]
+    (cond
+      ;; Handle list-changed notification: invalidate and request refresh
+      (and method (list-changed? method))
+      (let [capability (list-changed? method)
+            updated-context (update context "state" invalidate-mcp-cache-item capability)
+            refresh-request {"jsonrpc" "2.0"
+                             "id" (swap! mcp-request-id inc)
+                             "method" (str capability "/" "list")}]
+        (handler updated-context (wrap ["caching" "servicing"] refresh-request)))
 
-                  ;; invalidate cache item
-                  m (let [capability (list-changed? m)]
-                      [(assoc-in context ["state" capability] nil)
-                        ;; ask to reload this capability...
-                       (wrap ["caching" "servicing"] {"jsonrpc" "2.0" "id" 2 "method" (str capability "/" "list")})])
+      ;; Handle resource contents: merge into resources
+      contents
+      (let [updated-context (update-in context ["state" "resources"] merge-resources contents)]
+        ;; After merging contents, continue servicing
+        (handler updated-context (wrap ["caching" "servicing"] {})))
 
-                  ;; ;; refresh cache item
-                  ;; r  [(update context "state" merge r) nil]
+      ;; Handle list response: refresh cache item
+      r
+      (let [updated-context (update context "state" refresh-mcp-cache-item r)]
+        ;; After refreshing cache, check if we need more data or can proceed to LLM
+        ;; For now, continue servicing - we can refine this logic later
+        (handler updated-context (wrap ["caching" "servicing"] {})))
 
-                  ;; :else
-                  ;; ;; pass through
-                  ;; [context e]
-
-                  ;;TODO: subscriptions
-                  )]
-    (handler oc oe))
-
-  ;; (cond
-  ;;     ;; each different message must do two things
-  ;;     ;; - make a changhe to the cache
-  ;;     ;; - either, request a further change to the cache
-  ;;     ;; - or - declare the cache fresh and step up to the llm
-  ;;     )
-  )
+      :else
+      ;; Pass through - shouldn't normally happen
+      (handler context (wrap ["caching" "llm"] {})))))
 
 (defn llm-action [context fsm ix state [{[is document os] "content"} :as trail] handler]
   (log/info "llm-action:" (pr-str document))
