@@ -11,7 +11,7 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.tools.logging :as log]
    [clojure.data.json :refer [read-str write-str]]
-   [clojure.core.async :refer[chan alt!! timeout >!! <!!]]
+   [clojure.core.async :refer [chan alt!! timeout >!! <!!]]
    [claij.util :refer [def-m2]]
    [claij.fsm :refer [def-fsm start-fsm]]
    [claij.mcp.bridge :refer [start-mcp-bridge]]
@@ -65,14 +65,11 @@
            :output oc
            :stop stop)
     (handler
+     context
      (let [{m "method" :as message} (take! oc 5000 (assoc initialise-request "id" (swap! mcp-request-id inc)))]
        (cond
          (= m "initialize")
-         (wrap ["starting" "shedding"] d message)
-
-         ;; (list-changed? m)
-         ;; (wrap ["starting" "starting"] message)
-         )))))
+         (wrap ["starting" "shedding"] d message))))))
 
 ;; these messages should go out on the fsm in a look but reflexive xitions are not working...yet...
 (defn hack [oc]
@@ -83,31 +80,32 @@
         (hack oc))
       message)))
 
-(defn shed-action [context fsm ix state [{[is {{im "method" :as message} "message" document "document" :as event} os]  "content"} :as trail] handler]
+(defn shed-action [context fsm ix state [{[is {{im "method" :as message} "message" document "document" :as event} os] "content"} :as trail] handler]
   (log/info "shed-action:" (pr-str message))
   (let [{ic :input oc :output} @mcp-state]
     (>!! ic message)
-    (handler (wrap ["shedding" "initing"] document (hack oc)))))
+    (handler context (wrap ["shedding" "initing"] document (hack oc)))))
 
-(defn init-action [context fsm ix state [{[is {{im "method" :as message} "message" document "document" :as event} os]  "content"} :as trail] handler]
+(defn init-action [context fsm ix state [{[is {{im "method" :as message} "message" document "document" :as event} os] "content"} :as trail] handler]
   ;; TODO: put the initialise-response we receive into the cache
   (log/info "init-action:" (pr-str message))
-  (handler (wrap ["initing" "servicing"] document initialised-notification)))
+  (handler context (wrap ["initing" "servicing"] document initialised-notification)))
 
-(defn service-action [context fsm ix state [{[is {m "message" document "document"} os]  "content"} :as trail] handler]
+(defn service-action [context fsm ix state [{[is {m "message" document "document"} os] "content"} :as trail] handler]
   (log/info "service-action:" (pr-str m))
   (let [{ic :input oc :output} @mcp-state]
     (>!! ic m)
     ;; diagram says we should consider a timeout here...
     (let [{method "method" :as oe} (take! oc 2000 {})]
       (handler
+       context
        (cond
          method
          (wrap ["servicing" "caching"] document oe)
          :else
          {"id" ["servicing" "llm"] "document" document})))))
 
-(defn cache-action [context fsm ix state [{[is {m "message"} os]  "content"} :as trail] handler]
+(defn cache-action [context fsm ix state [{[is {m "message"} os] "content"} :as trail] handler]
   (log/info "cache-action:" (pr-str m))
 
   (let [{m "method" {contents "contents" cs "capabilities" :as r} "result" :as message} m
@@ -118,10 +116,10 @@
                   ;; contents [(update-in context ["state" "resources"] merge-resources contents) nil]
 
                   ;; invalidate cache item
-                  m  (let [capability (list-changed? m)]
-                       [(assoc-in context ["state" capability] nil)
+                  m (let [capability (list-changed? m)]
+                      [(assoc-in context ["state" capability] nil)
                         ;; ask to reload this capability...
-                        (wrap ["caching" "servicing"] {"jsonrpc" "2.0" "id" 2 "method" (str capability "/" "list")})])
+                       (wrap ["caching" "servicing"] {"jsonrpc" "2.0" "id" 2 "method" (str capability "/" "list")})])
 
                   ;; ;; refresh cache item
                   ;; r  [(update context "state" merge r) nil]
@@ -132,7 +130,7 @@
 
                   ;;TODO: subscriptions
                   )]
-    (handler oe))
+    (handler oc oe))
 
   ;; (cond
   ;;     ;; each different message must do two things
@@ -142,10 +140,9 @@
   ;;     )
   )
 
-(defn llm-action  [context fsm ix state [{[is document os]  "content"} :as trail] handler]
+(defn llm-action [context fsm ix state [{[is document os] "content"} :as trail] handler]
   (log/info "llm-action:" (pr-str document))
-  (handler (wrap ["llm" "end"] nil)))
-
+  (handler context (wrap ["llm" "end"] nil)))
 
 (defn end-action [context & args]
   (log/info "end-action:" args))
@@ -157,7 +154,7 @@
    "service" service-action
    "cache" cache-action
    "llm" llm-action
-   "end"   end-action})  
+   "end" end-action})
 
 ;;------------------------------------------------------------------------------
 ;; MCP FSM Definition
@@ -271,7 +268,7 @@
        "document" {"type" "string"}}
       "additionalProperties" false
       "required" ["id" "document"]}}
-    
+
     {"id" ["llm" "end"]
      "label" "ouput"
      "schema" true}]})
@@ -286,11 +283,11 @@
     (let [context {:id->action mcp-actions}
           [submit stop] (start-fsm context mcp-fsm)]
 
-      (is (fn? stop))      
+      (is (fn? stop))
       (submit
        {"id" ["start" "starting"]
         "document" "please evaluate (+ 1 1) at the repl"})
-      
+
       (try
         (catch Throwable t
           (log/error "unexpected error" t))

@@ -119,8 +119,8 @@
            request2-data response2-data
            response2-data summary-data}
 
-          llm-action (fn [_context _fsm _ix _state [{[_input-schema input-data _output-schema] "content"} & _tail] handler]
-                       (handler (event-map input-data)))
+          llm-action (fn [context _fsm _ix _state [{[_input-schema input-data _output-schema] "content"} & _tail] handler]
+                       (handler context (event-map input-data)))
 
           p (promise)
 

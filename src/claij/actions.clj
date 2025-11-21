@@ -13,8 +13,9 @@
   "Standard LLM action - constructs prompts from FSM/state/trail and calls LLM.
    
    Takes context containing :provider and :model for LLM configuration."
-  [{:keys [provider model]} fsm ix state trail handler]
-  (let [{fsm-schema "schema" fsm-prompts "prompts"} fsm
+  [context fsm ix state trail handler]
+  (let [{:keys [provider model]} context
+        {fsm-schema "schema" fsm-prompts "prompts"} fsm
         {ix-prompts "prompts"} ix
         {state-prompts "prompts"} state
 
@@ -36,15 +37,16 @@
 
         schema (get ix "schema")]
 
-    (open-router-async provider model all-prompts handler {:schema schema})))
+    (open-router-async provider model all-prompts (partial handler context) {:schema schema})))
 
 (defn triage-action
   "Loads all FSMs from store and asks LLM to choose the best one.
    
    Queries the store for FSM metadata and presents them to the LLM for selection."
-  [{:keys [store provider model]} fsm ix state trail handler]
+  [context fsm ix state trail handler]
   ;; Extract user's problem description from the trail
-  (let [[{[_input-schema input-data _output-schema] "content"}] trail
+  (let [{:keys [store provider model]} context
+        [{[_input-schema input-data _output-schema] "content"}] trail
         user-text (get input-data "document")
 
         ;; Query store for all FSM [id, version, description] triples
@@ -71,10 +73,10 @@
       ;; No FSMs available - fail gracefully
       (do
         (log/error "   Triage: No FSMs in store")
-        (handler {"id" ["triage" "generate"]
-                  "requirements" (str "No existing FSMs found. Need to implement: " user-text)}))
+        (handler context {"id" ["triage" "generate"]
+                          "requirements" (str "No existing FSMs found. Need to implement: " user-text)}))
       ;; Query LLM for selection
-      (open-router-async provider model prompts handler {:schema (get ix "schema")}))))
+      (open-router-async provider model prompts (partial handler context) {:schema (get ix "schema")}))))
 
 (defn reuse-action
   "Loads the chosen FSM, starts it, delegates the user's text, waits for result.
@@ -129,30 +131,30 @@
         (if (= result ::timeout)
           (do
             (log/error "   [X] Child FSM timeout")
-            (handler {"id" ["reuse" "end"]
-                      "success" false
-                      "output" "Child FSM execution timed out"}))
+            (handler context {"id" ["reuse" "end"]
+                              "success" false
+                              "output" "Child FSM execution timed out"}))
           (do
             (log/info "   [OK] Child FSM complete")
-            (handler {"id" ["reuse" "end"]
-                      "success" true
-                      "output" result})))))))
+            (handler context {"id" ["reuse" "end"]
+                              "success" true
+                              "output" result})))))))
 
 (defn fork-action
   "Placeholder for FSM forking (NOT IMPLEMENTED)"
   [context fsm ix state trail handler]
   (log/warn "   Fork: NOT IMPLEMENTED - this is a placeholder")
-  (handler {"id" ["fork" "end"]
-            "success" false
-            "output" "FSM forking is not yet implemented"}))
+  (handler context {"id" ["fork" "end"]
+                    "success" false
+                    "output" "FSM forking is not yet implemented"}))
 
 (defn generate-action
   "Placeholder for FSM generation (NOT IMPLEMENTED)"
   [context fsm ix state trail handler]
   (log/warn "   Generate: NOT IMPLEMENTED - this is a placeholder")
-  (handler {"id" ["generate" "end"]
-            "success" false
-            "output" "FSM generation is not yet implemented"}))
+  (handler context {"id" ["generate" "end"]
+                    "success" false
+                    "output" "FSM generation is not yet implemented"}))
 
 (defn end-action
   "Terminal action - delivers result to a promise from context.
@@ -166,7 +168,7 @@
       (deliver result-promise input-data))
     ;; Call handler anyway to allow FSM to complete properly
     (when handler
-      (handler input-data))))
+      (handler {:result-promise result-promise} input-data))))
 
 ;;------------------------------------------------------------------------------
 ;; Central Action Registry

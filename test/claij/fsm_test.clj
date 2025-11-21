@@ -137,3 +137,53 @@
       (testing "weather"
         (testing (str provider "/" model)
           (is (:valid? (validate {:draft :draft7} schema {} (let [p (promise)] (open-router-async provider model prompts (partial deliver p) {:schema schema}) @p)))))))))
+
+;;------------------------------------------------------------------------------
+;; Context Threading Test
+
+(deftest context-threading-test
+  (testing "Context flows through FSM transitions"
+    (let [state-a-action (fn [context _fsm _ix _state _trail handler]
+                          ;; Add cache to context and transition
+                           (handler (assoc context :cache {:tools []})
+                                    {"id" ["state-a" "state-b"]
+                                     "data" "test"}))
+          state-b-action (fn [context _fsm _ix _state _trail handler]
+                          ;; Assert cache is present from previous state
+                           (is (= {:tools []} (:cache context)))
+                          ;; Add more to cache and transition to end
+                           (handler (assoc context :cache {:tools ["bash" "read_file"]})
+                                    {"id" ["state-b" "end"]}))
+          test-fsm {"id" "context-test"
+                    "schema" {"$schema" "https://json-schema.org/draft/2020-12/schema"
+                              "$$id" "https://claij.org/schemas/context-test"
+                              "$version" 0}
+                    "states" [{"id" "state-a" "action" "action-a"}
+                              {"id" "state-b" "action" "action-b"}
+                              {"id" "end"}]
+                    "xitions" [{"id" ["start" "state-a"]
+                                "schema" {"type" "object"
+                                          "properties" {"id" {"const" ["start" "state-a"]}
+                                                        "input" {"type" "string"}}
+                                          "required" ["id" "input"]}}
+                               {"id" ["state-a" "state-b"]
+                                "schema" {"type" "object"
+                                          "properties" {"id" {"const" ["state-a" "state-b"]}
+                                                        "data" {"type" "string"}}
+                                          "required" ["id" "data"]}}
+                               {"id" ["state-b" "end"]
+                                "schema" {"type" "object"
+                                          "properties" {"id" {"const" ["state-b" "end"]}}
+                                          "required" ["id"]}}]}
+          initial-context {:id->action {"action-a" state-a-action
+                                        "action-b" state-b-action}}
+          [submit stop] (claij.fsm/start-fsm initial-context test-fsm)]
+
+      ;; Submit and let it run
+      (submit {"id" ["start" "state-a"] "input" "test-input"})
+
+      ;; Give it time to complete
+      (Thread/sleep 1000)
+
+      ;; Clean up
+      (stop))))
