@@ -235,8 +235,8 @@
           ;; Closes over initial-trail and extends it on retry
           handler
           (fn handler
-            ([event] (handler event initial-trail))
-            ([{ox-id "id" :as event} current-trail]
+            ([new-context event] (handler new-context event initial-trail))
+            ([new-context {ox-id "id" :as event} current-trail]
              (try
                (let [[{ox-schema "schema" :as ox} c] (id->x-and-c ox-id)
                      _ (when (nil? ox) (log/error "no output xition:" (prn-str ox-id)))
@@ -248,11 +248,12 @@
                       {}
                       event)]
                  (if v?
-                     ;; SUCCESS - Put on channel and extend trail
+                     ;; SUCCESS - Put context and trail on channel
                    (do
                      (log/info (str "   [OK] Validation: " ox-id))
-                     (>!! c (cons {"role" "assistant" "content" [ox-schema event nil]}
-                                  (cons {"role" r "content" [is input ox-schema]} trail)))
+                     (>!! c {:context new-context
+                             :trail (cons {"role" "assistant" "content" [ox-schema event nil]}
+                                          (cons {"role" r "content" [is input ox-schema]} trail))})
                      nil)
                      ;; FAILURE - Retry with error feedback
                    (retrier
@@ -272,8 +273,8 @@
                         (log/info "      [>>] Sending validation error feedback to LLM")
                            ;; Call action again with error in trail
                         (if-let [action (get-in context [:id->action a])]
-                          (action context fsm ix state error-trail handler)
-                          (handler (second (first error-trail)) error-trail))))
+                          (action new-context fsm ix state error-trail handler)
+                          (handler new-context (second (first error-trail)) error-trail))))
                        ;; Max retries exceeded
                     (fn []
                       (log/error (str "   [X] Max Retries Exceeded: Validation failed after " max-retries " attempts"))
@@ -287,7 +288,7 @@
         (do
           (log/info (str "   Action: " a))
           (action context fsm ix state initial-trail handler))
-        (handler (second (first initial-trail)))))
+        (handler context (second (first initial-trail)))))
     (catch Throwable t
       (log/error t "Error in xform"))))
 
@@ -358,9 +359,10 @@
 
         ;; Create interface functions
         submit (fn [input-data]
-                 ;; Accept complete entry data with id, don't wrap it
-                 (let [message [{"role" "user"
-                                 "content" [entry-schema input-data output-schema]}]]
+                 ;; Wrap trail with context in message
+                 (let [trail [{"role" "user"
+                               "content" [entry-schema input-data output-schema]}]
+                       message {:context context :trail trail}]
                    (safe-channel-operation #(>!! entry-channel %) message)
                    (log/info (str "   Submitted document to FSM: " start-state))))
         stop-fsm (fn []
@@ -379,10 +381,10 @@
             cs (keys ic->ix)]
         (when (seq cs)
           (go-loop []
-            (let [[v ic] (alts! cs)]
-              (when v
+            (let [[{ctx :context trail :trail :as msg} ic] (alts! cs)]
+              (when msg
                 (let [ix (ic->ix ic)]
-                  (xform context fsm ix s ox-and-cs v)
+                  (xform ctx fsm ix s ox-and-cs trail)
                   (recur))))))))
 
     ;; Return interface

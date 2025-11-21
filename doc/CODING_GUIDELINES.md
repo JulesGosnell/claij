@@ -510,9 +510,47 @@ When evaluating solutions, prefer in this order:
 
 **Embrace the language:**
 - Use threading macros (`->`, `->>`, `some->`) for pipelines
-- Use destructuring to make intent clear
+- Use destructuring to make intent clear - prefer explicit named bindings over `:keys` and `:strs`
+- Favor destructuring over `get`/`get-in` when possible - achieves multiple bindings in one line
 - Leverage sequence abstractions
 - Use `let` for intermediate bindings with clear names
+
+**Destructuring best practices:**
+```clojure
+;; Prefer explicit destructuring over get/get-in
+;; Good - clear, concise, all bindings visible
+(let [{ctx :context trail :trail} msg
+      {ic :input oc :output} ctx]
+  ...)
+
+;; Avoid - verbose, scattered bindings
+(let [ctx (get msg :context)
+      trail (get msg :trail)
+      ic (get-in msg [:context :input])
+      oc (get-in msg [:context :output])]
+  ...)
+
+;; Good - explicit named bindings (preferred over :keys/:strs)
+(defn process [{provider :provider model :model}]
+  (call-llm provider model))
+
+;; Acceptable but less preferred
+(defn process [{:keys [provider model]}]
+  (call-llm provider model))
+
+;; Good - nested destructuring
+(defn handle-message [{{ic :input oc :output} :context 
+                       [{role :role content :content}] :trail}]
+  ...)
+
+;; Avoid - multiple get-in calls
+(defn handle-message [msg]
+  (let [ic (get-in msg [:context :input])
+        oc (get-in msg [:context :output])
+        role (get-in msg [:trail 0 :role])
+        content (get-in msg [:trail 0 :content])]
+    ...))
+```
 
 **Leverage Clojure's concurrency primitives:**
 - Persistent collections eliminate whole classes of concurrency bugs
