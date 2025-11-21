@@ -6,7 +6,17 @@
    [clojure.core.async :refer [chan <!! >!!] :as async]
    [claij.mcp.bridge :refer [start-mcp-bridge]]
    [claij.fsm :refer [def-fsm]]
-   [claij.mcp :refer [initialise-request initialised-notification list-tools-request list-prompts-request list-resources-request mcp-schema handle list-changed? merge-resources]]))
+   [claij.mcp :refer [initialise-request
+                      initialised-notification
+                      list-tools-request
+                      list-prompts-request
+                      list-resources-request
+                      mcp-schema
+                      list-changed?
+                      merge-resources
+                      initialize-mcp-cache
+                      invalidate-mcp-cache-item
+                      refresh-mcp-cache-item]]))
 
 ;; send:
 
@@ -27,9 +37,6 @@
 ;; (>!! ic list-tools-request)
 ;; (>!! ic list-prompts-request)
 ;; (>!! ic list-resources-request)
-
-
-
 
 ;; initialize reponse - x1
 (def initialise-response
@@ -334,58 +341,58 @@
 
 ;; list prompts response - x1
 (def list-prompts-response
-    {"jsonrpc" "2.0",
-     "id" 3,
-     "result"
-     {"prompts"
-      [{"name" "ACT/scratch_pad_load",
+  {"jsonrpc" "2.0",
+   "id" 3,
+   "result"
+   {"prompts"
+    [{"name" "ACT/scratch_pad_load",
+      "description"
+      "Loads a file into the scratch pad state. Returns status messages and a shallow inspect of the loaded data.",
+      "arguments"
+      [{"name" "file_path",
+        "description" "Optional file path: default scratch_pad.edn",
+        "required" false}]}
+     {"name" "clojure_repl_system_prompt",
+      "description"
+      "Provides instructions and guidelines for Clojure development, including style and best practices.",
+      "arguments" []}
+     {"name" "create-update-project-summary",
+      "description"
+      "Generates a prompt instructing the LLM to create a summary of a project.",
+      "arguments" []}
+     {"name" "chat-session-summarize",
+      "description"
+      "Instructs the assistant to create a summary of the current chat session and store it in the scratch pad. `chat_session_key` is optional and will default to `chat_session_summary`",
+      "arguments"
+      [{"name" "chat_session_key",
+        "description" "[Optional] key to store the session summary in",
+        "required" false}]}
+     {"name" "ACT/scratch_pad_save_as",
+      "description"
+      "Saves the current scratch pad state to a specified file.",
+      "arguments"
+      [{"name" "file_path",
+        "description" "File path: relative to .clojure-mcp/ directory",
+        "required" true}]}
+     {"name" "chat-session-resume",
+      "description"
+      "Instructs the assistant to resume a previous chat session by loading context from the scratch pad. `chat_session_key` is optional and will default to `chat_session_summary`",
+      "arguments"
+      [{"name" "chat_session_key",
+        "description" "[Optional] key where session summary is stored",
+        "required" false}]}
+     {"name" "ACT/add-dir",
+      "description"
+      "Adds a directory to the allowed-directories list, giving the LLM access to it",
+      "arguments"
+      [{"name" "directory",
         "description"
-        "Loads a file into the scratch pad state. Returns status messages and a shallow inspect of the loaded data.",
-        "arguments"
-        [{"name" "file_path",
-          "description" "Optional file path: default scratch_pad.edn",
-          "required" false}]}
-       {"name" "clojure_repl_system_prompt",
-        "description"
-        "Provides instructions and guidelines for Clojure development, including style and best practices.",
-        "arguments" []}
-       {"name" "create-update-project-summary",
-        "description"
-        "Generates a prompt instructing the LLM to create a summary of a project.",
-        "arguments" []}
-       {"name" "chat-session-summarize",
-        "description"
-        "Instructs the assistant to create a summary of the current chat session and store it in the scratch pad. `chat_session_key` is optional and will default to `chat_session_summary`",
-        "arguments"
-        [{"name" "chat_session_key",
-          "description" "[Optional] key to store the session summary in",
-          "required" false}]}
-       {"name" "ACT/scratch_pad_save_as",
-        "description"
-        "Saves the current scratch pad state to a specified file.",
-        "arguments"
-        [{"name" "file_path",
-          "description" "File path: relative to .clojure-mcp/ directory",
-          "required" true}]}
-       {"name" "chat-session-resume",
-        "description"
-        "Instructs the assistant to resume a previous chat session by loading context from the scratch pad. `chat_session_key` is optional and will default to `chat_session_summary`",
-        "arguments"
-        [{"name" "chat_session_key",
-          "description" "[Optional] key where session summary is stored",
-          "required" false}]}
-       {"name" "ACT/add-dir",
-        "description"
-        "Adds a directory to the allowed-directories list, giving the LLM access to it",
-        "arguments"
-        [{"name" "directory",
-          "description"
-          "Directory path to add (can be relative or absolute)",
-          "required" true}]}
-       {"name" "plan-and-execute",
-        "description"
-        "Use the scratch pad tool to plan and execute an change",
-        "arguments" []}]}})
+        "Directory path to add (can be relative or absolute)",
+        "required" true}]}
+     {"name" "plan-and-execute",
+      "description"
+      "Use the scratch pad tool to plan and execute an change",
+      "arguments" []}]}})
 
 ;; list resources response - x1
 (def list-resources-response
@@ -419,7 +426,6 @@
       "The Claude instructions document for the current project hosting the REPL",
       "mimeType" "text/markdown"}]}})
 
-
 (def read-resources-request
   {"jsonrpc" "2.0" "id" 12345 "method" "resources/read" "params" {"uri" "custom://project-info"}})
 
@@ -433,13 +439,6 @@
       "text" "..."}]}}) ;; text broke cider...
 
 ;;------------------------------------------------------------------------------
-
-(defn handle-event [old-context old-event]
-  (let [[new-context new-event] (handle old-context old-event)]
-    (if new-event
-      (reduced [new-context new-event])
-      new-context)))
-
 ;;------------------------------------------------------------------------------
 
 (deftest mcp-test
@@ -472,132 +471,92 @@
             "mimeType" "text/markdown",
             "text" "..."}]))))
 
-  (testing "initialize response"
-    (is (=
-         [{"state" {"tools" nil "prompts" nil "resources" nil}} nil]
-         (handle nil initialise-response))))
+  (testing "initialize-mcp-cache"
+    (let [capabilities {"tools" {"listChanged" true}
+                        "prompts" {"listChanged" true}
+                        "resources" {"subscribe" true "listChanged" true}
+                        "logging" {}}
+          initial-cache {}]
+      (is (= {"tools" nil "prompts" nil "resources" nil}
+             (initialize-mcp-cache initial-cache capabilities)))))
 
-  (testing "tools list changed notification"
-    (is (= [{"state" {"tools" nil "prompts" [] "resources" []}} nil] (handle {"state" {"tools" [] "prompts" [] "resources" []}} tools-list-changed-notification))))
+  (testing "invalidate-mcp-cache-item"
+    (let [cache {"tools" ["tool1" "tool2"] "prompts" ["prompt1"] "resources" ["res1"]}]
+      (is (= {"tools" nil "prompts" ["prompt1"] "resources" ["res1"]}
+             (invalidate-mcp-cache-item cache "tools")))
+      (is (= {"tools" ["tool1" "tool2"] "prompts" nil "resources" ["res1"]}
+             (invalidate-mcp-cache-item cache "prompts")))
+      (is (= {"tools" ["tool1" "tool2"] "prompts" ["prompt1"] "resources" nil}
+             (invalidate-mcp-cache-item cache "resources")))))
 
-  (testing "prompts list changed notification"
-    (is (= [{"state" {"tools" [] "prompts" nil "resources" []}} nil] (handle {"state" {"tools" [] "prompts" [] "resources" []}} prompts-list-changed-notification))))
+  (testing "refresh-mcp-cache-item"
+    (let [cache {"tools" nil "prompts" ["old-prompt"]}
+          new-data {"tools" ["new-tool1" "new-tool2"]}]
+      (is (= {"tools" ["new-tool1" "new-tool2"] "prompts" ["old-prompt"]}
+             (refresh-mcp-cache-item cache new-data)))))
 
-  (testing "resources list changed notification"
-    (is (= [{"state" {"tools" [] "prompts" [] "resources" nil}} nil] (handle {"state" {"tools" [] "prompts" [] "resources" []}} resources-list-changed-notification))))
+  (testing "list-changed?"
+    (is (= "tools" (list-changed? "notifications/tools/list_changed")))
+    (is (= "prompts" (list-changed? "notifications/prompts/list_changed")))
+    (is (= "resources" (list-changed? "notifications/resources/list_changed")))
+    (is (nil? (list-changed? "initialize"))))
 
-  (testing "list tools response"
-    (is (=
-         [{"state" (get list-tools-response "result")} nil]
-         (handle {} list-tools-response))))
+  ;; Integration test showing typical cache update flow
+  (testing "cache update flow"
+    (let [;; Start with empty cache
+          cache0 {}
 
-  (testing "list prompts response"
-    (is (=
-         [{"state" (get list-prompts-response "result")} nil]
-         (handle {} list-prompts-response))))
+          ;; Initialize from capabilities
+          capabilities (get-in initialise-response ["result" "capabilities"])
+          cache1 (initialize-mcp-cache cache0 capabilities)
+          _ (is (= {"tools" nil "prompts" nil "resources" nil} cache1))
 
-  (testing "list resources response"
-    (is (=
-         [{"state" (get list-resources-response "result")} nil]
-         (handle {} list-resources-response))))
+          ;; Refresh tools cache
+          tools-data (get list-tools-response "result")
+          cache2 (refresh-mcp-cache-item cache1 tools-data)
+          _ (is (= (get-in list-tools-response ["result" "tools"])
+                   (get cache2 "tools")))
 
-  (testing "read resources response"
-    (is (=
-         [{"state" {"resources" [{"uri" "custom://project-info" "text" "..."}]}} nil]
-         (handle {"state" {"resources" [{"uri" "custom://project-info"}]}} read-resources-response))))
+          ;; Refresh prompts cache
+          prompts-data (get list-prompts-response "result")
+          cache3 (refresh-mcp-cache-item cache2 prompts-data)
+          _ (is (= (get-in list-prompts-response ["result" "prompts"])
+                   (get cache3 "prompts")))
 
-  ;; we need to go back and flesh out the resources
+          ;; Refresh resources cache
+          resources-data (get list-resources-response "result")
+          cache4 (refresh-mcp-cache-item cache3 resources-data)
+          _ (is (= (get-in list-resources-response ["result" "resources"])
+                   (get cache4 "resources")))
 
-  ;; TODO:
-  ;; what does subscribe mean ?
-  ;; - send resources/subscribe for each uri
-  ;; - on notifications/resources/updated, invalidate cache for that uri
-  ;; - call resources/read to refresh cache
+          ;; Invalidate tools cache
+          cache5 (invalidate-mcp-cache-item cache4 "tools")
+          _ (is (nil? (get cache5 "tools")))
+          _ (is (= (get cache4 "prompts") (get cache5 "prompts")))
+          _ (is (= (get cache4 "resources") (get cache5 "resources")))])
 
-  (testing "handle events"
-    (is (=
-         {"state" {"tools" nil "prompts" nil "resources" nil}}
-         (reduce
-          handle-event
-          {}
-          [initialise-response])))
-
-    (is (=
-         {"state" {"tools" (get-in list-tools-response ["result" "tools"])
-                   "prompts" nil
-                   "resources" nil}}
-         (reduce
-          handle-event
-          {}
-          [initialise-response list-tools-response])))
-
-    (is (=
-         {"state" {"tools"   (get-in list-tools-response   ["result" "tools"])
-                   "prompts" (get-in list-prompts-response ["result" "prompts"])
-                   "resources" nil}}
-         (reduce
-          handle-event
-          {}
-          [initialise-response list-tools-response list-prompts-response])))
-
-    (is (=
-         {"state" {"tools"     (get-in list-tools-response     ["result" "tools"])
-                   "prompts"   (get-in list-prompts-response   ["result" "prompts"])
-                   "resources" (get-in list-resources-response ["result" "resources"])}}
-         (reduce
-          handle-event
-          {}
-          [initialise-response list-tools-response list-prompts-response list-resources-response])))
-
-    (is (=
-         {"state" {"tools" nil
-                   "prompts"   (get-in list-prompts-response   ["result" "prompts"])
-                   "resources" (get-in list-resources-response ["result" "resources"])}}
-         (reduce
-          handle-event
-          {}
-          [initialise-response list-tools-response list-prompts-response list-resources-response tools-list-changed-notification])))
-
-    (is (=
-         {"state" {"tools" nil
-                   "prompts" nil
-                   "resources" (get-in list-resources-response ["result" "resources"])}}
-         (reduce
-          handle-event
-          {}
-          [initialise-response list-tools-response list-prompts-response list-resources-response tools-list-changed-notification prompts-list-changed-notification])))
-
-    (is (=
-         {"state" {"tools" nil
-                   "prompts" nil
-                   "resources" nil}}
-         (reduce
-          handle-event
-          {}
-          [initialise-response list-tools-response list-prompts-response list-resources-response tools-list-changed-notification prompts-list-changed-notification resources-list-changed-notification]))))
+    (is true))
 
   ;; subscriptions:
-  
+
   ;; I tried the following subscription:
-  
+
   {"jsonrpc" "2.0"
    "id" 10
    "method" "resources/subscribe"
    "params"
    {"uri" "custom://readme"}}
-  
+
   ;; and got the following error:
-  
+
   {"jsonrpc" "2.0",
    "id" 10,
    "error"
    {"code" -32601,
     "message" "Method not found: resources/subscribe"}}
-  
-  ;; so it looks like clojure-mcp does not support subscriptions...
-  
-  )
 
+  ;; so it looks like clojure-mcp does not support subscriptions...
+  )
 ;;------------------------------------------------------------------------------
 ;; actually start an mcp service and walk through its capabiliies:
 
@@ -641,7 +600,7 @@
         (log/info "stopping bridge...")
 
         ;; TODO: we should NOT need this !
-        
+
         (Thread/sleep 1000)
         (stop)
         (log/info "bridge stopped")
@@ -653,7 +612,6 @@
 ;;  "custom://llm-code-style"
 ;;  "custom://project-summary"
 ;;  "custom://claude")
-
 
 (comment
   (def n 100)
@@ -677,7 +635,7 @@
   (assoc-in (<!! oc) ["result" "contents" 0 "text"] "...")
   (>!! ic {"jsonrpc" "2.0" "id" 10 "method" "resources/read" "params" {"uri" "custom://project-info"}})
   (assoc-in (<!! oc) ["result" "contents" 0 "text"] "...")
-  
+
   (<!! oc) ;; many times
   )
 
