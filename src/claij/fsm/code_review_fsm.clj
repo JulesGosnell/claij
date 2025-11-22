@@ -313,11 +313,12 @@
    Starts a code review FSM session with the provided code."
   [& body]
   (let [code-str (pr-str (cons 'do body))]
-    `(let [p# (promise)
-           end-action# (fn [_context# _fsm# _ix# _state# [{[_input-schema# input-data# _output-schema#] "content"} & _tail#] _handler#] (deliver p# input-data#))
+    `(let [end-action# (fn [context# _fsm# _ix# _state# [{[_input-schema# input-data# _output-schema#] "content"} & _tail#] _handler#]
+                         (when-let [p# (:fsm/completion-promise context#)]
+                           (deliver p# input-data#)))
            code-review-actions# {"llm" llm-action "end" end-action#}
            context# {:id->action code-review-actions#}
-           [submit# stop-fsm#] (claij.fsm/start-fsm context# code-review-fsm)
+           [submit# await# stop-fsm#] (claij.fsm/start-fsm context# code-review-fsm)
            ;; Define available LLMs
            ;; TODO - extract this map to somewhere from whence it can be shared
            llms# [{"provider" "openai" "model" "gpt-5-codex"}
@@ -330,5 +331,8 @@
                        "llms" llms#
                        "concerns" example-code-review-concerns}]
        (submit# entry-msg#)
-       (clojure.pprint/pprint (deref p# (* 5 60 1000) false))
+       (let [result# (await# (* 5 60 1000))]
+         (if (= result# :timeout)
+           (println "Code review timed out")
+           (clojure.pprint/pprint result#)))
        (stop-fsm#))))

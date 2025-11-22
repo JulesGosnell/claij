@@ -464,6 +464,82 @@ When evaluating solutions, prefer in this order:
     (is (= :valid (:status result)))))
 ```
 
+**CRITICAL: Never use Thread/sleep for async coordination:**
+
+`Thread/sleep` is **never** a sufficient solution for async testing:
+- **Non-deterministic** - May pass on fast machines, fail on slow ones
+- **Race conditions** - Timing-dependent behavior is fragile
+- **Slow tests** - Must wait for worst-case timing
+- **False confidence** - Tests might pass by luck, fail in CI/production
+
+**Always use proper thread coordination primitives:**
+- Promises for one-time events
+- CountDownLatches for synchronization points  
+- Core.async channels for message passing
+- Atoms with waiting conditions
+
+**Examples:**
+
+```clojure
+;; ❌ BAD - Non-deterministic, slow, fragile
+(deftest async-test
+  (let [result (atom nil)]
+    (future (reset! result (compute-something)))
+    (Thread/sleep 1000)  ; Hope it's done by now!
+    (is (= :expected @result))))
+
+;; ✅ GOOD - Deterministic, fast, reliable
+(deftest async-test
+  (let [result-promise (promise)]
+    (future (deliver result-promise (compute-something)))
+    (is (= :expected (deref result-promise 5000 :timeout)))))
+
+;; ❌ BAD - FSM test with sleep
+(deftest fsm-test
+  (start-fsm fsm)
+  (Thread/sleep 5000)  ; Guessing how long it takes
+  (is (reached-end-state?)))
+
+;; ✅ GOOD - FSM test with latch
+(deftest fsm-test
+  (let [done (promise)]
+    (start-fsm fsm {:on-complete #(deliver done true)})
+    (is (deref done 10000 false))))
+
+;; ✅ GOOD - Using core.async
+(deftest channel-test
+  (let [result-chan (chan)]
+    (go
+      (let [result (<! (async-computation))]
+        (>! result-chan result)))
+    (is (= :expected (<!! result-chan)))))
+
+;; ✅ GOOD - Using CountDownLatch for multiple events
+(deftest multi-event-test
+  (let [latch (java.util.concurrent.CountDownLatch. 3)]
+    (doseq [_ (range 3)]
+      (future 
+        (process-event)
+        (.countDown latch)))
+    (.await latch 5 java.util.concurrent.TimeUnit/SECONDS)
+    (is (all-events-processed?))))
+```
+
+**Design async code to be testable:**
+- Make async boundaries explicit (promises, channels, callbacks)
+- Don't hide async work inside functions
+- Provide hooks for test coordination
+- Document async behavior clearly
+
+**FSM testing specifically:**
+- FSMs should provide completion signals (promises/latches)
+- Shared start/end actions can manage coordination
+- Tests await FSM completion, don't guess timing
+- See `doc/MCP.md` for planned latch-based FSM testing infrastructure
+
+**Rule of thumb:**
+If your test has `Thread/sleep`, you have a bug waiting to happen in CI or production. Always use proper synchronization primitives.
+
 ## Error Handling
 
 **Fail fast and explicitly:**

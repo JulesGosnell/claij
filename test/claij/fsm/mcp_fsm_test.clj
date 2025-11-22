@@ -1,305 +1,81 @@
 (ns claij.fsm.mcp-fsm-test
-  "MCP Protocol FSM - Models MCP lifecycle as explicit states.
-  
-  This FSM orchestrates the complete MCP protocol flow:
-  - Service initialization
-  - Cache population
-  - Tool/resource operations
-  
-  Production code at top, tests at bottom."
+  "Tests for MCP Protocol FSM - verifies cache building and threading"
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.tools.logging :as log]
-   [clojure.data.json :refer [read-str write-str]]
-   [clojure.core.async :refer [chan alt!! timeout >!! <!!]]
-   [claij.util :refer [def-m2]]
-   [claij.fsm :refer [def-fsm start-fsm]]
-   [claij.mcp.bridge :refer [start-mcp-bridge]]
-   [claij.mcp :refer [mcp-schema
-                      initialise-request
-                      initialised-notification
-                      list-changed?
-                      merge-resources
-                      initialize-mcp-cache
-                      invalidate-mcp-cache-item
-                      refresh-mcp-cache-item]]))
+   [claij.fsm :refer [start-fsm]]
+   [claij.fsm.mcp-fsm :refer [mcp-actions mcp-fsm]]))
 
 ;;==============================================================================
-;; PRODUCTION CODE
+;; Simple Action Tracking
+;;==============================================================================
+;; TODO: This is a TEMPORARY solution for testing this specific FSM.
+;;
+;; FUTURE: Generic FSM Testing Infrastructure
+;; 1. FSM machinery should record its own path (state/transition traversal)
+;; 2. Trail should be FSM-centric, post-processed for LLM (see Issue 1)
+;; 3. Latch-based coordination: shared start/end actions for proper async waiting
+;;
+;; See doc/MCP.md "Future: Generic FSM Testing Infrastructure" for details.
 ;;==============================================================================
 
-;;------------------------------------------------------------------------------
-;; MCP Schema
-;;------------------------------------------------------------------------------
+(defn make-tracker
+  "Creates a simple action call counter.
+  Returns [counter-atom wrapper-fn]"
+  []
+  (let [counter (atom {})]
+    [counter
+     (fn [action-name original-action]
+       (fn [context & args]
+         (swap! counter update action-name (fnil inc 0))
+         (apply original-action context args)))]))
 
-;;------------------------------------------------------------------------------
-;; MCP Actions
-;;------------------------------------------------------------------------------
-
-(defn wrap
-  ([id document message]
-   {"id" id "document" document "message" message})
-  ([id message]
-   {"id" id "message" message}))
-
-(defn unwrap [{m "message"}]
-  m)
-
-(defn take! [chan ms default]
-  (alt!! chan ([v] v) (timeout ms) ([_] default)))
-
-;;------------------------------------------------------------------------------
-;; MCP Actions
-;;------------------------------------------------------------------------------
-
-(def mcp-state (atom nil))
-
-(def mcp-request-id (atom -1))
-
-;; put mcp service in context
-;; pass through original request
-
-(defn start-action [context fsm ix state [{[is {d "document" :as event} os] "content"} :as trail] handler]
-  (log/info "start-action:" (pr-str d))
-  (let [n 100
-        config {"command" "bash", "args" ["-c", "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"], "transport" "stdio"}
-        ic (chan n (map write-str))
-        oc (chan n (map read-str))
-        ;; TODO: need to link the stopping of this bridge to the stopping of the fsm...
-        stop (start-mcp-bridge config ic oc)]
-    (swap! mcp-state assoc
-           :input ic
-           :output oc
-           :stop stop)
-    (handler
-     context
-     (let [{m "method" :as message} (take! oc 5000 (assoc initialise-request "id" (swap! mcp-request-id inc)))]
-       (cond
-         (= m "initialize")
-         (wrap ["starting" "shedding"] d message))))))
-
-;; these messages should go out on the fsm in a look but reflexive xitions are not working...yet...
-(defn hack [oc]
-  (let [{method "method" :as message} (<!! oc)]
-    (if (and method (list-changed? method))
-      (do
-        (log/warn "shedding:" (pr-str message))
-        (hack oc))
-      message)))
-
-(defn shed-action [context fsm ix state [{[is {{im "method" :as message} "message" document "document" :as event} os] "content"} :as trail] handler]
-  (log/info "shed-action:" (pr-str message))
-  (let [{ic :input oc :output} @mcp-state]
-    (>!! ic message)
-    (handler context (wrap ["shedding" "initing"] document (hack oc)))))
-
-(defn init-action [context fsm ix state [{[is {{im "method" :as message} "message" document "document" :as event} os] "content"} :as trail] handler]
-  (log/info "init-action:" (pr-str message))
-  ;; Extract capabilities from initialization response and set up cache
-  (let [capabilities (get-in message ["result" "capabilities"])
-        updated-context (if capabilities
-                          (update context "state" initialize-mcp-cache capabilities)
-                          context)]
-    (handler updated-context (wrap ["initing" "servicing"] document initialised-notification))))
-
-(defn service-action [context fsm ix state [{[is {m "message" document "document"} os] "content"} :as trail] handler]
-  (log/info "service-action:" (pr-str m))
-  (let [{ic :input oc :output} @mcp-state]
-    (>!! ic m)
-    ;; diagram says we should consider a timeout here...
-    (let [{method "method" :as oe} (take! oc 2000 {})]
-      (handler
-       context
-       (cond
-         method
-         (wrap ["servicing" "caching"] document oe)
-         :else
-         {"id" ["servicing" "llm"] "document" document})))))
-
-(defn cache-action [context fsm ix state [{[is {m "message"} os] "content"} :as trail] handler]
-  (log/info "cache-action:" (pr-str m))
-
-  (let [{method "method" {contents "contents" :as r} "result"} m]
-    (cond
-      ;; Handle list-changed notification: invalidate and request refresh
-      (and method (list-changed? method))
-      (let [capability (list-changed? method)
-            updated-context (update context "state" invalidate-mcp-cache-item capability)
-            refresh-request {"jsonrpc" "2.0"
-                             "id" (swap! mcp-request-id inc)
-                             "method" (str capability "/" "list")}]
-        (handler updated-context (wrap ["caching" "servicing"] refresh-request)))
-
-      ;; Handle resource contents: merge into resources
-      contents
-      (let [updated-context (update-in context ["state" "resources"] merge-resources contents)]
-        ;; After merging contents, continue servicing
-        (handler updated-context (wrap ["caching" "servicing"] {})))
-
-      ;; Handle list response: refresh cache item
-      r
-      (let [updated-context (update context "state" refresh-mcp-cache-item r)]
-        ;; After refreshing cache, check if we need more data or can proceed to LLM
-        ;; For now, continue servicing - we can refine this logic later
-        (handler updated-context (wrap ["caching" "servicing"] {})))
-
-      :else
-      ;; Pass through - shouldn't normally happen
-      (handler context (wrap ["caching" "llm"] {})))))
-
-(defn llm-action [context fsm ix state [{[is document os] "content"} :as trail] handler]
-  (log/info "llm-action:" (pr-str document))
-  (handler context (wrap ["llm" "end"] nil)))
-
-(defn end-action [context & args]
-  (log/info "end-action:" args))
-
-(def mcp-actions
-  {"start" start-action
-   "shed" shed-action
-   "init" init-action
-   "service" service-action
-   "cache" cache-action
-   "llm" llm-action
-   "end" end-action})
-
-;;------------------------------------------------------------------------------
-;; MCP FSM Definition
-;;------------------------------------------------------------------------------
-
-(declare mcp-fsm)
-
-(def-fsm
-  mcp-fsm
-
-  {"schema" mcp-schema
-   "id" "mcp"
-   "description" "Orchestrates MCP protocol interactions"
-
-   "prompts"
-   ["You are coordinating interactions with an MCP (Model Context Protocol) service"]
-
-   "states"
-   [;;{"id" "start"}
-    {"id" "starting" "action" "start"}
-    {"id" "shedding" "action" "shed"}
-    {"id" "initing" "action" "init"}
-    {"id" "servicing" "action" "service"}
-    {"id" "caching" "action" "cache"}
-    {"id" "llm" "action" "llm"}
-    {"id" "end" "action" "end"}]
-
-   "xitions"
-   [{"id" ["start" "starting"]
-     "description" "starts the MCP service. Returns an initialise-request."
-     "label" "document"
-     "schema"
-     {"type" "object"
-      "properties"
-      {"id" {"const" ["start" "starting"]}
-       "document" {"type" "string"}}
-      "additionalProperties" false
-      "required" ["id" "document"]}}
-
-    {"id" ["starting" "shedding"]
-     "description" "Shed unwanted list-changed messages."
-     "label" "initialise\nrequest\n(timeout)"
-     "schema"
-     {"type" "object"
-      "properties"
-      {"id" {"const" ["starting" "shedding"]}
-       "document" {"type" "string"}
-       "message" true}
-      "additionalProperties" false
-      "required" ["id" "document" "message"]}}
-
-    ;; {"id" ["shedding" "shedding"]
-    ;;  "description" "Shed unwanted list-changed messages."
-    ;;  "label" "list\nchanged"
-    ;;  "schema"
-    ;;  {"type" "object"
-    ;;   "properties"
-    ;;   {"id" {"const" ["shedding" "shedding"]}
-    ;;    "message" true}
-    ;;   "additionalProperties" false
-    ;;   "required" ["id" "message"]}}
-
-    {"id" ["shedding" "initing"]
-     "label" "initialise\nresponse"
-     "schema"
-     {"type" "object"
-      "properties"
-      {"id" {"const" ["shedding" "initing"]}
-       "document" {"type" "string"}
-       "message" true}
-      "additionalProperties" false
-      "required" ["id" "document" "message"]}}
-
-    {"id" ["initing" "servicing"]
-     "label" "initialise\nnotification"
-     "schema"
-     {"type" "object"
-      "properties"
-      {"id" {"const" ["initing" "servicing"]}
-       "document" {"type" "string"}
-       "message" true}
-      "additionalProperties" false
-      "required" ["id" "document" "message"]}}
-
-    {"id" ["servicing" "caching"]
-     "label" "list_changed,\nlist_response,\nread_response"
-     "schema"
-     {"type" "object"
-      "properties"
-      {"id" {"const" ["servicing" "caching"]}
-       "message" true}
-      "additionalProperties" false
-      "required" ["id" "message"]}}
-
-    {"id" ["caching" "servicing"]
-     "label" "list_request,\nread_request"
-     "schema"
-     {"type" "object"
-      "properties"
-      {"id" {"const" ["caching" "servicing"]}
-       "message" true}
-      "additionalProperties" false
-      "required" ["id" "message"]}}
-
-    {"id" ["servicing" "llm"]
-     "label" "tools\nreponse"
-     "schema"
-     {"type" "object"
-      "properties"
-      {"id" {"const" ["servicing" "llm"]}
-       "document" {"type" "string"}}
-      "additionalProperties" false
-      "required" ["id" "document"]}}
-
-    {"id" ["llm" "end"]
-     "label" "ouput"
-     "schema" true}]})
+(defn wrap-actions
+  "Wraps all actions with tracking wrapper."
+  [actions wrapper-fn]
+  (reduce-kv
+   (fn [m action-name action-fn]
+     (assoc m action-name (wrapper-fn action-name action-fn)))
+   {}
+   actions))
 
 ;;==============================================================================
 ;; TESTS
 ;;==============================================================================
 
-(deftest ^:integration mcp-fsm-test
-
-  (testing "walk the fsm"
+(deftest ^:integration mcp-fsm-smoke-test
+  (testing "MCP FSM can start, accept input, and complete"
     (let [context {:id->action mcp-actions}
-          [submit stop] (start-fsm context mcp-fsm)]
+          final-event (claij.fsm/run-sync mcp-fsm context
+                                          {"id" ["start" "starting"]
+                                           "document" "smoke test"}
+                                          5000)] ; 5 second timeout
 
-      (is (fn? stop))
-      (submit
-       {"id" ["start" "starting"]
-        "document" "please evaluate (+ 1 1) at the repl"})
+      (is (not= final-event :timeout) "FSM should complete within timeout")
+      (is (map? final-event) "FSM should return final event")
+      (log/info "FSM completed successfully with event:" final-event))))
 
-      (try
-        (catch Throwable t
-          (log/error "unexpected error" t))
-        (finally
-          (Thread/sleep 2000)
-          ;;(stop)
-          )))))
+(deftest ^:integration mcp-fsm-flow-test
+  (testing "MCP FSM action tracking works"
+    (let [[counter wrapper-fn] (make-tracker)
+          tracked-actions (wrap-actions mcp-actions wrapper-fn)
+          context {:id->action tracked-actions}
+          [submit await _stop] (start-fsm context mcp-fsm)]
 
+      (submit {"id" ["start" "starting"]
+               "document" "test action flow"})
+
+      ;; Wait for FSM completion with timeout
+      (let [final-event (await 10000)]
+        (is (not= final-event :timeout) "FSM should complete within 10 seconds")
+
+        (let [counts @counter]
+          (log/info "Final action call counts:" counts)
+
+          ;; At minimum, start and end should have been called
+          (is (>= (get counts "start" 0) 1) "start action should be called")
+          (is (>= (get counts "end" 0) 1) "end action should be called")
+
+          ;; Log what we observed for analysis
+          (log/info "Actions called:" (keys counts))
+          (log/info "Total action invocations:" (apply + (vals counts))))))))

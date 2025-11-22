@@ -154,13 +154,19 @@
                           ;; Add more to cache and transition to end
                            (handler (assoc context :cache {:tools ["bash" "read_file"]})
                                     {"id" ["state-b" "end"]}))
+          end-action (fn [context _fsm _ix _state [{[_is event _os] "content"}] _handler]
+                      ;; Deliver completion event to promise
+                       (when-let [p (:fsm/completion-promise context)]
+                         (deliver p event))
+                      ;; Verify final context has accumulated cache
+                       (is (= {:tools ["bash" "read_file"]} (:cache context))))
           test-fsm {"id" "context-test"
                     "schema" {"$schema" "https://json-schema.org/draft/2020-12/schema"
                               "$$id" "https://claij.org/schemas/context-test"
                               "$version" 0}
                     "states" [{"id" "state-a" "action" "action-a"}
                               {"id" "state-b" "action" "action-b"}
-                              {"id" "end"}]
+                              {"id" "end" "action" "end"}]
                     "xitions" [{"id" ["start" "state-a"]
                                 "schema" {"type" "object"
                                           "properties" {"id" {"const" ["start" "state-a"]}
@@ -176,14 +182,16 @@
                                           "properties" {"id" {"const" ["state-b" "end"]}}
                                           "required" ["id"]}}]}
           initial-context {:id->action {"action-a" state-a-action
-                                        "action-b" state-b-action}}
-          [submit stop] (claij.fsm/start-fsm initial-context test-fsm)]
+                                        "action-b" state-b-action
+                                        "end" end-action}}
+          [submit await stop] (claij.fsm/start-fsm initial-context test-fsm)]
 
-      ;; Submit and let it run
+      ;; Submit and wait for completion
       (submit {"id" ["start" "state-a"] "input" "test-input"})
-
-      ;; Give it time to complete
-      (Thread/sleep 1000)
+      
+      (let [result (await 5000)]
+        (is (not= result :timeout) "FSM should complete within timeout")
+        (is (= {"id" ["state-b" "end"]} result) "FSM should return final event"))
 
       ;; Clean up
       (stop))))

@@ -99,14 +99,8 @@
               (throw (ex-info "FSM not found in store"
                               {:fsm-id fsm-id :fsm-version fsm-version})))
 
-          ;; Create a promise to capture the child FSM's result
-          child-result (promise)
-
-          ;; Create child context with result-promise bound
-          child-context (assoc context :result-promise child-result)
-
-          ;; Start the child FSM
-          [submit stop-fsm] (start-fsm child-context loaded-fsm)]
+          ;; Start the child FSM with new API
+          [submit await stop-fsm] (start-fsm context loaded-fsm)]
 
       ;; Construct entry message based on FSM requirements
       ;; For code-review FSM, include llms list and default concerns
@@ -124,11 +118,11 @@
         (log/info (str "   [>>] Submitting to child FSM"))
         (submit entry-msg))
 
-      ;; Wait for the child FSM to complete
-      (let [result (deref child-result 60000 ::timeout)]
+      ;; Wait for the child FSM to complete using new await API
+      (let [result (await 60000)]
         (stop-fsm)
 
-        (if (= result ::timeout)
+        (if (= result :timeout)
           (do
             (log/error "   [X] Child FSM timeout")
             (handler context {"id" ["reuse" "end"]
@@ -157,18 +151,15 @@
                     "output" "FSM generation is not yet implemented"}))
 
 (defn end-action
-  "Terminal action - delivers result to a promise from context.
+  "Terminal action - delivers result to completion promise from context.
    
-   The result-promise should be bound in context under :result-promise key.
-   This allows FSM delegation where child FSMs can have custom end actions."
-  [{:keys [result-promise]} fsm ix state trail handler]
+   Checks for :fsm/completion-promise in context (new API) and delivers the final result.
+   This is called automatically by the FSM when reaching an end state."
+  [context _fsm _ix _state trail _handler]
   (let [[{[_input-schema input-data _output-schema] "content"}] trail]
     (log/info "   [OK] End")
-    (when result-promise
-      (deliver result-promise input-data))
-    ;; Call handler anyway to allow FSM to complete properly
-    (when handler
-      (handler {:result-promise result-promise} input-data))))
+    (when-let [p (:fsm/completion-promise context)]
+      (deliver p input-data))))
 
 ;;------------------------------------------------------------------------------
 ;; Central Action Registry
@@ -198,8 +189,7 @@
    - :model      - LLM model (e.g. 'gpt-4o')
    
    Optional keys:
-   - :id->action      - Override action implementations (defaults to default-actions)
-   - :result-promise  - Promise to deliver final result to (used by end-action)"
-  [{:keys [store provider model id->action result-promise] :as opts}]
+   - :id->action      - Override action implementations (defaults to default-actions)"
+  [opts]
   (merge {:id->action default-actions}
          opts))
