@@ -331,9 +331,26 @@
    - :id->action - Map of action-id to action function
    - Other keys as needed by actions (e.g. :store, :provider, :model)
    
+   Returns [submit await stop] where:
+   - submit: Function to submit input data to the FSM
+   - await: Function to wait for FSM completion, optionally with timeout-ms
+   - stop: Function to stop the FSM
+   
+   Usage:
+     (let [[submit await stop] (start-fsm context fsm)]
+       (submit input-data)
+       (let [result (await 5000)]  ; Wait up to 5 seconds
+         (if (= result :timeout)
+           (println \"FSM timed out\")
+           (println \"FSM completed:\" result))))
+   
    NOTE: Currently assumes exactly one transition from 'start'. See TODO above."
   [context {ss "states" xs "xitions" :as fsm}]
-  (let [;; Create channels and mappings
+  (let [;; Create completion promise (internal to start-fsm)
+        completion-promise (promise)
+        context (assoc context :fsm/completion-promise completion-promise)
+
+        ;; Create channels and mappings
         id->x (index-by (->key "id") xs)
         id->s (index-by (->key "id") ss)
         xid->c (map-values (fn [_k _v] (chan)) id->x)
@@ -365,6 +382,11 @@
                        message {:context context :trail trail}]
                    (safe-channel-operation #(>!! entry-channel %) message)
                    (log/info (str "   Submitted document to FSM: " start-state))))
+
+        await (fn
+                ([] (deref completion-promise))
+                ([timeout-ms] (deref completion-promise timeout-ms :timeout)))
+
         stop-fsm (fn []
                    (log/info (str "stopping fsm: " (or (get fsm "id") "unnamed")))
                    (doseq [c all-channels]
@@ -388,7 +410,35 @@
                   (recur))))))))
 
     ;; Return interface
-    [submit stop-fsm]))
+    [submit await stop-fsm]))
+
+(defn run-sync
+  "Run an FSM synchronously, blocking until completion.
+   
+   Starts the FSM, submits the input data, and waits for the final event.
+   Returns the final event delivered by the FSM's end action.
+   
+   Optional timeout-ms parameter (default 30000ms/30s) prevents indefinite blocking.
+   Returns :timeout keyword if timeout is reached.
+   
+   Usage:
+     (let [final-event (run-sync fsm ctx input-data)]
+       (if (= final-event :timeout)
+         (println \"FSM timed out\")
+         (println \"FSM completed:\" final-event)))
+     
+     ;; With custom timeout
+     (let [final-event (run-sync fsm ctx input-data 5000)]
+       ...)"
+  ([fsm context input-data]
+   (run-sync fsm context input-data 30000))
+  ([fsm context input-data timeout-ms]
+   (let [[submit await stop] (start-fsm context fsm)]
+     (try
+       (submit input-data)
+       (await timeout-ms)
+       (finally
+         (stop))))))
 
 ;; a correlation id threaded through the data
 ;; a monitor or callback on each state

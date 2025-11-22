@@ -122,24 +122,26 @@
           llm-action (fn [context _fsm _ix _state [{[_input-schema input-data _output-schema] "content"} & _tail] handler]
                        (handler context (event-map input-data)))
 
-          p (promise)
-
-          end-action (fn [_context _fsm _ix _state [{[_input-schema input-data _output-schema] "content"} & _tail] _handler]
-                       (deliver p input-data))
+          end-action (fn [context _fsm _ix _state [{[_input-schema input-data _output-schema] "content"} & _tail] _handler]
+                       ;; Deliver to completion promise if present
+                       (when-let [p (:fsm/completion-promise context)]
+                         (deliver p input-data)))
 
           code-review-actions {"llm" llm-action "end" end-action}
 
           context {:id->action code-review-actions}
 
-          [submit stop-fsm] (start-fsm context code-review-fsm)]
+          [submit await stop-fsm] (start-fsm context code-review-fsm)]
 
       (try
         (submit entry-data)
 
-        (is (= summary-data (deref p 5000 false)) "FSM should complete with summary")
+        (let [result (await 5000)]
+          (is (not= result :timeout) "FSM should complete within timeout")
+          (is (= summary-data result) "FSM should complete with summary"))
 
         (catch Throwable t
-          (is false "event submission failed"))
+          (is false (str "event submission failed: " (.getMessage t))))
 
         (finally
           (stop-fsm))))))

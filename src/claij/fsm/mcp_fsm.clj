@@ -1,200 +1,276 @@
 (ns claij.fsm.mcp-fsm
+  "MCP Protocol FSM - Models MCP lifecycle as explicit states.
+  
+  This FSM orchestrates the complete MCP protocol flow:
+  - Service initialization
+  - Cache population  
+  - Tool/resource operations"
   (:require
    [clojure.tools.logging :as log]
    [clojure.java.io :refer [resource]]
    [clojure.string :refer [starts-with?]]
    [clojure.data.json :refer [write-str read-str]]
-   [clojure.core.async :refer [chan go-loop >! alts! <!! >!!]]
-   [claij.util :refer [def-m2 map-values]]
-   [clj-http.client :refer [get] :rename {get http-get}]
-   [claij.fsm :refer [def-fsm schema-base-uri start-fsm]]
-   ;;[claij.llm :refer [llm-action]]
+   [clojure.core.async :refer [chan alt!! timeout <!! >!!]]
+   [claij.util :refer [def-m2]]
+   [claij.fsm :refer [def-fsm]]
    [claij.mcp.bridge :refer [start-mcp-bridge]]
-   [claij.mcp :refer [initialise-request initialised-notification]]))
+   [claij.mcp :refer [initialise-request
+                      initialised-notification
+                      list-changed?
+                      merge-resources
+                      initialize-mcp-cache
+                      invalidate-mcp-cache-item
+                      refresh-mcp-cache-item]]))
+
+;;==============================================================================
+;; MCP Schema
+;;==============================================================================
 
 (def-m2
   mcp-schema
   (assoc
-   ;; N.B. This is a BIG schema - 1598 lines
    (read-str (slurp (resource "mcp/schema.json")))
    "$$id"
-   (str schema-base-uri "/" "mcp.json")))
+   (str claij.fsm/schema-base-uri "/" "mcp.json")))
 
-;; can we generate this fsm directly from the schema url ? much less code to maintain...
+;;==============================================================================
+;; Helper Functions
+;;==============================================================================
 
-;; temporarily copied from .config/Claude/claude_desktop_config.json
+(defn wrap
+  ([id document message]
+   {"id" id "document" document "message" message})
+  ([id message]
+   {"id" id "message" message}))
 
-(def mcp-config
-  {"mcpServers"
-   {"emacs"
-    {"command" "socat",
-     "args" ["-", "UNIX-CONNECT:/home/jules/.emacs.d/emacs-mcp-server.sock"],
-     "transport" "stdio"},
-    "m3-clojure-tools"
-    {"command" "bash",
-     "args" ["-c", "cd /home/jules/src/m3 && ./bin/mcp-clojure-tools.sh"],
-     "transport" "stdio"},
-    "m3-clojure-language-server"
-    {"command" "bash",
-     "args" ["-c", "cd /home/jules/src/m3 && ./bin/mcp-language-server.sh"],
-     "transport" "stdio"},
-    "claij-clojure-tools"
-    {"command" "bash",
-     "args" ["-c", "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"],
-     "transport" "stdio"},
-    "claij-clojure-language-server"
-    {"command" "bash",
-     "args" ["-c", "cd /home/jules/src/claij && ./bin/mcp-language-server.sh"],
-     "transport" "stdio"}}})
+(defn unwrap [{m "message"}]
+  m)
 
-;; a map of id: [input-channel output-channel stop]
+(defn take! [chan ms default]
+  (alt!! chan ([v] v) (timeout ms) ([_] default)))
 
-;; TODO: think about what we should do with notifications... maybe
-;; store them until someone shows an interest in that service.... or
-;; just throw them all away... Otherwise we would have to pile them
-;; all into the context which would be over the top...
+(defn hack [oc]
+  (let [{method "method" :as message} (<!! oc)]
+    (if (and method (list-changed? method))
+      (do
+        (log/warn "shedding:" (pr-str message))
+        (hack oc))
+      message)))
 
-(defn notification? [{m "method"}]
-  (and m (starts-with? m "notifications/")))
+;;==============================================================================
+;; State Management
+;;==============================================================================
 
-;; these should be initialised LAZILY !
+(def mcp-state (atom nil))
 
-(defn start-mcp [id config]
+(def mcp-request-id (atom -1))
+
+;;==============================================================================
+;; MCP FSM Actions
+;;==============================================================================
+
+(defn start-action [context fsm ix state [{[is {d "document" :as event} os] "content"} :as trail] handler]
+  (log/info "start-action:" (pr-str d))
   (let [n 100
+        config {"command" "bash", "args" ["-c", "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"], "transport" "stdio"}
         ic (chan n (map write-str))
-        oc (chan n (comp (map read-str)
-                         ;; we'll start by discarding notifications - later on these should be collapsed into the initial states...
-                         (filter (complement notification?))))
-        stop (start-mcp-bridge config ic oc)
-        _ (>!! ic initialise-request)
-        r (<!! oc)
-        _ (>!! ic initialised-notification)]
-    [r ic oc stop]))
+        oc (chan n (map read-str))
+        ;; TODO: need to link the stopping of this bridge to the stopping of the fsm...
+        stop (start-mcp-bridge config ic oc)]
+    (swap! mcp-state assoc
+           :input ic
+           :output oc
+           :stop stop)
+    (handler
+     context
+     (let [{m "method" :as message} (take! oc 5000 (assoc initialise-request "id" (swap! mcp-request-id inc)))]
+       (cond
+         (= m "initialize")
+         (wrap ["starting" "shedding"] d message))))))
 
-(def mcp-services
-  (atom
-   nil ;;(map-values start-mcp (mcp-config "mcpServers"))
-   ))
+(defn shed-action [context fsm ix state [{[is {{im "method" :as message} "message" document "document" :as event} os] "content"} :as trail] handler]
+  (log/info "shed-action:" (pr-str message))
+  (let [{ic :input oc :output} @mcp-state]
+    (>!! ic message)
+    (handler context (wrap ["shedding" "initing"] document (hack oc)))))
 
-(def-fsm mcp-fsm
+(defn init-action [context fsm ix state [{[is {{im "method" :as message} "message" document "document" :as event} os] "content"} :as trail] handler]
+  (log/info "init-action:" (pr-str message))
+  ;; Extract capabilities from initialization response and set up cache
+  (let [capabilities (get-in message ["result" "capabilities"])
+        updated-context (if capabilities
+                          (update context "state" initialize-mcp-cache capabilities)
+                          context)]
+    (handler updated-context (wrap ["initing" "servicing"] document initialised-notification))))
+
+(defn service-action [context fsm ix state [{[is {m "message" document "document"} os] "content"} :as trail] handler]
+  (log/info "service-action:" (pr-str m))
+  (let [{ic :input oc :output} @mcp-state]
+    (>!! ic m)
+    ;; diagram says we should consider a timeout here...
+    (let [{method "method" :as oe} (take! oc 2000 {})]
+      (handler
+       context
+       (cond
+         method
+         (wrap ["servicing" "caching"] document oe)
+         :else
+         {"id" ["servicing" "llm"] "document" document})))))
+
+(defn cache-action [context fsm ix state [{[is {m "message"} os] "content"} :as trail] handler]
+  (log/info "cache-action:" (pr-str m))
+  (let [{method "method" {contents "contents" :as r} "result"} m]
+    (cond
+      ;; Handle list-changed notification: invalidate and request refresh
+      (and method (list-changed? method))
+      (let [capability (list-changed? method)
+            updated-context (update context "state" invalidate-mcp-cache-item capability)
+            refresh-request {"jsonrpc" "2.0"
+                             "id" (swap! mcp-request-id inc)
+                             "method" (str capability "/" "list")}]
+        (handler updated-context (wrap ["caching" "servicing"] refresh-request)))
+
+      ;; Handle resource contents: merge into resources
+      contents
+      (let [updated-context (update-in context ["state" "resources"] merge-resources contents)]
+        ;; After merging contents, continue servicing
+        (handler updated-context (wrap ["caching" "servicing"] {})))
+
+      ;; Handle list response: refresh cache item
+      r
+      (let [updated-context (update context "state" refresh-mcp-cache-item r)]
+        ;; After refreshing cache, check if we need more data or can proceed to LLM
+        ;; For now, continue servicing - we can refine this logic later
+        (handler updated-context (wrap ["caching" "servicing"] {})))
+
+      :else
+      ;; Pass through - shouldn't normally happen
+      (handler context (wrap ["caching" "llm"] {})))))
+
+(defn llm-action [context fsm ix state [{[is document os] "content"} :as trail] handler]
+  (log/info "llm-action:" (pr-str document))
+  (handler context (wrap ["llm" "end"] nil)))
+
+(defn end-action
+  "Final action that signals FSM completion via promise delivery.
+   
+   If context contains :fsm/completion-promise, delivers the final event to it.
+   This enables tests and parent FSMs to await completion deterministically."
+  [context _fsm _ix _state [{[_is event _os] "content"} :as _trail] _handler]
+  (log/info "FSM complete - reached end state")
+  (when-let [p (:fsm/completion-promise context)]
+    (log/debug "Delivering final event to completion promise")
+    (deliver p event))
+  nil)
+
+(def mcp-actions
+  {"start" start-action
+   "shed" shed-action
+   "init" init-action
+   "service" service-action
+   "cache" cache-action
+   "llm" llm-action
+   "end" end-action})
+
+;;==============================================================================
+;; MCP FSM Definition
+;;==============================================================================
+
+(def-fsm
+  mcp-fsm
+
   {"schema" mcp-schema
    "id" "mcp"
+   "description" "Orchestrates MCP protocol interactions"
 
-   "description" "Coordinate M[odel] C[ontext] P[rotocol] interactions."
-
-   "prompts" ["You are involved in an interaction with an M[odel] C[ontext] P[rotocol] service"]
+   "prompts"
+   ["You are coordinating interactions with an MCP (Model Context Protocol) service"]
 
    "states"
-   [;; entry point
-    ;;{"id" "start"}
-
-    ;; calls llm with text from start and list of extant mcp services asking fr an mcp request
-    {"id" "info"
-     "prompts" ["This is a mp of [id : initialisation-response] of the available mcp services:"
-                (write-str (map-values (fn [_k [ir]] ir) @mcp-services)) ;; TODO - can't put this here...
-                "If you would like to make an MCP request please build one conformnt to your output schema and return it"]
-     "action" "llm"}
-
-    ;; receives an mcp request, dispatches onto service, returns an mcp response
-    {"id" "mcp"
-     "action" "mcp"
-     "prompts" ["Process an MCP non-Initialize request."]}
-
-    ;; exit point
-    {"id" "end"}]
+   [{"id" "starting" "action" "start"}
+    {"id" "shedding" "action" "shed"}
+    {"id" "initing" "action" "init"}
+    {"id" "servicing" "action" "service"}
+    {"id" "caching" "action" "cache"}
+    {"id" "llm" "action" "llm"}
+    {"id" "end" "action" "end"}]
 
    "xitions"
-   [{"id" ["start" "info"]
-     "schema" {"description" "use this to learn about the mcp services available."
-               "type" "object"
-               "properties"
-               {"id" {"const" ["start" "info"]}
-                "document" {"type" "string"}}
-               "additionalProperties" false
-               "required" ["id" "document"]}}
+   [{"id" ["start" "starting"]
+     "description" "starts the MCP service. Returns an initialise-request."
+     "label" "document"
+     "schema"
+     {"type" "object"
+      "properties"
+      {"id" {"const" ["start" "starting"]}
+       "document" {"type" "string"}}
+      "additionalProperties" false
+      "required" ["id" "document"]}}
 
-    {"id" ["info" "mcp"]
-     "schema" {"description" "use this to make a request to an MCP service."
-               "type" "object"
-               "properties"
-               {"id"
-                {"const" ["info" "mcp"]}
-                "service"
-                {"description" "The id of the MCP sevice that you want to talk to."
-                 "type" "string"}
-                "request"
-                {"description" "The MCP request that you want to send"
-                 "type" {"$ref" "#/definitions/JSONRPCRequest"}}}
-               "additionalProperties" false
-               "required" ["id" "service" "request"]}}
+    {"id" ["starting" "shedding"]
+     "description" "Shed unwanted list-changed messages."
+     "label" "initialise\nrequest\n(timeout)"
+     "schema"
+     {"type" "object"
+      "properties"
+      {"id" {"const" ["starting" "shedding"]}
+       "document" {"type" "string"}
+       "message" true}
+      "additionalProperties" false
+      "required" ["id" "document" "message"]}}
 
-    {"id" ["mcp" "info"]
-     "schema" {"description" "returns the response from an MCP service"
-               "type" "object"
-               "properties"
-               {"id"
-                {"const" ["info" "mcp"]}
-                "service"
-                {"description" "The id of the MCP sevice that sent the response."
-                 "type" "string"}
-                "response"
-                {"description" "The MCP service's response"
-                 "type"
-                 {"$ref" "#/definitions/JSONRPCResponse"}}}
-               "additionalProperties" false
-               "required" ["id" "service" "response"]}}
+    {"id" ["shedding" "initing"]
+     "label" "initialise\nresponse"
+     "schema"
+     {"type" "object"
+      "properties"
+      {"id" {"const" ["shedding" "initing"]}
+       "document" {"type" "string"}
+       "message" true}
+      "additionalProperties" false
+      "required" ["id" "document" "message"]}}
 
-    {"id" ["info" "end"]
-     "schema" {"description" "Completes your interaction with the MCP service"
-               "type" "object"
-               "properties"
-               {"id"
-                {"const" ["info" "mcp"]}
-                "document"
-                {"description" "Whatever you like"
-                 "type" true}}
-               "additionalProperties" false
-               "required" ["id" "document"]}}
+    {"id" ["initing" "servicing"]
+     "label" "initialise\nnotification"
+     "schema"
+     {"type" "object"
+      "properties"
+      {"id" {"const" ["initing" "servicing"]}
+       "document" {"type" "string"}
+       "message" true}
+      "additionalProperties" false
+      "required" ["id" "document" "message"]}}
 
-    ;; TODO: looks like we might need to plumb start and end types of sub-fsms into super-fsms and not assume that they are just (type string}
-    ]})
+    {"id" ["servicing" "caching"]
+     "label" "list_changed,\nlist_response,\nread_response"
+     "schema"
+     {"type" "object"
+      "properties"
+      {"id" {"const" ["servicing" "caching"]}
+       "message" true}
+      "additionalProperties" false
+      "required" ["id" "message"]}}
 
-;; ;; TODO: instead of piping everything backwards and forwards with
-;; ;; go-loops, we should be able to plumb all this together with async
-;; ;; constructs or even just plug channels directly in instead of doing
-;; ;; a->b->c
+    {"id" ["caching" "servicing"]
+     "label" "list_request,\nread_request"
+     "schema"
+     {"type" "object"
+      "properties"
+      {"id" {"const" ["caching" "servicing"]}
+       "message" true}
+      "additionalProperties" false
+      "required" ["id" "message"]}}
 
-;; (defn mcp-action [context fsm ix state [[_is {id "id" r "request"} _os]] handler]
-;;   (let [[_ir ic _oc _stop] (mcp-services id)]
-;;     (>!! ic r)))
+    {"id" ["servicing" "llm"]
+     "label" "tools\nreponse"
+     "schema"
+     {"type" "object"
+      "properties"
+      {"id" {"const" ["servicing" "llm"]}
+       "document" {"type" "string"}}
+      "additionalProperties" false
+      "required" ["id" "document"]}}
 
-;; ;; TODO:
-;; ;; connect dispatcher
-;; ;; logging would be helpful
-;; ;; complete integration of llm-action
-;; ;; get this working !
-
-;; ;; long-term
-;; ;; mcp-services may be restarted - the fsm needs to refresh them each time we go into init state - prompts may need to understand dereffables
-;; ;; shrink (shake-out) schema ? - not sure we can do that now all requests go through same state...
-;; ;; keep an eye on billing to see if mcp too expensive
-
-;; ;; tidy up
-;; ;; test
-;; ;; worry about parallel invocations
-;; ;; shrink schema use with DSL
-
-;; (def mcp-actions
-;;   {
-;;    ;; "llm" llm-action ;; TODO - needs parameters in state - check this
-;;    "mcp" mcp-action})
-
-(comment
-
-  (start-fsm
-   {:id->action mcp-actions})
-
-;; double check that the fsm schema is only included once in our state - on entry to the fsm
-
-  ;; hmmm... how will LLM know which schema we are $ref-ing if we keep switcing schemas - we may have to qualify refs... (i.e. use external ones)
-  )
+    {"id" ["llm" "end"]
+     "label" "ouput"
+     "schema" true}]})

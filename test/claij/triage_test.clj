@@ -108,25 +108,23 @@
                                   "notes" "Review complete"}))))
 
           ;; Create context with mock actions
-          result (promise)
           context (actions/make-context
                    {:store *store*
                     :provider "mock"
                     :model "mock"
-                    :result-promise result
                     :id->action (merge actions/default-actions
                                        {"triage" mock-triage-llm
                                         "llm" mock-review-llm})})
 
-          [submit stop-fsm] (start-triage context)]
+          [submit await stop-fsm] (start-triage context)]
 
       (try
         ;; Submit a code review request to the triage FSM
         (submit "Please review my fibonacci function")
 
-        ;; Wait for result
-        (let [final-result (deref result 10000 ::timeout)]
-          (is (not= final-result ::timeout) "Triage FSM should complete")
+        ;; Wait for result using new await API
+        (let [final-result (await 10000)]
+          (is (not= final-result :timeout) "Triage FSM should complete")
           (is (= (get final-result "id") ["reuse" "end"]) "Should delegate through reuse")
           (is (get final-result "success") "Delegation should succeed")
           (log/info "Final result:" final-result))
@@ -137,22 +135,20 @@
 (deftest triage-empty-store-test
   (testing "Triage FSM handles empty store gracefully"
     (let [;; No FSMs in store - triage action should route to generate
-          result (promise)
           context (actions/make-context
                    {:store *store*
                     :provider "mock"
-                    :model "mock"
-                    :result-promise result})
+                    :model "mock"})
           ;; Use real actions - no need to mock since triage-action handles empty store
 
-          [submit stop-fsm] (start-triage context)]
+          [submit await stop-fsm] (start-triage context)]
 
       (try
         (submit "Some request")
 
-        ;; Wait for result
-        (let [final-result (deref result 10000 ::timeout)]
-          (is (not= final-result ::timeout) "Triage FSM should complete")
+        ;; Wait for result using new await API
+        (let [final-result (await 10000)]
+          (is (not= final-result :timeout) "Triage FSM should complete")
           ;; With empty store, it should route to generate
           (is (= (get final-result "id") ["generate" "end"]) "Should route to generate when no FSMs available")
           (is (not (get final-result "success")) "Should fail when generation not implemented"))

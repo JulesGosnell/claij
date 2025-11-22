@@ -156,7 +156,7 @@
    - :model      - LLM model (e.g. 'gpt-4o')
    - :id->action - (Optional) Override default actions
    
-   Returns [submit stop-fsm] functions."
+   Returns [submit await stop-fsm] functions."
   [context]
   (start-fsm context triage-fsm))
 
@@ -168,7 +168,7 @@
                  {:store nil ;; TODO: real store connection
                   :provider "openai"
                   :model "gpt-4o"})
-        [submit stop-fsm] (start-triage context)
+        [submit await stop-fsm] (start-triage context)
         result (promise)]
 
     (submit "Please review my fibonacci code")
