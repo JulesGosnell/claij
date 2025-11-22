@@ -59,10 +59,11 @@
           (log/info "FSM completed successfully with event:" final-event))))))
 
 (deftest ^:integration mcp-fsm-flow-test
-  (testing "MCP FSM action tracking works"
+  (testing "MCP FSM action tracking and cache construction"
     (let [[counter wrapper-fn] (make-tracker)
           tracked-actions (wrap-actions mcp-actions wrapper-fn)
-          context {:id->action tracked-actions}
+          context {:id->action tracked-actions
+                   "state" {}} ;; Initialize with empty state for cache
           [submit await _stop] (start-fsm context mcp-fsm)]
 
       (submit {"id" ["start" "starting"]
@@ -74,13 +75,66 @@
 
         (when (not= result :timeout)
           (let [[final-context trail] result
-                counts @counter]
-            (log/info "Final action call counts:" counts)
+                counts @counter
+                cache (get final-context "state")]
 
-            ;; At minimum, start and end should have been called
-            (is (>= (get counts "start" 0) 1) "start action should be called")
-            (is (>= (get counts "end" 0) 1) "end action should be called")
+            (testing "action tracking"
+              (log/info "Final action call counts:" counts)
 
-            ;; Log what we observed for analysis
-            (log/info "Actions called:" (keys counts))
-            (log/info "Total action invocations:" (apply + (vals counts)))))))))
+              ;; At minimum, start and end should have been called
+              (is (>= (get counts "start" 0) 1) "start action should be called")
+              (is (>= (get counts "end" 0) 1) "end action should be called")
+
+              ;; Log what we observed for analysis
+              (log/info "Actions called:" (keys counts))
+              (log/info "Total action invocations:" (apply + (vals counts))))
+
+            (testing "cache initialization from capabilities"
+              ;; Cache should be initialized with capability keys
+              (is (map? cache) "Cache should be a map")
+              (is (contains? cache "tools") "Cache should have tools key")
+              (is (contains? cache "prompts") "Cache should have prompts key")
+              (is (contains? cache "resources") "Cache should have resources key")
+              (log/info "Cache keys initialized:" (keys cache)))
+
+            (testing "cache population with data"
+              ;; Cache should be populated with actual data (not nil)
+              (is (coll? (get cache "tools")) "Tools should be a collection")
+              (is (seq (get cache "tools")) "Tools should be non-empty")
+              (is (coll? (get cache "prompts")) "Prompts should be a collection")
+              (is (seq (get cache "prompts")) "Prompts should be non-empty")
+              (is (coll? (get cache "resources")) "Resources should be a collection")
+              (is (seq (get cache "resources")) "Resources should be non-empty")
+              (log/info "Cache sizes - tools:" (count (get cache "tools"))
+                        "prompts:" (count (get cache "prompts"))
+                        "resources:" (count (get cache "resources"))))
+
+            (testing "cache structure validation"
+              ;; Each tool should have expected keys
+              (let [tools (get cache "tools")]
+                (is (every? #(contains? % "name") tools) "Each tool should have a name")
+                (is (every? #(contains? % "description") tools) "Each tool should have a description")
+                (is (every? #(contains? % "inputSchema") tools) "Each tool should have an inputSchema"))
+
+              ;; Each prompt should have expected keys
+              (let [prompts (get cache "prompts")]
+                (is (every? #(contains? % "name") prompts) "Each prompt should have a name")
+                (is (every? #(contains? % "description") prompts) "Each prompt should have a description"))
+
+              ;; Each resource should have expected keys
+              (let [resources (get cache "resources")]
+                (is (every? #(contains? % "uri") resources) "Each resource should have a uri")
+                (is (every? #(contains? % "name") resources) "Each resource should have a name")
+                (is (every? #(contains? % "mimeType") resources) "Each resource should have a mimeType")))
+
+            (testing "resources text content merged"
+              ;; Resources should have text content merged from read-resource responses
+              (let [resources (get cache "resources")]
+                ;; At least some resources should have text content
+                ;; (depending on which resources were read during FSM execution)
+                (is (some #(contains? % "text") resources)
+                    "At least some resources should have text content merged")
+                (log/info "Resources with text:"
+                          (count (filter #(contains? % "text") resources))
+                          "of" (count resources))))))))))
+
