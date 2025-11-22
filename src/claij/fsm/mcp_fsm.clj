@@ -61,9 +61,8 @@
 ;; State Management
 ;;==============================================================================
 
-(def mcp-state (atom nil))
-
-(def mcp-request-id (atom -1))
+;; NOTE: MCP state is now stored in FSM context as :mcp/bridge and :mcp/request-id
+;; This provides proper isolation between FSM instances and eliminates test interference
 
 ;;==============================================================================
 ;; MCP FSM Actions
@@ -75,22 +74,21 @@
         config {"command" "bash", "args" ["-c", "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"], "transport" "stdio"}
         ic (chan n (map write-str))
         oc (chan n (map read-str))
-        ;; TODO: need to link the stopping of this bridge to the stopping of the fsm...
-        stop (start-mcp-bridge config ic oc)]
-    (swap! mcp-state assoc
-           :input ic
-           :output oc
-           :stop stop)
+        stop (start-mcp-bridge config ic oc)
+        ;; Store MCP bridge in context instead of global atom
+        updated-context (assoc context 
+                               :mcp/bridge {:input ic :output oc :stop stop}
+                               :mcp/request-id 0)]
     (handler
-     context
-     (let [{m "method" :as message} (take! oc 5000 (assoc initialise-request "id" (swap! mcp-request-id inc)))]
+     updated-context
+     (let [{m "method" :as message} (take! oc 5000 (assoc initialise-request "id" 0))]
        (cond
          (= m "initialize")
          (wrap ["starting" "shedding"] d message))))))
 
 (defn shed-action [context fsm ix state [{[is {{im "method" :as message} "message" document "document" :as event} os] "content"} :as trail] handler]
   (log/info "shed-action:" (pr-str message))
-  (let [{ic :input oc :output} @mcp-state]
+  (let [{{ic :input oc :output} :mcp/bridge} context]
     (>!! ic message)
     (handler context (wrap ["shedding" "initing"] document (hack oc)))))
 
@@ -105,7 +103,7 @@
 
 (defn service-action [context fsm ix state [{[is {m "message" document "document"} os] "content"} :as trail] handler]
   (log/info "service-action:" (pr-str m))
-  (let [{ic :input oc :output} @mcp-state]
+  (let [{{ic :input oc :output} :mcp/bridge} context]
     (>!! ic m)
     ;; diagram says we should consider a timeout here...
     (let [{method "method" :as oe} (take! oc 2000 {})]
@@ -124,9 +122,12 @@
       ;; Handle list-changed notification: invalidate and request refresh
       (and method (list-changed? method))
       (let [capability (list-changed? method)
-            updated-context (update context "state" invalidate-mcp-cache-item capability)
+            request-id (inc (:mcp/request-id context))
+            updated-context (-> context
+                                (update "state" invalidate-mcp-cache-item capability)
+                                (assoc :mcp/request-id request-id))
             refresh-request {"jsonrpc" "2.0"
-                             "id" (swap! mcp-request-id inc)
+                             "id" request-id
                              "method" (str capability "/" "list")}]
         (handler updated-context (wrap ["caching" "servicing"] refresh-request)))
 
@@ -152,14 +153,15 @@
   (handler context (wrap ["llm" "end"] nil)))
 
 (defn end-action
-  "Final action that signals FSM completion via promise delivery.
-   
-   If context contains :fsm/completion-promise, delivers the final event to it.
-   This enables tests and parent FSMs to await completion deterministically."
+  "Final action that signals FSM completion via promise delivery."
   [context _fsm _ix _state [{[_is event _os] "content"} :as _trail] _handler]
   (log/info "FSM complete - reached end state")
+  
+  ;; NOTE: We DON'T stop MCP subprocess here because it blocks
+  ;; Let the FSM's stop function or test cleanup handle it
+  
+  ;; Deliver completion event
   (when-let [p (:fsm/completion-promise context)]
-    (log/debug "Delivering final event to completion promise")
     (deliver p event))
   nil)
 

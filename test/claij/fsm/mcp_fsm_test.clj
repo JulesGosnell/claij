@@ -49,7 +49,7 @@
           final-event (claij.fsm/run-sync mcp-fsm context
                                           {"id" ["start" "starting"]
                                            "document" "smoke test"}
-                                          5000)] ; 5 second timeout
+                                          15000)] ; 15 second timeout (first test takes 9s)
 
       (is (not= final-event :timeout) "FSM should complete within timeout")
       (is (map? final-event) "FSM should return final event")
