@@ -128,11 +128,13 @@
             (handler context {"id" ["reuse" "end"]
                               "success" false
                               "output" "Child FSM execution timed out"}))
-          (do
+          ;; Extract just the final event from child's trail to avoid deep nesting
+          (let [[child-context child-trail] result
+                child-result (claij.fsm/last-event child-trail)]
             (log/info "   [OK] Child FSM complete")
             (handler context {"id" ["reuse" "end"]
                               "success" true
-                              "output" result})))))))
+                              "output" child-result})))))))
 
 (defn fork-action
   "Placeholder for FSM forking (NOT IMPLEMENTED)"
@@ -153,13 +155,13 @@
 (defn end-action
   "Terminal action - delivers result to completion promise from context.
    
-   Checks for :fsm/completion-promise in context (new API) and delivers the final result.
+   Checks for :fsm/completion-promise in context (new API) and delivers [context trail].
    This is called automatically by the FSM when reaching an end state."
   [context _fsm _ix _state trail _handler]
   (let [[{[_input-schema input-data _output-schema] "content"}] trail]
     (log/info "   [OK] End")
     (when-let [p (:fsm/completion-promise context)]
-      (deliver p input-data))))
+      (deliver p [context trail]))))
 
 ;;------------------------------------------------------------------------------
 ;; Central Action Registry

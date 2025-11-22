@@ -46,14 +46,17 @@
 (deftest ^:integration mcp-fsm-smoke-test
   (testing "MCP FSM can start, accept input, and complete"
     (let [context {:id->action mcp-actions}
-          final-event (claij.fsm/run-sync mcp-fsm context
-                                          {"id" ["start" "starting"]
-                                           "document" "smoke test"}
-                                          15000)] ; 15 second timeout (first test takes 9s)
+          result (claij.fsm/run-sync mcp-fsm context
+                                     {"id" ["start" "starting"]
+                                      "document" "smoke test"}
+                                     15000)] ; 15 second timeout (first test takes 9s)
 
-      (is (not= final-event :timeout) "FSM should complete within timeout")
-      (is (map? final-event) "FSM should return final event")
-      (log/info "FSM completed successfully with event:" final-event))))
+      (is (not= result :timeout) "FSM should complete within timeout")
+      (when (not= result :timeout)
+        (let [[final-context trail] result
+              final-event (claij.fsm/last-event trail)]
+          (is (map? final-event) "FSM should return final event")
+          (log/info "FSM completed successfully with event:" final-event))))))
 
 (deftest ^:integration mcp-fsm-flow-test
   (testing "MCP FSM action tracking works"
@@ -66,16 +69,18 @@
                "document" "test action flow"})
 
       ;; Wait for FSM completion with timeout
-      (let [final-event (await 10000)]
-        (is (not= final-event :timeout) "FSM should complete within 10 seconds")
+      (let [result (await 10000)]
+        (is (not= result :timeout) "FSM should complete within 10 seconds")
 
-        (let [counts @counter]
-          (log/info "Final action call counts:" counts)
+        (when (not= result :timeout)
+          (let [[final-context trail] result
+                counts @counter]
+            (log/info "Final action call counts:" counts)
 
-          ;; At minimum, start and end should have been called
-          (is (>= (get counts "start" 0) 1) "start action should be called")
-          (is (>= (get counts "end" 0) 1) "end action should be called")
+            ;; At minimum, start and end should have been called
+            (is (>= (get counts "start" 0) 1) "start action should be called")
+            (is (>= (get counts "end" 0) 1) "end action should be called")
 
-          ;; Log what we observed for analysis
-          (log/info "Actions called:" (keys counts))
-          (log/info "Total action invocations:" (apply + (vals counts))))))))
+            ;; Log what we observed for analysis
+            (log/info "Actions called:" (keys counts))
+            (log/info "Total action invocations:" (apply + (vals counts)))))))))

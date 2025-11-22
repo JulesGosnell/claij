@@ -412,24 +412,37 @@
     ;; Return interface
     [submit await stop-fsm]))
 
+(defn last-event
+  "Extract the final event from a trail.
+   
+   Takes a trail (vector of trail entries) and returns the event from the
+   most recent entry (the head of the trail).
+   
+   Usage:
+     (let [[context trail] (await)]
+       (last-event trail))  ; Returns the final event"
+  [trail]
+  (second (get (first trail) "content")))
+
 (defn run-sync
   "Run an FSM synchronously, blocking until completion.
    
-   Starts the FSM, submits the input data, and waits for the final event.
-   Returns the final event delivered by the FSM's end action.
+   Starts the FSM, submits the input data, and waits for completion.
+   Returns [context trail] tuple containing final context and execution trail.
    
    Optional timeout-ms parameter (default 30000ms/30s) prevents indefinite blocking.
    Returns :timeout keyword if timeout is reached.
    
    Usage:
-     (let [final-event (run-sync fsm ctx input-data)]
-       (if (= final-event :timeout)
-         (println \"FSM timed out\")
-         (println \"FSM completed:\" final-event)))
+     (let [[context trail] (run-sync fsm ctx input-data)]
+       (println \"Final event:\" (last-event trail)))
      
-     ;; With custom timeout
-     (let [final-event (run-sync fsm ctx input-data 5000)]
-       ...)"
+     ;; With timeout check
+     (let [result (run-sync fsm ctx input-data 5000)]
+       (if (= result :timeout)
+         (println \"FSM timed out\")
+         (let [[context trail] result]
+           (println \"FSM completed:\" (last-event trail)))))"
   ([fsm context input-data]
    (run-sync fsm context input-data 30000))
   ([fsm context input-data timeout-ms]

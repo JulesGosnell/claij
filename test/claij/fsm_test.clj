@@ -154,10 +154,10 @@
                           ;; Add more to cache and transition to end
                            (handler (assoc context :cache {:tools ["bash" "read_file"]})
                                     {"id" ["state-b" "end"]}))
-          end-action (fn [context _fsm _ix _state [{[_is event _os] "content"}] _handler]
-                      ;; Deliver completion event to promise
+          end-action (fn [context _fsm _ix _state trail _handler]
+                      ;; Deliver [context trail] to promise
                        (when-let [p (:fsm/completion-promise context)]
-                         (deliver p event))
+                         (deliver p [context trail]))
                       ;; Verify final context has accumulated cache
                        (is (= {:tools ["bash" "read_file"]} (:cache context))))
           test-fsm {"id" "context-test"
@@ -188,10 +188,13 @@
 
       ;; Submit and wait for completion
       (submit {"id" ["start" "state-a"] "input" "test-input"})
-      
+
       (let [result (await 5000)]
         (is (not= result :timeout) "FSM should complete within timeout")
-        (is (= {"id" ["state-b" "end"]} result) "FSM should return final event"))
+        (when (not= result :timeout)
+          (let [[final-context trail] result
+                final-event (claij.fsm/last-event trail)]
+            (is (= {"id" ["state-b" "end"]} final-event) "FSM should return final event"))))
 
       ;; Clean up
       (stop))))

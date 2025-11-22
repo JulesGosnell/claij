@@ -76,7 +76,7 @@
         oc (chan n (map read-str))
         stop (start-mcp-bridge config ic oc)
         ;; Store MCP bridge in context instead of global atom
-        updated-context (assoc context 
+        updated-context (assoc context
                                :mcp/bridge {:input ic :output oc :stop stop}
                                :mcp/request-id 0)]
     (handler
@@ -154,15 +154,15 @@
 
 (defn end-action
   "Final action that signals FSM completion via promise delivery."
-  [context _fsm _ix _state [{[_is event _os] "content"} :as _trail] _handler]
+  [context _fsm _ix _state trail _handler]
   (log/info "FSM complete - reached end state")
-  
+
   ;; NOTE: We DON'T stop MCP subprocess here because it blocks
   ;; Let the FSM's stop function or test cleanup handle it
-  
-  ;; Deliver completion event
+
+  ;; Deliver completion: [context trail]
   (when-let [p (:fsm/completion-promise context)]
-    (deliver p event))
+    (deliver p [context trail]))
   nil)
 
 (def mcp-actions

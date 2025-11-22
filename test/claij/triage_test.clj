@@ -123,11 +123,14 @@
         (submit "Please review my fibonacci function")
 
         ;; Wait for result using new await API
-        (let [final-result (await 10000)]
-          (is (not= final-result :timeout) "Triage FSM should complete")
-          (is (= (get final-result "id") ["reuse" "end"]) "Should delegate through reuse")
-          (is (get final-result "success") "Delegation should succeed")
-          (log/info "Final result:" final-result))
+        (let [result (await 10000)]
+          (is (not= result :timeout) "Triage FSM should complete")
+          (when (not= result :timeout)
+            (let [[final-context trail] result
+                  final-result (claij.fsm/last-event trail)]
+              (is (= (get final-result "id") ["reuse" "end"]) "Should delegate through reuse")
+              (is (get final-result "success") "Delegation should succeed")
+              (log/info "Final result:" final-result))))
 
         (finally
           (stop-fsm))))))
@@ -147,11 +150,14 @@
         (submit "Some request")
 
         ;; Wait for result using new await API
-        (let [final-result (await 10000)]
-          (is (not= final-result :timeout) "Triage FSM should complete")
-          ;; With empty store, it should route to generate
-          (is (= (get final-result "id") ["generate" "end"]) "Should route to generate when no FSMs available")
-          (is (not (get final-result "success")) "Should fail when generation not implemented"))
+        (let [result (await 10000)]
+          (is (not= result :timeout) "Triage FSM should complete")
+          (when (not= result :timeout)
+            (let [[final-context trail] result
+                  final-result (claij.fsm/last-event trail)]
+              ;; With empty store, it should route to generate
+              (is (= (get final-result "id") ["generate" "end"]) "Should route to generate when no FSMs available")
+              (is (not (get final-result "success")) "Should fail when generation not implemented"))))
 
         (finally
           (stop-fsm))))))
