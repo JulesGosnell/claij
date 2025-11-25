@@ -193,22 +193,34 @@
    "id" {"const" id}
    "document" schema})
 
-(defn state-schema
-  "make the schema for a state - to be valid for a state, you must be valid for one (only) of its output xitions"
-  [{fid "id" fv "version" fs "schema" :as _fsm} {sid "id" :as _state} xs]
-  ;; {"$schema" meta-schema-uri
-  ;;  "$$id" (format "%s/%s/%d/%s" schema-base-uri fid (or fv 0) sid)
-  ;;  "oneOf"
-  ;;  (mapv
-  ;;   (fn [{xid "id" s "schema" :as _x}]
-  ;;     {"properties" (expand-schema xid s)})
-  ;;   xs)}
+(defn resolve-schema
+  "Resolve a transition schema, supporting dynamic schema generation.
+   
+   If schema is a string, looks up (get-in context [:id->schema schema-key])
+   to get a schema function, then calls (schema-fn context xition).
+   
+   If schema is a map (or other), returns it unchanged.
+   
+   NOTE: Future optimization opportunity - when we have the event and the
+   resolved schema is a oneOf/anyOf, we could narrow it further based on
+   event content. Currently we only narrow to the selected transition,
+   not within a transition's schema."
+  [context xition schema]
+  (if (string? schema)
+    (if-let [schema-fn (get-in context [:id->schema schema])]
+      (schema-fn context xition)
+      (do
+        (log/warn "No schema function found for key:" schema)
+        true))
+    schema))
 
-  ;; (-> fs
-  ;;     (dissoc "$$id")
-  ;;     (dissoc "$version")
-  ;;     (assoc "$id" (fs "$$id")))
-  {"oneOf" (mapv (->key "schema") xs)})
+(defn state-schema
+  "Make the schema for a state - to be valid for a state, you must be valid for one (only) of its output xitions.
+   Resolves dynamic schemas via context :id->schema lookup."
+  [context {fid "id" fv "version" fs "schema" :as _fsm} {sid "id" :as _state} xs]
+  {"oneOf" (mapv (fn [{s "schema" :as xition}]
+                   (resolve-schema context xition s))
+                 xs)})
 
 (defn xition-schema
   "make the schema for a transition - embed its schema field in a larger context"
@@ -224,7 +236,7 @@
   (try
     (log/info (str "=> [" from " -> " to "]"))
 
-    (let [s-schema (state-schema fsm state (map first ox-and-cs))
+    (let [s-schema (state-schema context fsm state (map first ox-and-cs))
           id->x-and-c (index-by (comp (->key "id") first) ox-and-cs)
           retry-count (atom 0)
           max-retries 3
@@ -238,8 +250,9 @@
             ([new-context event] (handler new-context event initial-trail))
             ([new-context {ox-id "id" :as event} current-trail]
              (try
-               (let [[{ox-schema "schema" :as ox} c] (id->x-and-c ox-id)
+               (let [[{ox-schema-raw "schema" :as ox} c] (id->x-and-c ox-id)
                      _ (when (nil? ox) (log/error "no output xition:" (prn-str ox-id)))
+                     ox-schema (resolve-schema new-context ox ox-schema-raw)
                      {v? :valid? es :errors}
                      (validate
                       {:draft schema-draft
@@ -365,7 +378,7 @@
         entry-schema (get entry-xition "schema")
         start-state-obj (id->s start-state)
         output-xitions (map first (sid->ox-and-cs start-state))
-        output-schema (state-schema fsm start-state-obj output-xitions)
+        output-schema (state-schema context fsm start-state-obj output-xitions)
 
         ;; Error handling for channel operations
         safe-channel-operation (fn [op ch]

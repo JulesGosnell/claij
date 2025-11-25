@@ -3,7 +3,7 @@
    [clojure.test :refer [deftest testing is]]
    [m3.uri :refer [parse-uri]]
    [m3.validate :refer [validate]]
-   [claij.fsm :refer [state-schema xition-schema schema-base-uri uri->schema]]
+   [claij.fsm :refer [state-schema xition-schema schema-base-uri uri->schema resolve-schema]]
    [claij.llm.open-router :refer [open-router-async]]))
 
 ;;------------------------------------------------------------------------------
@@ -242,4 +242,52 @@
           result (validate {:draft :draft2020-12} fsm-m2 {} test-fsm)]
       (is (:valid? result)
           (str "FSM with string schema should validate against fsm-m2. Errors: "
-               (:errors result))))))
+               (:errors result)))))
+
+  (testing "resolve-schema with map schema passes through unchanged"
+    (let [context {}
+          xition {"id" ["a" "b"]}
+          schema {"type" "string"}]
+      (is (= schema (resolve-schema context xition schema)))))
+
+  (testing "resolve-schema with string key looks up and calls schema function"
+    (let [;; Schema function that returns a schema based on context
+          my-schema-fn (fn [ctx xition]
+                         {"type" "object"
+                          "properties" {"tool" {"const" (get ctx :selected-tool)}}})
+          context {:id->schema {"my-schema" my-schema-fn}
+                   :selected-tool "clojure_eval"}
+          xition {"id" ["llm" "servicing"]}
+          resolved (resolve-schema context xition "my-schema")]
+      (is (= {"type" "object"
+              "properties" {"tool" {"const" "clojure_eval"}}}
+             resolved))))
+
+  (testing "resolve-schema with missing key returns true and logs warning"
+    (let [context {:id->schema {}} ;; Empty - no schema functions
+          xition {"id" ["a" "b"]}
+          resolved (resolve-schema context xition "unknown-key")]
+      (is (= true resolved)
+          "Missing schema key should return true (permissive)")))
+
+  (testing "state-schema resolves string schemas in transitions"
+    (let [;; Schema function
+          request-schema-fn (fn [ctx xition]
+                              {"type" "object"
+                               "properties" {"method" {"const" "tools/call"}}})
+          context {:id->schema {"mcp-request" request-schema-fn}}
+          fsm {"id" "test" "version" 0}
+          state {"id" "llm"}
+          ;; Mix of string and inline schemas
+          xitions [{"id" ["llm" "servicing"] "schema" "mcp-request"}
+                   {"id" ["llm" "end"] "schema" {"type" "string"}}]
+          result (state-schema context fsm state xitions)]
+      ;; Should have oneOf with resolved schemas
+      (is (= 2 (count (get result "oneOf"))))
+      ;; First should be resolved from function
+      (is (= {"type" "object"
+              "properties" {"method" {"const" "tools/call"}}}
+             (first (get result "oneOf"))))
+      ;; Second should be passed through
+      (is (= {"type" "string"}
+             (second (get result "oneOf")))))))
