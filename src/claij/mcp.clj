@@ -518,6 +518,30 @@
                   (into (map tool-cache->response-schema tools)))]
     {"anyOf" schemas}))
 
+;;-----------------------------------------------------------------------------
+;; FSM Schema Functions
+;;
+;; These functions have signature (fn [context xition] schema) for use with
+;; FSM dynamic schema resolution. They extract MCP cache from context and
+;; delegate to the schema generation functions above.
+
+(defn mcp-request-schema-fn
+  "Schema function for FSM dynamic schema resolution.
+   Extracts MCP cache from context and generates request schema.
+   
+   Context must have MCP cache at (get context \"state\") with shape:
+   {\"tools\" [...] \"resources\" [...] \"prompts\" [...]}"
+  [context _xition]
+  (mcp-cache->request-schema (get context "state")))
+
+(defn mcp-response-schema-fn
+  "Schema function for FSM dynamic schema resolution.
+   Extracts MCP cache from context and generates response schema.
+   
+   Context must have MCP cache at (get context \"state\")."
+  [context _xition]
+  (mcp-cache->response-schema (get context "state")))
+
 ;; TODO: Additional MCP capabilities not yet implemented
 ;;
 ;; The schemas above define what our MCP integration can do. The LLM cannot
