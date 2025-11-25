@@ -376,3 +376,68 @@
                         "enum" (mapv #(get % "uri") resources-cache)}}
    "required" ["uri"]})
 
+(def prompt-response-schema
+  "Schema for MCP prompt get responses (GetPromptResult).
+   Returns messages with role and content blocks."
+  {"type" "object"
+   "properties"
+   {"description" {"type" "string"}
+    "messages"
+    {"type" "array"
+     "items"
+     {"type" "object"
+      "properties"
+      {"role" {"type" "string" "enum" ["user" "assistant"]}
+       "content"
+       {"anyOf"
+        [{"type" "object"
+          "properties" {"type" {"const" "text"}
+                        "text" {"type" "string"}}
+          "required" ["type" "text"]}
+         {"type" "object"
+          "properties" {"type" {"const" "image"}
+                        "data" {"type" "string"}
+                        "mimeType" {"type" "string"}}
+          "required" ["type" "data" "mimeType"]}
+         {"type" "object"
+          "properties" {"type" {"const" "audio"}
+                        "data" {"type" "string"}
+                        "mimeType" {"type" "string"}}
+          "required" ["type" "data" "mimeType"]}
+         {"type" "object"
+          "properties" {"type" {"const" "resource_link"}
+                        "uri" {"type" "string"}}
+          "required" ["type" "uri"]}
+         {"type" "object"
+          "properties" {"type" {"const" "resource"}
+                        "resource" {"type" "object"}}
+          "required" ["type" "resource"]}]}}
+      "required" ["role" "content"]}}}
+   "required" ["messages"]})
+
+(defn prompt-cache->request-schema
+  "Generate request schema for a single prompt from cache entry.
+   Arguments are always strings in MCP prompts."
+  [prompt-cache]
+  (let [prompt-name (get prompt-cache "name")
+        arguments (get prompt-cache "arguments" [])
+        arg-properties (into {}
+                             (map (fn [{n "name" d "description"}]
+                                    [n (cond-> {"type" "string"}
+                                         d (assoc "description" d))]))
+                             arguments)
+        required-args (vec (keep (fn [{n "name" r "required"}]
+                                   (when r n))
+                                 arguments))]
+    {"type" "object"
+     "properties" {"name" {"const" prompt-name}
+                   "arguments" (cond-> {"type" "object"
+                                        "properties" arg-properties}
+                                 (seq required-args) (assoc "required" required-args))}
+     "required" ["name"]}))
+
+(defn prompts-cache->request-schema
+  "Generate a oneOf schema for all prompts in cache."
+  [prompts-cache]
+  {"oneOf" (mapv prompt-cache->request-schema prompts-cache)})
+
