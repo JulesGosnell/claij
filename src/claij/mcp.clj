@@ -316,30 +316,15 @@
     "structuredContent" {"type" "object"}}
    "required" ["content"]})
 
-(defn strip-descriptions
-  "Remove description keys from a schema recursively."
-  [schema]
-  (cond
-    (map? schema)
-    (into {}
-          (comp (remove (fn [[k _]] (= k "description")))
-                (map (fn [[k v]] [k (strip-descriptions v)])))
-          schema)
-
-    (vector? schema)
-    (mapv strip-descriptions schema)
-
-    :else
-    schema))
-
 (defn tool-cache->request-schema
-  "Generate a JSON Schema for a tool call request from cached tool info."
+  "Generate a JSON Schema for a tool call request from cached tool info.
+   Preserves descriptions to guide LLM output generation."
   [tool-cache]
   (let [tool-name (get tool-cache "name")
         input-schema (get tool-cache "inputSchema")]
     {"type" "object"
      "properties" {"name" {"const" tool-name}
-                   "arguments" (strip-descriptions input-schema)}
+                   "arguments" input-schema}
      "required" ["name" "arguments"]}))
 
 (defn tool-cache->response-schema
