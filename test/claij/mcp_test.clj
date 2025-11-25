@@ -18,7 +18,6 @@
                       invalidate-mcp-cache-item
                       refresh-mcp-cache-item
                       tool-response-schema
-                      strip-descriptions
                       tool-cache->request-schema
                       tool-cache->response-schema
                       tools-cache->request-schema
@@ -622,7 +621,8 @@
           expected-request-schema {"type" "object"
                                    "properties" {"name" {"const" "clojure_eval"}
                                                  "arguments" {"type" "object"
-                                                              "properties" {"code" {"type" "string"}}
+                                                              "properties" {"code" {"type" "string"
+                                                                                    "description" "The Clojure code to evaluate."}}
                                                               "required" ["code"]}}
                                    "required" ["name" "arguments"]}
 
