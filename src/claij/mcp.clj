@@ -347,3 +347,32 @@
   [tools-cache]
   {"anyOf" (mapv tool-cache->response-schema tools-cache)})
 
+(def resource-response-schema
+  "Schema for MCP resource read responses (ReadResourceResult).
+   Contents can be text or blob (base64 binary)."
+  {"type" "object"
+   "properties"
+   {"contents"
+    {"type" "array"
+     "items"
+     {"anyOf"
+      [{"type" "object"
+        "properties" {"uri" {"type" "string"}
+                      "text" {"type" "string"}
+                      "mimeType" {"type" "string"}}
+        "required" ["uri" "text"]}
+       {"type" "object"
+        "properties" {"uri" {"type" "string"}
+                      "blob" {"type" "string"}
+                      "mimeType" {"type" "string"}}
+        "required" ["uri" "blob"]}]}}}
+   "required" ["contents"]})
+
+(defn resources-cache->request-schema
+  "Generate request schema constraining uri to known resources."
+  [resources-cache]
+  {"type" "object"
+   "properties" {"uri" {"type" "string"
+                        "enum" (mapv #(get % "uri") resources-cache)}}
+   "required" ["uri"]})
+
