@@ -31,7 +31,9 @@
                       logging-set-level-request-schema
                       logging-notification-schema
                       mcp-cache->request-schema
-                      mcp-cache->response-schema]]
+                      mcp-cache->response-schema
+                      mcp-request-schema-fn
+                      mcp-response-schema-fn]]
    [m3.validate :refer [validate]]))
 
 ;; send:
@@ -955,7 +957,46 @@
 
       ;; Response schema has anyOf with static schemas + per-tool schemas
       (is (contains? response-schema "anyOf"))
-      (is (>= (count (get response-schema "anyOf")) 4)))))
+      (is (>= (count (get response-schema "anyOf")) 4))))
+
+  (testing "FSM schema functions"
+    (let [;; Simulate FSM context with MCP cache at "state" key
+          cache {"tools" [{"name" "clojure_eval"
+                           "inputSchema" {"type" "object"
+                                          "properties" {"code" {"type" "string"}}
+                                          "required" ["code"]}}]
+                 "resources" [{"uri" "custom://readme"}]
+                 "prompts" [{"name" "system-prompt" "arguments" []}]}
+          context {"state" cache}
+          xition {"id" ["llm" "servicing"]}]
+
+      ;; mcp-request-schema-fn extracts cache and generates request schema
+      (let [schema (mcp-request-schema-fn context xition)]
+        (is (contains? schema "oneOf")
+            "Request schema function should return oneOf schema")
+        (is (= 4 (count (get schema "oneOf")))
+            "Should have 4 alternatives (tools, resources, prompts, logging)"))
+
+      ;; mcp-response-schema-fn extracts cache and generates response schema
+      (let [schema (mcp-response-schema-fn context xition)]
+        (is (contains? schema "anyOf")
+            "Response schema function should return anyOf schema")
+        (is (>= (count (get schema "anyOf")) 4)
+            "Should have at least 4 response types"))
+
+      ;; Works with empty cache
+      (let [empty-context {"state" {"tools" nil "resources" nil "prompts" nil}}
+            schema (mcp-request-schema-fn empty-context xition)]
+        (is (= 1 (count (get schema "oneOf")))
+            "Empty cache should still have logging")))
+
+    ;; xition parameter is available for future use (currently unused)
+    (let [context {"state" {"tools" [{"name" "test" "inputSchema" {}}]}}
+          xition-a {"id" ["llm" "servicing"]}
+          xition-b {"id" ["servicing" "llm"]}]
+      (is (= (mcp-request-schema-fn context xition-a)
+             (mcp-request-schema-fn context xition-b))
+          "Currently xition is unused, both should return same schema"))))
 
 ;;------------------------------------------------------------------------------
 ;;------------------------------------------------------------------------------
