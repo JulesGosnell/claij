@@ -21,7 +21,9 @@
                       tool-cache->request-schema
                       tool-cache->response-schema
                       tools-cache->request-schema
-                      tools-cache->response-schema]]
+                      tools-cache->response-schema
+                      resource-response-schema
+                      resources-cache->request-schema]]
    [m3.validate :refer [validate]]))
 
 ;; send:
@@ -715,7 +717,61 @@
       (is (:valid? (validate {:draft :draft7} response-schema {} add-response))
           "Add response should validate")
       (is (:valid? (validate {:draft :draft7} response-schema {} greet-response))
-          "Greet response should validate"))))
+          "Greet response should validate")))
+
+  (testing "resource read schema generation"
+    (let [resources-cache [{"uri" "custom://readme"
+                            "name" "README.md"
+                            "description" "Project readme"
+                            "mimeType" "text/markdown"}
+                           {"uri" "custom://project-info"
+                            "name" "Project Info"
+                            "description" "Project structure info"
+                            "mimeType" "text/markdown"}]
+
+          ;; Valid requests
+          valid-request {"uri" "custom://readme"}
+          valid-request-2 {"uri" "custom://project-info"}
+
+          ;; Invalid request - uri not in cache
+          invalid-request {"uri" "custom://unknown"}
+
+          ;; Valid responses
+          text-response {"contents" [{"uri" "custom://readme"
+                                      "text" "# My Project\n..."
+                                      "mimeType" "text/markdown"}]}
+          blob-response {"contents" [{"uri" "custom://image"
+                                      "blob" "base64encodeddata..."
+                                      "mimeType" "image/png"}]}
+          multi-response {"contents" [{"uri" "custom://readme"
+                                       "text" "# Part 1"}
+                                      {"uri" "custom://readme"
+                                       "text" "# Part 2"}]}
+
+          ;; Invalid response - missing required field
+          invalid-response {"contents" [{"uri" "custom://readme"}]}
+
+          request-schema (resources-cache->request-schema resources-cache)]
+
+      ;; Request schema structure
+      (is (= ["custom://readme" "custom://project-info"]
+             (get-in request-schema ["properties" "uri" "enum"])))
+
+      ;; Valid requests pass
+      (is (:valid? (validate {:draft :draft7} request-schema {} valid-request)))
+      (is (:valid? (validate {:draft :draft7} request-schema {} valid-request-2)))
+
+      ;; Invalid request fails (uri not in enum)
+      (is (not (:valid? (validate {:draft :draft7} request-schema {} invalid-request))))
+
+      ;; Response schema validates content types
+      (is (:valid? (validate {:draft :draft7} resource-response-schema {} text-response)))
+      (is (:valid? (validate {:draft :draft7} resource-response-schema {} blob-response)))
+      (is (:valid? (validate {:draft :draft7} resource-response-schema {} multi-response)))
+
+      ;; Invalid response fails
+      (is (not (:valid? (validate {:draft :draft7} resource-response-schema {} invalid-response)))))))
+
 ;;------------------------------------------------------------------------------
 ;; actually start an mcp service and walk through its capabiliies:
 
