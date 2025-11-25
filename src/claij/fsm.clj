@@ -120,9 +120,9 @@
       "prompts"
       {"$ref" "#/$defs/prompts"}
 
-      "schema" true
-      ;;{"$ref" "#/$defs/schema-ref"}
-      }
+      ;; TODO: tighten to {"oneOf" [{"$ref" "#/$defs/json-schema"} {"type" "string"}]}
+      ;; String values are lookup keys into context :id->schema for dynamic schema generation
+      "schema" true}
      "additionalProperties" false
      "required" ["id" "schema"]}}
 
