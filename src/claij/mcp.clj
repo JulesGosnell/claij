@@ -441,3 +441,25 @@
   [prompts-cache]
   {"oneOf" (mapv prompt-cache->request-schema prompts-cache)})
 
+(def logging-levels
+  "MCP logging levels (RFC-5424 syslog severities)."
+  ["debug" "info" "notice" "warning" "error" "critical" "alert" "emergency"])
+
+(def logging-set-level-request-schema
+  "Schema for MCP logging/setLevel request.
+   Client tells server what log level to send."
+  {"type" "object"
+   "properties" {"level" {"type" "string"
+                          "enum" logging-levels}}
+   "required" ["level"]})
+
+(def logging-notification-schema
+  "Schema for MCP notifications/message (log message from server).
+   Data can be any JSON value."
+  {"type" "object"
+   "properties" {"level" {"type" "string"
+                          "enum" logging-levels}
+                 "data" {}
+                 "logger" {"type" "string"}}
+   "required" ["level" "data"]})
+

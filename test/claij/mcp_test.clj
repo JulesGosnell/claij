@@ -26,7 +26,10 @@
                       resources-cache->request-schema
                       prompt-response-schema
                       prompt-cache->request-schema
-                      prompts-cache->request-schema]]
+                      prompts-cache->request-schema
+                      logging-levels
+                      logging-set-level-request-schema
+                      logging-notification-schema]]
    [m3.validate :refer [validate]]))
 
 ;; send:
@@ -856,7 +859,39 @@
       (is (:valid? (validate {:draft :draft7} prompt-response-schema {} with-description)))
 
       ;; Invalid response fails
-      (is (not (:valid? (validate {:draft :draft7} prompt-response-schema {} invalid-response)))))))
+      (is (not (:valid? (validate {:draft :draft7} prompt-response-schema {} invalid-response))))))
+
+  (testing "logging schema"
+    (let [;; Valid set-level requests
+          set-debug {"level" "debug"}
+          set-error {"level" "error"}
+
+          ;; Invalid set-level request
+          invalid-level {"level" "verbose"}
+
+          ;; Valid log notifications
+          simple-log {"level" "info" "data" "Server started"}
+          object-log {"level" "warning" "data" {"msg" "Connection lost" "code" 503}}
+          with-logger {"level" "debug" "data" "trace info" "logger" "mcp.server"}
+
+          ;; Invalid log notification - missing data
+          invalid-log {"level" "error"}]
+
+      ;; Logging levels constant
+      (is (= 8 (count logging-levels)))
+      (is (some #{"debug"} logging-levels))
+      (is (some #{"emergency"} logging-levels))
+
+      ;; Set-level requests
+      (is (:valid? (validate {:draft :draft7} logging-set-level-request-schema {} set-debug)))
+      (is (:valid? (validate {:draft :draft7} logging-set-level-request-schema {} set-error)))
+      (is (not (:valid? (validate {:draft :draft7} logging-set-level-request-schema {} invalid-level))))
+
+      ;; Log notifications
+      (is (:valid? (validate {:draft :draft7} logging-notification-schema {} simple-log)))
+      (is (:valid? (validate {:draft :draft7} logging-notification-schema {} object-log)))
+      (is (:valid? (validate {:draft :draft7} logging-notification-schema {} with-logger)))
+      (is (not (:valid? (validate {:draft :draft7} logging-notification-schema {} invalid-log)))))))
 
 ;;------------------------------------------------------------------------------
 ;; actually start an mcp service and walk through its capabiliies:
