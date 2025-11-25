@@ -277,3 +277,88 @@
   (when-let [[_ capability] (re-matches #"notifications/([^/]+)/list_changed" m)]
     capability))
 
+;; ============================================================
+;; Tool schema generation
+;; ============================================================
+
+(def tool-response-schema
+  "Minimal schema for MCP tool call responses (CallToolResult).
+   Covers: TextContent, ImageContent, AudioContent, ResourceLink, EmbeddedResource"
+  {"type" "object"
+   "properties"
+   {"content"
+    {"type" "array"
+     "items"
+     {"anyOf"
+      [{"type" "object"
+        "properties" {"type" {"const" "text"}
+                      "text" {"type" "string"}}
+        "required" ["type" "text"]}
+       {"type" "object"
+        "properties" {"type" {"const" "image"}
+                      "data" {"type" "string"}
+                      "mimeType" {"type" "string"}}
+        "required" ["type" "data" "mimeType"]}
+       {"type" "object"
+        "properties" {"type" {"const" "audio"}
+                      "data" {"type" "string"}
+                      "mimeType" {"type" "string"}}
+        "required" ["type" "data" "mimeType"]}
+       {"type" "object"
+        "properties" {"type" {"const" "resource_link"}
+                      "uri" {"type" "string"}}
+        "required" ["type" "uri"]}
+       {"type" "object"
+        "properties" {"type" {"const" "resource"}
+                      "resource" {"type" "object"}}
+        "required" ["type" "resource"]}]}}
+    "isError" {"type" "boolean"}
+    "structuredContent" {"type" "object"}}
+   "required" ["content"]})
+
+(defn strip-descriptions
+  "Remove description keys from a schema recursively."
+  [schema]
+  (cond
+    (map? schema)
+    (into {}
+          (comp (remove (fn [[k _]] (= k "description")))
+                (map (fn [[k v]] [k (strip-descriptions v)])))
+          schema)
+
+    (vector? schema)
+    (mapv strip-descriptions schema)
+
+    :else
+    schema))
+
+(defn tool-cache->request-schema
+  "Generate a JSON Schema for a tool call request from cached tool info."
+  [tool-cache]
+  (let [tool-name (get tool-cache "name")
+        input-schema (get tool-cache "inputSchema")]
+    {"type" "object"
+     "properties" {"name" {"const" tool-name}
+                   "arguments" (strip-descriptions input-schema)}
+     "required" ["name" "arguments"]}))
+
+(defn tool-cache->response-schema
+  "Generate response schema for a tool.
+   If tool has outputSchema, constrains structuredContent to match it."
+  [tool-cache]
+  (if-let [output-schema (get tool-cache "outputSchema")]
+    (assoc-in tool-response-schema
+              ["properties" "structuredContent"]
+              output-schema)
+    tool-response-schema))
+
+(defn tools-cache->request-schema
+  "Generate a oneOf schema for all tools in cache."
+  [tools-cache]
+  {"oneOf" (mapv tool-cache->request-schema tools-cache)})
+
+(defn tools-cache->response-schema
+  "Generate an anyOf schema for all tool responses in cache."
+  [tools-cache]
+  {"anyOf" (mapv tool-cache->response-schema tools-cache)})
+
