@@ -101,56 +101,153 @@
                           context)]
     (handler updated-context (wrap ["initing" "servicing"] document initialised-notification))))
 
-(defn service-action [context fsm ix state [{[is {m "message" document "document"} os] "content"} :as trail] handler]
-  (log/info "service-action:" (pr-str m))
-  (let [{{ic :input oc :output} :mcp/bridge} context]
+(defn service-action
+  "Routes messages to MCP bridge and handles responses.
+   Routing depends on where the message came from."
+  [context fsm {id "id"} state [{[is {m "message" document "document"} os] "content"} :as trail] handler]
+  (log/info "service-action: from" id "message:" (pr-str m))
+  (let [{{ic :input oc :output} :mcp/bridge} context
+        [from _to] id]
     (>!! ic m)
-    ;; diagram says we should consider a timeout here...
     (let [{method "method" :as oe} (take! oc 2000 {})]
       (handler
        context
        (cond
+         ;; Notification received - route to caching
          method
          (wrap ["servicing" "caching"] document oe)
-         :else
-         {"id" ["servicing" "llm"] "document" document})))))
 
-(defn cache-action [context fsm ix state [{[is {m "message"} os] "content"} :as trail] handler]
-  (log/info "cache-action:" (pr-str m))
-  (let [{method "method" {contents "contents" :as r} "result"} m]
+         ;; Response to tool call from llm - route back to llm with result
+         (= from "llm")
+         (cond-> {"id" ["servicing" "llm"] "message" oe}
+           document (assoc "document" document))
+
+         ;; Response to cache request - route back to caching with result
+         (= from "caching")
+         {"id" ["servicing" "caching"] "message" oe}
+
+         ;; Timeout/empty response during init phase - go to caching to populate
+         (= from "initing")
+         {"id" ["servicing" "caching"] "message" {}}
+
+         ;; Other timeout - go to llm
+         :else
+         (cond-> {"id" ["servicing" "llm"]}
+           document (assoc "document" document)))))))
+
+(defn check-cache-and-continue
+  "Inspect cache for holes. Request missing data until cache is complete.
+   
+   Holes:
+   - nil capability value → request capability/list
+   - resource without text → request resources/read"
+  [context handler]
+  (let [cache (get context "state")
+        ;; Check 1: Any nil capabilities?
+        missing-capability (first (filter (fn [[_k v]] (nil? v)) cache))
+        ;; Check 2: Any resources without text?
+        resources (get cache "resources")
+        resource-without-text (when (and (not missing-capability)
+                                         (sequential? resources))
+                                (first (filter #(not (contains? % "text")) resources)))]
+
     (cond
-      ;; Handle list-changed notification: invalidate and request refresh
+      ;; Hole 1: Request capability list
+      missing-capability
+      (let [[capability _nil-value] missing-capability
+            request-id (inc (:mcp/request-id context))
+            request {"jsonrpc" "2.0"
+                     "id" request-id
+                     "method" (str capability "/list")}]
+        (log/info "check-cache-and-continue: requesting" capability)
+        (handler
+         (assoc context :mcp/request-id request-id)
+         {"id" ["caching" "servicing"] "message" request}))
+
+      ;; Hole 2: Request resource read
+      resource-without-text
+      (let [uri (get resource-without-text "uri")
+            request-id (inc (:mcp/request-id context))
+            request {"jsonrpc" "2.0"
+                     "id" request-id
+                     "method" "resources/read"
+                     "params" {"uri" uri}}]
+        (log/info "check-cache-and-continue: requesting resource" uri)
+        (handler
+         (assoc context :mcp/request-id request-id)
+         {"id" ["caching" "servicing"] "message" request}))
+
+      ;; No holes - cache is complete!
+      :else
+      (do
+        (log/info "check-cache-and-continue: cache complete, going to llm")
+        (handler context {"id" ["caching" "llm"]})))))
+
+(defn cache-action
+  "Manages cache population by inspecting state and requesting missing data.
+   Routes based on incoming message type."
+  [context fsm {id "id"} state [{[is {m "message"} os] "content"} :as trail] handler]
+  (log/info "cache-action: from" id "message:" (pr-str m))
+  (let [{method "method" result "result"} m
+        contents (get result "contents")]
+
+    (cond
+      ;; Resource contents - merge into resources
+      contents
+      (do
+        (log/info "cache-action: received resource contents, merging")
+        (let [updated-context (update-in context ["state" "resources"] merge-resources contents)]
+          (check-cache-and-continue updated-context handler)))
+
+      ;; Incoming list response - refresh cache with data
+      result
+      (do
+        (log/info "cache-action: received list response, refreshing cache")
+        (let [updated-context (update context "state" refresh-mcp-cache-item result)]
+          (check-cache-and-continue updated-context handler)))
+
+      ;; list_changed notification - invalidate and request refresh
       (and method (list-changed? method))
       (let [capability (list-changed? method)
+            updated-context (update context "state" invalidate-mcp-cache-item capability)
             request-id (inc (:mcp/request-id context))
-            updated-context (-> context
-                                (update "state" invalidate-mcp-cache-item capability)
-                                (assoc :mcp/request-id request-id))
-            refresh-request {"jsonrpc" "2.0"
-                             "id" request-id
-                             "method" (str capability "/" "list")}]
-        (handler updated-context (wrap ["caching" "servicing"] refresh-request)))
+            request {"jsonrpc" "2.0"
+                     "id" request-id
+                     "method" (str capability "/list")}]
+        (log/info "cache-action: list_changed for" capability ", requesting refresh")
+        (handler
+         (assoc updated-context :mcp/request-id request-id)
+         {"id" ["caching" "servicing"] "message" request}))
 
-      ;; Handle resource contents: merge into resources
-      contents
-      (let [updated-context (update-in context ["state" "resources"] merge-resources contents)]
-        ;; After merging contents, continue servicing
-        (handler updated-context (wrap ["caching" "servicing"] {})))
-
-      ;; Handle list response: refresh cache item
-      r
-      (let [updated-context (update context "state" refresh-mcp-cache-item r)]
-        ;; After refreshing cache, check if we need more data or can proceed to LLM
-        ;; For now, continue servicing - we can refine this logic later
-        (handler updated-context (wrap ["caching" "servicing"] {})))
-
+      ;; Initial entry or retry - inspect cache and request missing data
       :else
-      ;; Pass through - shouldn't normally happen
-      (handler context (wrap ["caching" "llm"] {})))))
+      (do
+        (log/info "cache-action: checking cache for missing data")
+        (check-cache-and-continue context handler)))))
 
-(defn llm-action [context fsm ix state [{[is document os] "content"} :as trail] handler]
-  (log/info "llm-action:" (pr-str document))
-  (handler context (wrap ["llm" "end"] nil)))
+(defn llm-action
+  "LLM state - can make tool calls or signal completion.
+   Routes based on incoming transition and message content."
+  [context fsm {id "id"} state [{[is {m "message" d "document"} os] "content"} :as trail] handler]
+  (log/info "llm-action: from" id "message:" (pr-str m))
+  ;; Check if this is a tool response (has result) or initial entry
+  (if (get m "result")
+    ;; Tool response returned - we're done
+    (let [result (get m "result")]
+      (log/info "llm-action: tool result received" (pr-str result))
+      (handler context {"id" ["llm" "end"] "result" result}))
+    ;; Initial entry (from servicing timeout or caching) - make a test tool call
+    (let [request-id (inc (:mcp/request-id context))
+          tool-call {"jsonrpc" "2.0"
+                     "id" request-id
+                     "method" "tools/call"
+                     "params" {"name" "clojure_eval"
+                               "arguments" {"code" "(+ 1 1)"}}}]
+      (log/info "llm-action: making tool call" (pr-str tool-call))
+      (handler
+       (assoc context :mcp/request-id request-id)
+       (cond-> {"id" ["llm" "servicing"] "message" tool-call}
+         d (assoc "document" d))))))
 
 (defn end-action
   "Final action that signals FSM completion via promise delivery."
@@ -177,6 +274,13 @@
 ;;==============================================================================
 ;; MCP FSM Definition
 ;;==============================================================================
+
+;; NOTE: If you modify this FSM definition, regenerate the visualization:
+;;   1. At the REPL: (require '[claij.graph :refer [fsm->dot]]
+;;                             '[claij.fsm.mcp-fsm :refer [mcp-fsm]])
+;;                   (spit "doc/mcp-fsm.dot" (fsm->dot mcp-fsm))
+;;   2. Generate SVG: dot -Tsvg doc/mcp-fsm.dot -o doc/mcp-fsm.svg
+;;   This keeps the README visualization in sync with the code.
 
 (def-fsm
   mcp-fsm
@@ -264,15 +368,39 @@
       "required" ["id" "message"]}}
 
     {"id" ["servicing" "llm"]
-     "label" "tools\nreponse"
+     "label" "tool\nresponse"
+     "description" "Tool response returning to LLM"
      "schema"
      {"type" "object"
       "properties"
       {"id" {"const" ["servicing" "llm"]}
-       "document" {"type" "string"}}
+       "document" {"type" "string"}
+       "message" true}
       "additionalProperties" false
-      "required" ["id" "document"]}}
+      "required" ["id"]}}
+
+    {"id" ["caching" "llm"]
+     "label" "cache\nready"
+     "description" "Cache is ready, LLM can start work"
+     "schema"
+     {"type" "object"
+      "properties"
+      {"id" {"const" ["caching" "llm"]}}
+      "additionalProperties" false
+      "required" ["id"]}}
+
+    {"id" ["llm" "servicing"]
+     "label" "tool\ncall"
+     "description" "LLM makes a tool call"
+     "schema"
+     {"type" "object"
+      "properties"
+      {"id" {"const" ["llm" "servicing"]}
+       "message" true}
+      "additionalProperties" false
+      "required" ["id" "message"]}}
 
     {"id" ["llm" "end"]
-     "label" "ouput"
+     "label" "output"
+     "description" "LLM completes work"
      "schema" true}]})
