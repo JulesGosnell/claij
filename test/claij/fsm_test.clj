@@ -198,3 +198,48 @@
 
       ;; Clean up
       (stop))))
+
+(deftest string-schema-reference-test
+  (testing "FSM definition accepts string as schema reference"
+    ;; Step 1: Confirm that string values are valid in schema fields at definition time.
+    ;; This enables dynamic schema lookup at runtime (Step 2).
+    (let [fsm-with-string-schema
+          {"id" "string-schema-test"
+           "schema" {"$schema" "https://json-schema.org/draft/2020-12/schema"
+                     "$$id" "https://claij.org/schemas/string-schema-test"
+                     "$version" 0}
+           "states" [{"id" "llm" "action" "llm"}
+                     {"id" "servicing" "action" "mcp"}
+                     {"id" "end"}]
+           "xitions" [{"id" ["start" "llm"]
+                       "schema" {"type" "string"}}
+                      ;; String schema references - to be resolved at runtime
+                      {"id" ["llm" "servicing"]
+                       "schema" "mcp-request"}
+                      {"id" ["servicing" "llm"]
+                       "schema" "mcp-response"}
+                      {"id" ["llm" "end"]
+                       "schema" {"type" "object"
+                                 "properties" {"result" {"type" "string"}}}}]}]
+      ;; FSM definition should validate (string is accepted as schema value)
+      (is (= "string-schema-test" (get fsm-with-string-schema "id")))
+      (is (= "mcp-request" (get-in fsm-with-string-schema ["xitions" 1 "schema"])))
+      (is (= "mcp-response" (get-in fsm-with-string-schema ["xitions" 2 "schema"])))
+
+      ;; Verify structure is correct for later runtime processing
+      (let [xitions (get fsm-with-string-schema "xitions")
+            string-schemas (filter #(string? (get % "schema")) xitions)]
+        (is (= 2 (count string-schemas))
+            "Should have 2 transitions with string schema references"))))
+
+  (testing "def-m1 validates FSM with string schemas"
+    ;; Use the validation machinery directly
+    (let [fsm-m2 @(resolve 'claij.fsm/fsm-m2)
+          test-fsm {"id" "validation-test"
+                    "states" [{"id" "a"} {"id" "b"}]
+                    "xitions" [{"id" ["a" "b"]
+                                "schema" "dynamic-schema-key"}]}
+          result (validate {:draft :draft2020-12} fsm-m2 {} test-fsm)]
+      (is (:valid? result)
+          (str "FSM with string schema should validate against fsm-m2. Errors: "
+               (:errors result))))))
