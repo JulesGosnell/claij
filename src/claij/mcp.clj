@@ -463,3 +463,82 @@
                  "logger" {"type" "string"}}
    "required" ["level" "data"]})
 
+;;-----------------------------------------------------------------------------
+;; Level 1: Combined MCP request/response schemas
+;;
+;; These functions take the MCP cache and produce unified schemas covering
+;; all available operations. The schemas are dynamic - they reflect what's
+;; actually available from the connected MCP server(s).
+
+(defn mcp-cache->request-schema
+  "Generate combined request schema from MCP cache.
+   Returns a oneOf schema covering all available operations:
+   tools/call, resources/read, prompts/get, logging/setLevel.
+   
+   Cache shape: {\"tools\" [...] \"resources\" [...] \"prompts\" [...]}"
+  [{tools "tools" resources "resources" prompts "prompts"}]
+  (let [schemas (cond-> []
+                  (seq tools)
+                  (conj {"type" "object"
+                         "properties" {"method" {"const" "tools/call"}
+                                       "params" (tools-cache->request-schema tools)}
+                         "required" ["method" "params"]})
+
+                  (seq resources)
+                  (conj {"type" "object"
+                         "properties" {"method" {"const" "resources/read"}
+                                       "params" (resources-cache->request-schema resources)}
+                         "required" ["method" "params"]})
+
+                  (seq prompts)
+                  (conj {"type" "object"
+                         "properties" {"method" {"const" "prompts/get"}
+                                       "params" (prompts-cache->request-schema prompts)}
+                         "required" ["method" "params"]})
+
+                  ;; logging/setLevel is always available (not cache-dependent)
+                  true
+                  (conj {"type" "object"
+                         "properties" {"method" {"const" "logging/setLevel"}
+                                       "params" logging-set-level-request-schema}
+                         "required" ["method" "params"]}))]
+    {"oneOf" schemas}))
+
+(defn mcp-cache->response-schema
+  "Generate combined response schema from MCP cache.
+   Returns an anyOf schema covering all possible responses.
+   
+   Note: Response schemas are mostly static (not per-tool/resource/prompt)
+   except for tools with outputSchema which constrain structuredContent."
+  [{tools "tools" :as _cache}]
+  (let [schemas (cond-> [resource-response-schema
+                         prompt-response-schema
+                         logging-notification-schema]
+                  (seq tools)
+                  (into (map tool-cache->response-schema tools)))]
+    {"anyOf" schemas}))
+
+;; TODO: Additional MCP capabilities not yet implemented
+;;
+;; The schemas above define what our MCP integration can do. The LLM cannot
+;; request capabilities we don't offer schemas for.
+;;
+;; Future capabilities to consider:
+;;
+;; - sampling (Server → Client): Server requests client to make an LLM call.
+;;   Enables nested/recursive LLM reasoning - tools can spawn their own AI.
+;;   High priority for multi-agent "society of AIs" architecture.
+;;
+;; - completions (Server → Client): Autocompletion for tool/prompt arguments.
+;;   Could provide dynamic valid-value suggestions beyond static enums.
+;;
+;; - elicitation (Server → Client): Server requests user input.
+;;   For interactive workflows requiring human-in-the-loop.
+;;
+;; - progress (Server → Client): Progress notifications for long operations.
+;;
+;; - roots (Client → Server): Client tells server about filesystem roots.
+;;
+;; - subscriptions (Client → Server): Subscribe to resource updates.
+;;   Note: clojure-mcp doesn't currently support this.
+

@@ -29,7 +29,9 @@
                       prompts-cache->request-schema
                       logging-levels
                       logging-set-level-request-schema
-                      logging-notification-schema]]
+                      logging-notification-schema
+                      mcp-cache->request-schema
+                      mcp-cache->response-schema]]
    [m3.validate :refer [validate]]))
 
 ;; send:
@@ -891,8 +893,71 @@
       (is (:valid? (validate {:draft :draft7} logging-notification-schema {} simple-log)))
       (is (:valid? (validate {:draft :draft7} logging-notification-schema {} object-log)))
       (is (:valid? (validate {:draft :draft7} logging-notification-schema {} with-logger)))
-      (is (not (:valid? (validate {:draft :draft7} logging-notification-schema {} invalid-log)))))))
+      (is (not (:valid? (validate {:draft :draft7} logging-notification-schema {} invalid-log))))))
 
+  (testing "combined MCP cache schema generation"
+    (let [;; Minimal cache with one of each
+          cache {"tools" [{"name" "eval"
+                           "inputSchema" {"type" "object"
+                                          "properties" {"code" {"type" "string"}}
+                                          "required" ["code"]}}]
+                 "resources" [{"uri" "custom://readme" "name" "README"}]
+                 "prompts" [{"name" "system-prompt" "arguments" []}]}
+
+          ;; Empty cache
+          empty-cache {"tools" nil "resources" nil "prompts" nil}
+
+          ;; Partial cache - only tools
+          tools-only-cache {"tools" [{"name" "bash"
+                                      "inputSchema" {"type" "object"
+                                                     "properties" {"cmd" {"type" "string"}}}}]
+                            "resources" nil
+                            "prompts" nil}
+
+          ;; Valid requests
+          tool-request {"method" "tools/call"
+                        "params" {"name" "eval" "arguments" {"code" "(+ 1 1)"}}}
+          resource-request {"method" "resources/read"
+                            "params" {"uri" "custom://readme"}}
+          prompt-request {"method" "prompts/get"
+                          "params" {"name" "system-prompt"}}
+          logging-request {"method" "logging/setLevel"
+                           "params" {"level" "debug"}}
+
+          ;; Invalid request - wrong method
+          invalid-method {"method" "tools/list" "params" {}}
+
+          ;; Generate schemas
+          request-schema (mcp-cache->request-schema cache)
+          response-schema (mcp-cache->response-schema cache)
+          empty-request-schema (mcp-cache->request-schema empty-cache)
+          tools-only-request-schema (mcp-cache->request-schema tools-only-cache)]
+
+      ;; Full cache produces 4 alternatives (tools, resources, prompts, logging)
+      (is (= 4 (count (get request-schema "oneOf"))))
+
+      ;; Empty cache still has logging
+      (is (= 1 (count (get empty-request-schema "oneOf"))))
+      (is (= "logging/setLevel"
+             (get-in empty-request-schema ["oneOf" 0 "properties" "method" "const"])))
+
+      ;; Partial cache has tools + logging
+      (is (= 2 (count (get tools-only-request-schema "oneOf"))))
+
+      ;; Valid requests pass
+      (is (:valid? (validate {:draft :draft7} request-schema {} tool-request)))
+      (is (:valid? (validate {:draft :draft7} request-schema {} resource-request)))
+      (is (:valid? (validate {:draft :draft7} request-schema {} prompt-request)))
+      (is (:valid? (validate {:draft :draft7} request-schema {} logging-request)))
+
+      ;; Invalid method fails
+      (is (not (:valid? (validate {:draft :draft7} request-schema {} invalid-method))))
+
+      ;; Response schema has anyOf with static schemas + per-tool schemas
+      (is (contains? response-schema "anyOf"))
+      (is (>= (count (get response-schema "anyOf")) 4)))))
+
+;;------------------------------------------------------------------------------
 ;;------------------------------------------------------------------------------
 ;; actually start an mcp service and walk through its capabiliies:
 
@@ -972,8 +1037,7 @@
   (>!! ic {"jsonrpc" "2.0" "id" 10 "method" "resources/read" "params" {"uri" "custom://project-info"}})
   (assoc-in (<!! oc) ["result" "contents" 0 "text"] "...")
 
-  (<!! oc) ;; many times
-  )
+  (<!! oc)) ;; many times
 
 ;;------------------------------------------------------------------------------
 
