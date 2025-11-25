@@ -16,7 +16,14 @@
                       merge-resources
                       initialize-mcp-cache
                       invalidate-mcp-cache-item
-                      refresh-mcp-cache-item]]))
+                      refresh-mcp-cache-item
+                      tool-response-schema
+                      strip-descriptions
+                      tool-cache->request-schema
+                      tool-cache->response-schema
+                      tools-cache->request-schema
+                      tools-cache->response-schema]]
+   [m3.validate :refer [validate]]))
 
 ;; send:
 
@@ -436,7 +443,9 @@
    {"contents"
     [{"uri" "custom://project-info",
       "mimeType" "text/markdown",
-      "text" "..."}]}}) ;; text broke cider...
+      "text" "..."}]}})
+
+;; Tool schema generation functions moved to src/claij/mcp.clj
 
 ;;------------------------------------------------------------------------------
 ;;------------------------------------------------------------------------------
@@ -556,7 +565,157 @@
     "message" "Method not found: resources/subscribe"}}
 
   ;; so it looks like clojure-mcp does not support subscriptions...
-  )
+
+  (testing "tool call schema generation"
+    (let [;; (0a) tool cache WITHOUT outputSchema
+          tool-cache {"name" "clojure_eval"
+                      "description" "Takes a Clojure Expression and evaluates it."
+                      "inputSchema" {"type" "object"
+                                     "properties" {"code" {"type" "string"
+                                                           "description" "The Clojure code to evaluate."}}
+                                     "required" ["code"]}}
+
+          ;; (0b) tool cache WITH outputSchema
+          tool-cache-with-output {"name" "query_users"
+                                  "description" "Query users from database"
+                                  "inputSchema" {"type" "object"
+                                                 "properties" {"limit" {"type" "integer"}}
+                                                 "required" []}
+                                  "outputSchema" {"type" "object"
+                                                  "properties" {"users" {"type" "array"}
+                                                                "total" {"type" "integer"}}
+                                                  "required" ["users" "total"]}}
+
+          ;; (1) example request
+          tool-request {"name" "clojure_eval"
+                        "arguments" {"code" "(+ 1 1)"}}
+
+          ;; (2a-h) response examples - various content types
+          tool-response-text {"content" [{"type" "text" "text" "=> 2"}]}
+          tool-response-error {"isError" true
+                               "content" [{"type" "text" "text" "Error: file not found"}]}
+          tool-response-image {"content" [{"type" "image"
+                                           "data" "base64encodeddata..."
+                                           "mimeType" "image/png"}]}
+          tool-response-audio {"content" [{"type" "audio"
+                                           "data" "base64audiodata..."
+                                           "mimeType" "audio/wav"}]}
+          tool-response-resource-link {"content" [{"type" "resource_link"
+                                                   "uri" "file:///path/to/file.txt"}]}
+          tool-response-embedded {"content" [{"type" "resource"
+                                              "resource" {"uri" "file:///foo.txt"
+                                                          "text" "contents here"}}]}
+          tool-response-multi {"content" [{"type" "text" "text" "Found 3 files:"}
+                                          {"type" "text" "text" "- foo.clj\n- bar.clj"}]}
+
+          ;; (2i) response with valid structuredContent (for outputSchema tool)
+          tool-response-structured-valid {"content" [{"type" "text" "text" "Found 2 users"}]
+                                          "structuredContent" {"users" [{"id" 1} {"id" 2}]
+                                                               "total" 2}}
+
+          ;; (2j) response with invalid structuredContent (missing required field)
+          tool-response-structured-invalid {"content" [{"type" "text" "text" "Found 2 users"}]
+                                            "structuredContent" {"users" [{"id" 1}]}}
+          ;; missing "total" field
+
+          ;; (3) expected request schema
+          expected-request-schema {"type" "object"
+                                   "properties" {"name" {"const" "clojure_eval"}
+                                                 "arguments" {"type" "object"
+                                                              "properties" {"code" {"type" "string"}}
+                                                              "required" ["code"]}}
+                                   "required" ["name" "arguments"]}
+
+          ;; Generate schemas
+          request-schema (tool-cache->request-schema tool-cache)
+          response-schema (tool-cache->response-schema tool-cache)
+          response-schema-with-output (tool-cache->response-schema tool-cache-with-output)]
+
+      ;; Test: request schema generation
+      (is (= expected-request-schema request-schema)
+          "Generated request schema should match expected")
+      (is (:valid? (validate {:draft :draft7} request-schema {} tool-request))
+          "Request should validate against generated schema")
+
+      ;; Test: response schema WITHOUT outputSchema returns base schema
+      (is (= tool-response-schema response-schema)
+          "Tool without outputSchema should return base response schema")
+
+      ;; Test: response schema WITH outputSchema includes constraint
+      (is (= (get-in tool-cache-with-output ["outputSchema"])
+             (get-in response-schema-with-output ["properties" "structuredContent"]))
+          "Tool with outputSchema should constrain structuredContent")
+
+      ;; Test: all content types validate against base schema
+      (is (:valid? (validate {:draft :draft7} response-schema {} tool-response-text))
+          "Text content should validate")
+      (is (:valid? (validate {:draft :draft7} response-schema {} tool-response-error))
+          "Error response should validate")
+      (is (:valid? (validate {:draft :draft7} response-schema {} tool-response-image))
+          "Image content should validate")
+      (is (:valid? (validate {:draft :draft7} response-schema {} tool-response-audio))
+          "Audio content should validate")
+      (is (:valid? (validate {:draft :draft7} response-schema {} tool-response-resource-link))
+          "Resource link should validate")
+      (is (:valid? (validate {:draft :draft7} response-schema {} tool-response-embedded))
+          "Embedded resource should validate")
+      (is (:valid? (validate {:draft :draft7} response-schema {} tool-response-multi))
+          "Multiple content blocks should validate")
+
+      ;; Test: structuredContent validation with outputSchema
+      (is (:valid? (validate {:draft :draft7} response-schema-with-output {} tool-response-structured-valid))
+          "Valid structuredContent should validate against outputSchema")
+      (is (not (:valid? (validate {:draft :draft7} response-schema-with-output {} tool-response-structured-invalid)))
+          "Invalid structuredContent should fail validation against outputSchema")))
+
+  (testing "combined tools schema generation (oneOf)"
+    (let [;; Simple 2-tool cache
+          tools-cache [{"name" "add"
+                        "description" "Add two numbers"
+                        "inputSchema" {"type" "object"
+                                       "properties" {"a" {"type" "integer"}
+                                                     "b" {"type" "integer"}}
+                                       "required" ["a" "b"]}}
+                       {"name" "greet"
+                        "description" "Greet someone"
+                        "inputSchema" {"type" "object"
+                                       "properties" {"name" {"type" "string"}}
+                                       "required" ["name"]}}]
+
+          ;; Example requests
+          add-request {"name" "add" "arguments" {"a" 1 "b" 2}}
+          greet-request {"name" "greet" "arguments" {"name" "Alice"}}
+          invalid-request {"name" "add" "arguments" {"a" "not-a-number"}}
+
+          ;; Example responses
+          add-response {"content" [{"type" "text" "text" "3"}]}
+          greet-response {"content" [{"type" "text" "text" "Hello, Alice!"}]}
+
+          ;; Generate combined schemas
+          request-schema (tools-cache->request-schema tools-cache)
+          response-schema (tools-cache->response-schema tools-cache)]
+
+      ;; Test: structure is oneOf/anyOf with correct count
+      (is (= 2 (count (get request-schema "oneOf")))
+          "Request schema should have oneOf with 2 alternatives")
+      (is (= 2 (count (get response-schema "anyOf")))
+          "Response schema should have anyOf with 2 alternatives")
+
+      ;; Test: valid requests pass
+      (is (:valid? (validate {:draft :draft7} request-schema {} add-request))
+          "Add request should validate")
+      (is (:valid? (validate {:draft :draft7} request-schema {} greet-request))
+          "Greet request should validate")
+
+      ;; Test: invalid request fails
+      (is (not (:valid? (validate {:draft :draft7} request-schema {} invalid-request)))
+          "Invalid request should fail validation")
+
+      ;; Test: responses validate
+      (is (:valid? (validate {:draft :draft7} response-schema {} add-response))
+          "Add response should validate")
+      (is (:valid? (validate {:draft :draft7} response-schema {} greet-response))
+          "Greet response should validate"))))
 ;;------------------------------------------------------------------------------
 ;; actually start an mcp service and walk through its capabiliies:
 
