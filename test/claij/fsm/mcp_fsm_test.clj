@@ -138,3 +138,51 @@
                           (count (filter #(contains? % "text") resources))
                           "of" (count resources))))))))))
 
+(deftest ^:integration mcp-fsm-tool-call-test
+  (testing "MCP FSM can make tool calls via llm↔servicing loop"
+    (let [[counter wrapper-fn] (make-tracker)
+          tracked-actions (wrap-actions mcp-actions wrapper-fn)
+          context {:id->action tracked-actions
+                   "state" {}}
+          [submit await _stop] (start-fsm context mcp-fsm)]
+
+      (submit {"id" ["start" "starting"]
+               "document" "test tool call"})
+
+      (let [result (await 15000)]
+        (is (not= result :timeout) "FSM should complete within 15 seconds")
+
+        (when (not= result :timeout)
+          (let [[_final-context trail] result
+                counts @counter
+                final-event (claij.fsm/last-event trail)]
+
+            (testing "llm action called multiple times (entry + tool response)"
+              ;; llm should be called at least twice:
+              ;; 1. Initial entry (makes tool call)
+              ;; 2. Tool response (completes)
+              (is (>= (get counts "llm" 0) 2)
+                  "llm action should be called at least twice for tool call loop"))
+
+            (testing "service action called for tool routing"
+              ;; service should be called multiple times:
+              ;; 1. During init (sends initialized notification)
+              ;; 2. Tool call from llm
+              (is (>= (get counts "service" 0) 2)
+                  "service action should handle init and tool call"))
+
+            (testing "tool call result captured"
+              ;; Final event should contain the tool result
+              (is (map? final-event) "Final event should be a map")
+              (let [tool-result (get final-event "result")]
+                (is (some? tool-result) "Final event should have result from tool call")
+                (when tool-result
+                  ;; The clojure_eval tool returns {"content" [{"type" "text", "text" "=> 2"}]}
+                  (let [content (get tool-result "content")
+                        text (get-in content [0 "text"])]
+                    (is (= "=> 2" text) "(+ 1 1) should evaluate to 2")
+                    (log/info "Tool call result:" text)))))
+
+            (log/info "Action counts:" counts)))))))
+
+
