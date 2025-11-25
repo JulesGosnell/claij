@@ -23,7 +23,10 @@
                       tools-cache->request-schema
                       tools-cache->response-schema
                       resource-response-schema
-                      resources-cache->request-schema]]
+                      resources-cache->request-schema
+                      prompt-response-schema
+                      prompt-cache->request-schema
+                      prompts-cache->request-schema]]
    [m3.validate :refer [validate]]))
 
 ;; send:
@@ -770,7 +773,90 @@
       (is (:valid? (validate {:draft :draft7} resource-response-schema {} multi-response)))
 
       ;; Invalid response fails
-      (is (not (:valid? (validate {:draft :draft7} resource-response-schema {} invalid-response)))))))
+      (is (not (:valid? (validate {:draft :draft7} resource-response-schema {} invalid-response))))))
+
+  (testing "prompt get schema generation"
+    (let [;; Prompt without arguments
+          prompt-no-args {"name" "clojure_repl_system_prompt"
+                          "description" "Provides Clojure development guidelines."
+                          "arguments" []}
+
+          ;; Prompt with optional argument
+          prompt-optional-arg {"name" "chat-session-summarize"
+                               "description" "Summarize the chat session."
+                               "arguments" [{"name" "chat_session_key"
+                                             "description" "Key to store summary"
+                                             "required" false}]}
+
+          ;; Prompt with required argument
+          prompt-required-arg {"name" "ACT/scratch_pad_save_as"
+                               "description" "Save scratch pad to file."
+                               "arguments" [{"name" "file_path"
+                                             "description" "File path to save"
+                                             "required" true}]}
+
+          ;; Valid requests
+          request-no-args {"name" "clojure_repl_system_prompt"}
+          request-with-args {"name" "ACT/scratch_pad_save_as"
+                             "arguments" {"file_path" "my-session.edn"}}
+          request-optional-provided {"name" "chat-session-summarize"
+                                     "arguments" {"chat_session_key" "custom_key"}}
+          request-optional-omitted {"name" "chat-session-summarize"
+                                    "arguments" {}}
+
+          ;; Invalid request - missing required argument
+          request-missing-required {"name" "ACT/scratch_pad_save_as"
+                                    "arguments" {}}
+
+          ;; Valid responses
+          text-response {"messages" [{"role" "user"
+                                      "content" {"type" "text"
+                                                 "text" "Please do X..."}}]}
+          multi-message {"messages" [{"role" "user"
+                                      "content" {"type" "text" "text" "First"}}
+                                     {"role" "assistant"
+                                      "content" {"type" "text" "text" "Second"}}]}
+          with-description {"description" "A helpful prompt"
+                            "messages" [{"role" "user"
+                                         "content" {"type" "text" "text" "Hello"}}]}
+
+          ;; Invalid response
+          invalid-response {"messages" [{"role" "user"}]}
+
+          ;; Generate schemas
+          schema-no-args (prompt-cache->request-schema prompt-no-args)
+          schema-required (prompt-cache->request-schema prompt-required-arg)
+          prompts-cache [prompt-no-args prompt-optional-arg prompt-required-arg]
+          combined-schema (prompts-cache->request-schema prompts-cache)]
+
+      ;; Schema structure - no required args means no "required" in arguments
+      (is (= {"const" "clojure_repl_system_prompt"}
+             (get-in schema-no-args ["properties" "name"])))
+      (is (nil? (get-in schema-no-args ["properties" "arguments" "required"])))
+
+      ;; Schema structure - required args present
+      (is (= ["file_path"]
+             (get-in schema-required ["properties" "arguments" "required"])))
+
+      ;; Combined schema uses oneOf
+      (is (= 3 (count (get combined-schema "oneOf"))))
+
+      ;; Valid requests pass
+      (is (:valid? (validate {:draft :draft7} schema-no-args {} request-no-args)))
+      (is (:valid? (validate {:draft :draft7} schema-required {} request-with-args)))
+      (is (:valid? (validate {:draft :draft7} combined-schema {} request-optional-provided)))
+      (is (:valid? (validate {:draft :draft7} combined-schema {} request-optional-omitted)))
+
+      ;; Missing required argument fails
+      (is (not (:valid? (validate {:draft :draft7} schema-required {} request-missing-required))))
+
+      ;; Response schema validates
+      (is (:valid? (validate {:draft :draft7} prompt-response-schema {} text-response)))
+      (is (:valid? (validate {:draft :draft7} prompt-response-schema {} multi-message)))
+      (is (:valid? (validate {:draft :draft7} prompt-response-schema {} with-description)))
+
+      ;; Invalid response fails
+      (is (not (:valid? (validate {:draft :draft7} prompt-response-schema {} invalid-response)))))))
 
 ;;------------------------------------------------------------------------------
 ;; actually start an mcp service and walk through its capabiliies:
