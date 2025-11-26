@@ -20,7 +20,9 @@
                       merge-resources
                       initialize-mcp-cache
                       invalidate-mcp-cache-item
-                      refresh-mcp-cache-item]]))
+                      refresh-mcp-cache-item
+                      mcp-request-xition-schema-fn
+                      mcp-response-xition-schema-fn]]))
 
 ;;==============================================================================
 ;; MCP Schema
@@ -76,9 +78,12 @@
         oc (chan n (map read-str))
         stop (start-mcp-bridge config ic oc)
         ;; Store MCP bridge in context instead of global atom
+        ;; Register schema functions for dynamic schema resolution
         updated-context (assoc context
                                :mcp/bridge {:input ic :output oc :stop stop}
-                               :mcp/request-id 0)]
+                               :mcp/request-id 0
+                               :id->schema {"mcp-request-xition" mcp-request-xition-schema-fn
+                                            "mcp-response-xition" mcp-response-xition-schema-fn})]
     (handler
      updated-context
      (let [{m "method" :as message} (take! oc 5000 (assoc initialise-request "id" 0))]
@@ -369,15 +374,8 @@
 
     {"id" ["servicing" "llm"]
      "label" "tool\nresponse"
-     "description" "Tool response returning to LLM"
-     "schema"
-     {"type" "object"
-      "properties"
-      {"id" {"const" ["servicing" "llm"]}
-       "document" {"type" "string"}
-       "message" true}
-      "additionalProperties" false
-      "required" ["id"]}}
+     "description" "Tool response returning to LLM - schema dynamically generated from MCP cache"
+     "schema" "mcp-response-xition"}
 
     {"id" ["caching" "llm"]
      "label" "cache\nready"
@@ -391,14 +389,8 @@
 
     {"id" ["llm" "servicing"]
      "label" "tool\ncall"
-     "description" "LLM makes a tool call"
-     "schema"
-     {"type" "object"
-      "properties"
-      {"id" {"const" ["llm" "servicing"]}
-       "message" true}
-      "additionalProperties" false
-      "required" ["id" "message"]}}
+     "description" "LLM makes MCP request - schema dynamically generated from MCP cache"
+     "schema" "mcp-request-xition"}
 
     {"id" ["llm" "end"]
      "label" "output"
