@@ -12,12 +12,11 @@
    [clojure.data.json :refer [write-str read-str]]
    [clojure.core.async :refer [chan alt!! timeout <!! >!!]]
    [claij.util :refer [def-m2]]
-   [claij.fsm :refer [def-fsm]]
+   [claij.fsm :refer [def-fsm llm-action]]
    [claij.mcp.bridge :refer [start-mcp-bridge]]
    [claij.mcp :refer [initialise-request
                       initialised-notification
                       list-changed?
-                      merge-resources
                       initialize-mcp-cache
                       invalidate-mcp-cache-item
                       refresh-mcp-cache-item
@@ -145,20 +144,13 @@
    
    Holes:
    - nil capability value → request capability/list
-   - resource without text → request resources/read"
+   
+   Note: Resource bodies are loaded lazily at LLM's request, not eagerly here."
   [context handler]
   (let [cache (get context "state")
-        ;; Check 1: Any nil capabilities?
-        missing-capability (first (filter (fn [[_k v]] (nil? v)) cache))
-        ;; Check 2: Any resources without text?
-        resources (get cache "resources")
-        resource-without-text (when (and (not missing-capability)
-                                         (sequential? resources))
-                                (first (filter #(not (contains? % "text")) resources)))]
-
-    (cond
-      ;; Hole 1: Request capability list
-      missing-capability
+        missing-capability (first (filter (fn [[_k v]] (nil? v)) cache))]
+    (if missing-capability
+      ;; Request capability list
       (let [[capability _nil-value] missing-capability
             request-id (inc (:mcp/request-id context))
             request {"jsonrpc" "2.0"
@@ -168,22 +160,7 @@
         (handler
          (assoc context :mcp/request-id request-id)
          {"id" ["caching" "servicing"] "message" request}))
-
-      ;; Hole 2: Request resource read
-      resource-without-text
-      (let [uri (get resource-without-text "uri")
-            request-id (inc (:mcp/request-id context))
-            request {"jsonrpc" "2.0"
-                     "id" request-id
-                     "method" "resources/read"
-                     "params" {"uri" uri}}]
-        (log/info "check-cache-and-continue: requesting resource" uri)
-        (handler
-         (assoc context :mcp/request-id request-id)
-         {"id" ["caching" "servicing"] "message" request}))
-
-      ;; No holes - cache is complete!
-      :else
+      ;; Cache is complete - go to LLM
       (do
         (log/info "check-cache-and-continue: cache complete, going to llm")
         (handler context {"id" ["caching" "llm"]})))))
@@ -192,18 +169,8 @@
   "Manages cache population by inspecting state and requesting missing data.
    Routes based on incoming message type."
   [context fsm {id "id"} state [{[is {m "message"} os] "content"} :as trail] handler]
-  (log/info "cache-action: from" id "message:" (pr-str m))
-  (let [{method "method" result "result"} m
-        contents (get result "contents")]
-
+  (let [{method "method" result "result"} m]
     (cond
-      ;; Resource contents - merge into resources
-      contents
-      (do
-        (log/info "cache-action: received resource contents, merging")
-        (let [updated-context (update-in context ["state" "resources"] merge-resources contents)]
-          (check-cache-and-continue updated-context handler)))
-
       ;; Incoming list response - refresh cache with data
       result
       (do
@@ -229,30 +196,6 @@
       (do
         (log/info "cache-action: checking cache for missing data")
         (check-cache-and-continue context handler)))))
-
-(defn llm-action
-  "LLM state - can make tool calls or signal completion.
-   Routes based on incoming transition and message content."
-  [context fsm {id "id"} state [{[is {m "message" d "document"} os] "content"} :as trail] handler]
-  (log/info "llm-action: from" id "message:" (pr-str m))
-  ;; Check if this is a tool response (has result) or initial entry
-  (if (get m "result")
-    ;; Tool response returned - we're done
-    (let [result (get m "result")]
-      (log/info "llm-action: tool result received" (pr-str result))
-      (handler context {"id" ["llm" "end"] "result" result}))
-    ;; Initial entry (from servicing timeout or caching) - make a test tool call
-    (let [request-id (inc (:mcp/request-id context))
-          tool-call {"jsonrpc" "2.0"
-                     "id" request-id
-                     "method" "tools/call"
-                     "params" {"name" "clojure_eval"
-                               "arguments" {"code" "(+ 1 1)"}}}]
-      (log/info "llm-action: making tool call" (pr-str tool-call))
-      (handler
-       (assoc context :mcp/request-id request-id)
-       (cond-> {"id" ["llm" "servicing"] "message" tool-call}
-         d (assoc "document" d))))))
 
 (defn end-action
   "Final action that signals FSM completion via promise delivery."

@@ -145,6 +145,10 @@
 (defn ppr-str [x]
   (with-out-str (pprint x)))
 
+;; DEBUG atoms for capturing LLM calls
+(defonce llm-call-capture (atom nil))
+(defonce llm-response-capture (atom nil))
+
 (defn open-router-async
   "Call OpenRouter API asynchronously. Optionally accepts a JSON schema for structured output.
   Automatically retries on JSON parse errors with feedback to the LLM.
@@ -169,6 +173,9 @@
                                   :json_schema {:name "response"
                                                 :strict true
                                                 :schema schema}}))]
+    ;; DEBUG: Capture inputs
+    (log/info ">>>>>> CAPTURING LLM CALL <<<<<<")
+    (reset! llm-call-capture {:provider provider :model model :prompts prompts :body-map body-map :timestamp (java.time.Instant/now)})
     (post
      (str api-url "/chat/completions")
      {:async? true
@@ -177,9 +184,13 @@
      (fn [r]
        (try
          (let [d (strip-md-json (unpack r))]
+           (log/info ">>>>>> RAW LLM RESPONSE <<<<<<")
+           (log/info (str "Response length: " (count d)))
+           (reset! llm-response-capture {:raw d :status :received :timestamp (java.time.Instant/now)})
            (try
              (let [j (read-str d)]
                (log/info "      [OK] LLM Response: Valid JSON received")
+               (swap! llm-response-capture assoc :parsed j :status :success)
                (handler j))
              (catch Exception e
                (let [retrier (make-retrier max-retries)]
@@ -209,9 +220,12 @@
          (catch Throwable t
            (log/error t "Error processing LLM response"))))
      (fn [exception]
+       (log/error ">>>>>> LLM REQUEST EXCEPTION <<<<<<")
+       (reset! llm-response-capture {:exception exception :status :error :timestamp (java.time.Instant/now)})
        (try
          (let [m (read-str (:body (.getData exception)))]
            (log/error (str "      [X] LLM Request Failed: " (get m "error")))
+           (swap! llm-response-capture assoc :error-body m)
            (when error (error m)))
          (catch Throwable t
            (log/error t "Error handling LLM failure")))))))
