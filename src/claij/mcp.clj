@@ -230,20 +230,6 @@
 
 ;;------------------------------------------------------------------------------
 
-(defn merge-resources
-  "Merge read-resource response contents into existing resources list.
-  
-  Takes a vector of resources (each with a 'uri' key) and a vector of contents
-  (each with 'uri' and 'text' keys). Returns the resources vector with text
-  merged in based on matching URIs."
-  [resources contents]
-  (let [id->index (reduce (fn [acc [n {id "uri"}]] (assoc acc id n)) {} (map-indexed vector resources))]
-    (reduce
-     (fn [acc {id "uri" t "text"}]
-       (assoc-in acc [(id->index id) "text"] t))
-     resources
-     contents)))
-
 (defn initialize-mcp-cache
   "Initialize MCP cache structure from initialization response capabilities.
   

@@ -13,7 +13,6 @@
                       list-resources-request
                       mcp-schema
                       list-changed?
-                      merge-resources
                       initialize-mcp-cache
                       invalidate-mcp-cache-item
                       refresh-mcp-cache-item
@@ -465,33 +464,6 @@
 
 (deftest mcp-test
 
-  (testing "merge resources"
-    (is (=
-         [{"uri" "custom://readme",
-           "name" "README.md",
-           "description"
-           "A README document for the current Clojure project hosting the REPL",
-           "mimeType" "text/markdown"}
-          {"uri" "custom://project-info",
-           "name" "Clojure Project Info",
-           "description"
-           "Information about the current Clojure project structure, attached REPL environment and dependencies",
-           "mimeType" "text/markdown"
-           "text" "..."}]
-         (merge-resources
-          [{"uri" "custom://readme",
-            "name" "README.md",
-            "description"
-            "A README document for the current Clojure project hosting the REPL",
-            "mimeType" "text/markdown"}
-           {"uri" "custom://project-info",
-            "name" "Clojure Project Info",
-            "description"
-            "Information about the current Clojure project structure, attached REPL environment and dependencies",
-            "mimeType" "text/markdown"}]
-          [{"uri" "custom://project-info",
-            "mimeType" "text/markdown",
-            "text" "..."}]))))
 
   (testing "initialize-mcp-cache"
     (let [capabilities {"tools" {"listChanged" true}
