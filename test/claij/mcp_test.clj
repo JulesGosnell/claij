@@ -918,18 +918,26 @@
                             "resources" nil
                             "prompts" nil}
 
-          ;; Valid requests
-          tool-request {"method" "tools/call"
+          ;; Valid requests - now include JSON-RPC envelope
+          tool-request {"jsonrpc" "2.0"
+                        "id" 1
+                        "method" "tools/call"
                         "params" {"name" "eval" "arguments" {"code" "(+ 1 1)"}}}
-          resource-request {"method" "resources/read"
+          resource-request {"jsonrpc" "2.0"
+                            "id" 2
+                            "method" "resources/read"
                             "params" {"uri" "custom://readme"}}
-          prompt-request {"method" "prompts/get"
+          prompt-request {"jsonrpc" "2.0"
+                          "id" 3
+                          "method" "prompts/get"
                           "params" {"name" "system-prompt"}}
-          logging-request {"method" "logging/setLevel"
+          logging-request {"jsonrpc" "2.0"
+                           "id" 4
+                           "method" "logging/setLevel"
                            "params" {"level" "debug"}}
 
           ;; Invalid request - wrong method
-          invalid-method {"method" "tools/list" "params" {}}
+          invalid-method {"jsonrpc" "2.0" "id" 5 "method" "tools/list" "params" {}}
 
           ;; Generate schemas
           request-schema (mcp-cache->request-schema cache)
@@ -1035,14 +1043,23 @@
       (let [request-schema (mcp-request-xition-schema-fn context llm->servicing)
             response-schema (mcp-response-xition-schema-fn context servicing->llm)
 
+            ;; JSON-RPC wrapped request
             valid-request {"id" ["llm" "servicing"]
-                           "message" {"method" "tools/call"
+                           "message" {"jsonrpc" "2.0"
+                                      "id" 1
+                                      "method" "tools/call"
                                       "params" {"name" "clojure_eval"
                                                 "arguments" {"code" "(+ 1 1)"}}}}
+            ;; JSON-RPC wrapped response
             valid-response {"id" ["servicing" "llm"]
-                            "message" {"content" [{"type" "text" "text" "2"}]}}
+                            "message" {"jsonrpc" "2.0"
+                                       "id" 1
+                                       "result" {"content" [{"type" "text" "text" "2"}]}}}
             invalid-request {"id" ["llm" "servicing"]
-                             "message" {"method" "invalid/method"}}]
+                             "message" {"jsonrpc" "2.0"
+                                        "id" 2
+                                        "method" "invalid/method"
+                                        "params" {}}}]
 
         (is (:valid? (validate {:draft :draft7} request-schema {} valid-request))
             "Valid tool call request should pass")
