@@ -475,47 +475,80 @@
    Returns a oneOf schema covering all available operations:
    tools/call, resources/read, prompts/get, logging/setLevel.
    
+   Each alternative is a complete JSON-RPC request with:
+   - jsonrpc: const \"2.0\"
+   - id: integer (request id)
+   - method: const for the operation
+   - params: operation-specific parameters
+   
    Cache shape: {\"tools\" [...] \"resources\" [...] \"prompts\" [...]}"
   [{tools "tools" resources "resources" prompts "prompts"}]
-  (let [schemas (cond-> []
+  (let [;; Helper to wrap method+params in JSON-RPC envelope
+        wrap-jsonrpc (fn [method params-schema]
+                       {"type" "object"
+                        "properties" {"jsonrpc" {"const" "2.0"}
+                                      "id" {"type" "integer"}
+                                      "method" {"const" method}
+                                      "params" params-schema}
+                        "required" ["jsonrpc" "id" "method" "params"]
+                        "additionalProperties" false})
+
+        schemas (cond-> []
                   (seq tools)
-                  (conj {"type" "object"
-                         "properties" {"method" {"const" "tools/call"}
-                                       "params" (tools-cache->request-schema tools)}
-                         "required" ["method" "params"]})
+                  (conj (wrap-jsonrpc "tools/call" (tools-cache->request-schema tools)))
 
                   (seq resources)
-                  (conj {"type" "object"
-                         "properties" {"method" {"const" "resources/read"}
-                                       "params" (resources-cache->request-schema resources)}
-                         "required" ["method" "params"]})
+                  (conj (wrap-jsonrpc "resources/read" (resources-cache->request-schema resources)))
 
                   (seq prompts)
-                  (conj {"type" "object"
-                         "properties" {"method" {"const" "prompts/get"}
-                                       "params" (prompts-cache->request-schema prompts)}
-                         "required" ["method" "params"]})
+                  (conj (wrap-jsonrpc "prompts/get" (prompts-cache->request-schema prompts)))
 
                   ;; logging/setLevel is always available (not cache-dependent)
                   true
-                  (conj {"type" "object"
-                         "properties" {"method" {"const" "logging/setLevel"}
-                                       "params" logging-set-level-request-schema}
-                         "required" ["method" "params"]}))]
+                  (conj (wrap-jsonrpc "logging/setLevel" logging-set-level-request-schema)))]
     {"oneOf" schemas}))
 
 (defn mcp-cache->response-schema
   "Generate combined response schema from MCP cache.
-   Returns an anyOf schema covering all possible responses.
+   Returns an anyOf schema covering all possible JSON-RPC responses.
+   
+   JSON-RPC responses have: jsonrpc, id, result
+   JSON-RPC notifications have: jsonrpc, method, params (no id)
    
    Note: Response schemas are mostly static (not per-tool/resource/prompt)
    except for tools with outputSchema which constrain structuredContent."
   [{tools "tools" :as _cache}]
-  (let [schemas (cond-> [resource-response-schema
-                         prompt-response-schema
-                         logging-notification-schema]
-                  (seq tools)
-                  (into (map tool-cache->response-schema tools)))]
+  (let [;; Helper to wrap result content in JSON-RPC response envelope
+        wrap-response (fn [result-schema]
+                        {"type" "object"
+                         "properties" {"jsonrpc" {"const" "2.0"}
+                                       "id" {"type" "integer"}
+                                       "result" result-schema}
+                         "required" ["jsonrpc" "id" "result"]
+                         "additionalProperties" false})
+
+        ;; Helper to wrap notification in JSON-RPC notification envelope
+        wrap-notification (fn [method params-schema]
+                            {"type" "object"
+                             "properties" {"jsonrpc" {"const" "2.0"}
+                                           "method" {"const" method}
+                                           "params" params-schema}
+                             "required" ["jsonrpc" "method" "params"]
+                             "additionalProperties" false})
+
+        ;; Tool responses - each tool may have different outputSchema
+        tool-responses (when (seq tools)
+                         (map (fn [tool]
+                                (wrap-response (tool-cache->response-schema tool)))
+                              tools))
+
+        schemas (cond-> [;; Static response types
+                         (wrap-response resource-response-schema)
+                         (wrap-response prompt-response-schema)
+                         ;; Logging is a notification, not a response
+                         (wrap-notification "notifications/message" logging-notification-schema)]
+                  tool-responses
+                  (into tool-responses))]
     {"anyOf" schemas}))
 
 ;;-----------------------------------------------------------------------------
