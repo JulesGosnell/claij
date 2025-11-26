@@ -542,6 +542,33 @@
   [context _xition]
   (mcp-cache->response-schema (get context "state")))
 
+(defn mcp-request-xition-schema-fn
+  "Schema function for llm->servicing transition.
+   Builds complete transition envelope with dynamic MCP request schema.
+   
+   Used as `:id->schema \"mcp-request-xition\"` in FSM context."
+  [context {xid "id" :as _xition}]
+  {"type" "object"
+   "properties"
+   {"id" {"const" xid}
+    "message" (mcp-cache->request-schema (get context "state"))}
+   "additionalProperties" false
+   "required" ["id" "message"]})
+
+(defn mcp-response-xition-schema-fn
+  "Schema function for servicing->llm transition.
+   Builds complete transition envelope with dynamic MCP response schema.
+   
+   Used as `:id->schema \"mcp-response-xition\"` in FSM context."
+  [context {xid "id" :as _xition}]
+  {"type" "object"
+   "properties"
+   {"id" {"const" xid}
+    "document" {"type" "string"}
+    "message" (mcp-cache->response-schema (get context "state"))}
+   "additionalProperties" false
+   "required" ["id"]})
+
 ;; TODO: Additional MCP capabilities not yet implemented
 ;;
 ;; The schemas above define what our MCP integration can do. The LLM cannot

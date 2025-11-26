@@ -33,7 +33,9 @@
                       mcp-cache->request-schema
                       mcp-cache->response-schema
                       mcp-request-schema-fn
-                      mcp-response-schema-fn]]
+                      mcp-response-schema-fn
+                      mcp-request-xition-schema-fn
+                      mcp-response-xition-schema-fn]]
    [m3.validate :refer [validate]]))
 
 ;; send:
@@ -996,7 +998,58 @@
           xition-b {"id" ["servicing" "llm"]}]
       (is (= (mcp-request-schema-fn context xition-a)
              (mcp-request-schema-fn context xition-b))
-          "Currently xition is unused, both should return same schema"))))
+          "Currently xition is unused, both should return same schema")))
+
+  (testing "FSM xition schema functions (complete envelope)"
+    (let [cache {"tools" [{"name" "clojure_eval"
+                           "inputSchema" {"type" "object"
+                                          "properties" {"code" {"type" "string"}}
+                                          "required" ["code"]}}]
+                 "resources" [{"uri" "custom://readme"}]
+                 "prompts" [{"name" "system-prompt" "arguments" []}]}
+          context {"state" cache}
+          llm->servicing {"id" ["llm" "servicing"]}
+          servicing->llm {"id" ["servicing" "llm"]}]
+
+      ;; mcp-request-xition-schema-fn builds complete envelope with xition id
+      (let [schema (mcp-request-xition-schema-fn context llm->servicing)]
+        (is (= ["llm" "servicing"]
+               (get-in schema ["properties" "id" "const"]))
+            "Request xition schema should have correct id const")
+        (is (contains? (get-in schema ["properties" "message"]) "oneOf")
+            "Request xition schema should have oneOf for message property")
+        (is (= ["id" "message"] (get schema "required"))
+            "Request xition should require id and message"))
+
+      ;; mcp-response-xition-schema-fn builds complete envelope with xition id  
+      (let [schema (mcp-response-xition-schema-fn context servicing->llm)]
+        (is (= ["servicing" "llm"]
+               (get-in schema ["properties" "id" "const"]))
+            "Response xition schema should have correct id const")
+        (is (contains? (get-in schema ["properties" "message"]) "anyOf")
+            "Response xition schema should have anyOf for message property")
+        (is (= ["id"] (get schema "required"))
+            "Response xition should only require id (message optional)"))
+
+      ;; Validate actual events against generated schemas
+      (let [request-schema (mcp-request-xition-schema-fn context llm->servicing)
+            response-schema (mcp-response-xition-schema-fn context servicing->llm)
+
+            valid-request {"id" ["llm" "servicing"]
+                           "message" {"method" "tools/call"
+                                      "params" {"name" "clojure_eval"
+                                                "arguments" {"code" "(+ 1 1)"}}}}
+            valid-response {"id" ["servicing" "llm"]
+                            "message" {"content" [{"type" "text" "text" "2"}]}}
+            invalid-request {"id" ["llm" "servicing"]
+                             "message" {"method" "invalid/method"}}]
+
+        (is (:valid? (validate {:draft :draft7} request-schema {} valid-request))
+            "Valid tool call request should pass")
+        (is (:valid? (validate {:draft :draft7} response-schema {} valid-response))
+            "Valid tool response should pass")
+        (is (not (:valid? (validate {:draft :draft7} request-schema {} invalid-request)))
+            "Invalid method should fail validation")))))
 
 ;;------------------------------------------------------------------------------
 ;;------------------------------------------------------------------------------
