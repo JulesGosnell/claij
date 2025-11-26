@@ -76,6 +76,31 @@ These constraints are validated at FSM definition time via the `fsm-m2` meta-sch
 
 ## Implementation Status
 
+### Shared LLM Action (2025-11-26)
+
+The `llm-action` function lives in `claij.fsm` and is shared by all FSMs that use LLM states:
+
+```clojure
+(defn llm-action
+  "FSM action: call LLM with prompts built from FSM config and trail.
+   Extracts provider/model from input data, defaults to openai/gpt-4o."
+  [context fsm ix state trail handler]
+  ...)
+```
+
+Key points:
+- **Builds prompts** from FSM schema, state prompts, and conversation trail via `make-prompts`
+- **Calls `open-router-async`** with provider/model from input data (or defaults)
+- **Returns `(handler context output)`** - FSM handler validates output against schema
+- **No structured output schema needed** - FSM handler already validates and retries on failure
+
+FSM definitions reference this action by name in state definitions:
+```clojure
+{"id" "llm-state"
+ "action" "llm"
+ "prompts" ["State-specific instructions..."]}
+```
+
 ### Recently Completed (2025-11-05)
 
 **FSM Event Processing Fixes**:
