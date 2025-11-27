@@ -69,7 +69,7 @@
 ;; MCP FSM Actions
 ;;==============================================================================
 
-(defn start-action [context fsm ix state [{[is {d "document" :as event} os] "content"} :as trail] handler]
+(defn start-action [context fsm ix state {d "document" :as event} trail handler]
   (log/info "start-action:" (pr-str d))
   (let [n 100
         config {"command" "bash", "args" ["-c", "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"], "transport" "stdio"}
@@ -78,25 +78,33 @@
         stop (start-mcp-bridge config ic oc)
         ;; Store MCP bridge in context instead of global atom
         ;; Register schema functions for dynamic schema resolution
+        ;; Store document in context so it's available throughout the FSM
         updated-context (assoc context
                                :mcp/bridge {:input ic :output oc :stop stop}
                                :mcp/request-id 0
+                               :mcp/document d
                                :id->schema {"mcp-request-xition" mcp-request-xition-schema-fn
-                                            "mcp-response-xition" mcp-response-xition-schema-fn})]
+                                            "mcp-response-xition" mcp-response-xition-schema-fn})
+        init-request (assoc initialise-request "id" 0)]
     (handler
      updated-context
-     (let [{m "method" :as message} (take! oc 5000 (assoc initialise-request "id" 0))]
+     (let [{m "method" :as message} (take! oc 5000 init-request)]
        (cond
+         ;; Server sent initialize request, or we timed out (default is init-request)
          (= m "initialize")
-         (wrap ["starting" "shedding"] d message))))))
+         (wrap ["starting" "shedding"] d message)
 
-(defn shed-action [context fsm ix state [{[is {{im "method" :as message} "message" document "document" :as event} os] "content"} :as trail] handler]
+         ;; Server sent something else (notifications) - use our initialize request
+         :else
+         (wrap ["starting" "shedding"] d init-request))))))
+
+(defn shed-action [context fsm ix state {{im "method" :as message} "message" document "document" :as event} trail handler]
   (log/info "shed-action:" (pr-str message))
   (let [{{ic :input oc :output} :mcp/bridge} context]
     (>!! ic message)
     (handler context (wrap ["shedding" "initing"] document (hack oc)))))
 
-(defn init-action [context fsm ix state [{[is {{im "method" :as message} "message" document "document" :as event} os] "content"} :as trail] handler]
+(defn init-action [context fsm ix state {{im "method" :as message} "message" document "document" :as event} trail handler]
   (log/info "init-action:" (pr-str message))
   ;; Extract capabilities from initialization response and set up cache
   (let [capabilities (get-in message ["result" "capabilities"])
@@ -108,7 +116,7 @@
 (defn service-action
   "Routes messages to MCP bridge and handles responses.
    Routing depends on where the message came from."
-  [context fsm {id "id"} state [{[is {m "message" document "document"} os] "content"} :as trail] handler]
+  [context fsm {id "id"} state {m "message" document "document" :as event} trail handler]
   (log/info "service-action: from" id "message:" (pr-str m))
   (let [{{ic :input oc :output} :mcp/bridge} context
         [from _to] id]
@@ -160,15 +168,16 @@
         (handler
          (assoc context :mcp/request-id request-id)
          {"id" ["caching" "servicing"] "message" request}))
-      ;; Cache is complete - go to LLM
+      ;; Cache is complete - go to LLM with document
       (do
         (log/info "check-cache-and-continue: cache complete, going to llm")
-        (handler context {"id" ["caching" "llm"]})))))
+        (handler context {"id" ["caching" "llm"]
+                          "document" (:mcp/document context)})))))
 
 (defn cache-action
   "Manages cache population by inspecting state and requesting missing data.
    Routes based on incoming message type."
-  [context fsm {id "id"} state [{[is {m "message"} os] "content"} :as trail] handler]
+  [context fsm {id "id"} state {m "message" :as event} trail handler]
   (let [{method "method" result "result"} m]
     (cond
       ;; Incoming list response - refresh cache with data
@@ -199,7 +208,7 @@
 
 (defn end-action
   "Final action that signals FSM completion via promise delivery."
-  [context _fsm _ix _state trail _handler]
+  [context _fsm _ix _state event trail _handler]
   (log/info "FSM complete - reached end state")
 
   ;; NOTE: We DON'T stop MCP subprocess here because it blocks
@@ -253,6 +262,7 @@
    [{"id" ["start" "starting"]
      "description" "starts the MCP service. Returns an initialise-request."
      "label" "document"
+     "omit" true
      "schema"
      {"type" "object"
       "properties"
@@ -264,6 +274,7 @@
     {"id" ["starting" "shedding"]
      "description" "Shed unwanted list-changed messages."
      "label" "initialise\nrequest\n(timeout)"
+     "omit" true
      "schema"
      {"type" "object"
       "properties"
@@ -273,8 +284,22 @@
       "additionalProperties" false
       "required" ["id" "document" "message"]}}
 
+    {"id" ["starting" "initing"]
+     "description" "Direct path when initialize response received"
+     "label" "initialise\nresponse"
+     "omit" true
+     "schema"
+     {"type" "object"
+      "properties"
+      {"id" {"const" ["starting" "initing"]}
+       "document" {"type" "string"}
+       "message" true}
+      "additionalProperties" false
+      "required" ["id" "document" "message"]}}
+
     {"id" ["shedding" "initing"]
      "label" "initialise\nresponse"
+     "omit" true
      "schema"
      {"type" "object"
       "properties"
@@ -286,6 +311,7 @@
 
     {"id" ["initing" "servicing"]
      "label" "initialise\nnotification"
+     "omit" true
      "schema"
      {"type" "object"
       "properties"
@@ -297,6 +323,7 @@
 
     {"id" ["servicing" "caching"]
      "label" "list_changed,\nlist_response,\nread_response"
+     "omit" true
      "schema"
      {"type" "object"
       "properties"
@@ -307,6 +334,7 @@
 
     {"id" ["caching" "servicing"]
      "label" "list_request,\nread_request"
+     "omit" true
      "schema"
      {"type" "object"
       "properties"
@@ -326,9 +354,10 @@
      "schema"
      {"type" "object"
       "properties"
-      {"id" {"const" ["caching" "llm"]}}
+      {"id" {"const" ["caching" "llm"]}
+       "document" {"type" "string"}}
       "additionalProperties" false
-      "required" ["id"]}}
+      "required" ["id" "document"]}}
 
     {"id" ["llm" "servicing"]
      "label" "tool\ncall"
@@ -338,4 +367,10 @@
     {"id" ["llm" "end"]
      "label" "output"
      "description" "LLM completes work"
-     "schema" true}]})
+     "schema"
+     {"type" "object"
+      "properties"
+      {"id" {"const" ["llm" "end"]}
+       "result" {"type" "object"}}
+      "additionalProperties" false
+      "required" ["id" "result"]}}]})

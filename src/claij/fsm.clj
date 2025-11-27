@@ -125,7 +125,13 @@
 
       ;; TODO: tighten to {"oneOf" [{"$ref" "#/$defs/json-schema"} {"type" "string"}]}
       ;; String values are lookup keys into context :id->schema for dynamic schema generation
-      "schema" true}
+      "schema" true
+
+      ;; When true, this transition's event will not be added to the trail.
+      ;; Useful for internal FSM transitions (e.g. MCP protocol) that shouldn't
+      ;; pollute the conversation history sent to LLMs.
+      "omit"
+      {"type" "boolean"}}
      "additionalProperties" false
      "required" ["id" "schema"]}}
 
@@ -235,7 +241,7 @@
 ;; rename "action" "transform"
 ;; TODO: if we inline cform, we may be able to more work outside and less inside it...
 ;; $$id is a hack because $id breaks $ref resolution - investigate
-(defn xform [context {{fsm-schema-id "$$id" :as fsm-schema} "schema" :as fsm} {[from to] "id" :as ix} {a "action" :as state} ox-and-cs [{r "role" [is input] "content" :as head} & trail :as all]]
+(defn xform [context {{fsm-schema-id "$$id" :as fsm-schema} "schema" :as fsm} {[from to] "id" ix-schema "schema" ix-omit? "omit" :as ix} {a "action" :as state} ox-and-cs event trail]
   (try
     (log/info (str "=> [" from " -> " to "]"))
 
@@ -244,14 +250,12 @@
           retry-count (atom 0)
           max-retries 3
           retrier (make-retrier max-retries)
-          initial-trail (cons {"role" r "content" [is input s-schema]} trail)
 
           ;; Handler validates output and retries on failure
-          ;; Closes over initial-trail and extends it on retry
           handler
           (fn handler
-            ([new-context event] (handler new-context event initial-trail))
-            ([new-context {ox-id "id" :as event} current-trail]
+            ([new-context output-event] (handler new-context output-event trail))
+            ([new-context {ox-id "id" :as output-event} current-trail]
              (try
                (let [[{ox-schema-raw "schema" :as ox} c] (id->x-and-c ox-id)
                      _ (when (nil? ox) (log/error "no output xition:" (prn-str ox-id)))
@@ -262,14 +266,25 @@
                        :uri->schema (partial uri->schema {(uri-base (parse-uri fsm-schema-id)) fsm-schema})}
                       ox-schema
                       {}
-                      event)]
+                      output-event)]
                  (if v?
-                     ;; SUCCESS - Put context and trail on channel
+                     ;; SUCCESS - Put context, event, and trail on channel
                    (do
                      (log/info (str "   [OK] Validation: " ox-id))
-                     (>!! c {:context new-context
-                             :trail (cons {"role" "assistant" "content" [ox-schema event nil]}
-                                          (cons {"role" r "content" [is input ox-schema]} trail))})
+                     (let [;; Build new trail - only check input transition for omit
+                           ;; ix-omit?: omit the user entry (the input triple)
+                           ;; ox omit is irrelevant here - checked when ox becomes next ix
+                           new-trail (if ix-omit?
+                                       ;; Omit user triple, keep assistant entry
+                                       (cons {"role" "assistant" "content" [ox-schema output-event nil]}
+                                             current-trail)
+                                       ;; Add both entries
+                                       (cons {"role" "assistant" "content" [ox-schema output-event nil]}
+                                             (cons {"role" "user" "content" [ix-schema event s-schema]}
+                                                   current-trail)))]
+                       (>!! c {:context new-context
+                               :event output-event
+                               :trail new-trail}))
                      nil)
                      ;; FAILURE - Retry with error feedback
                    (retrier
@@ -289,22 +304,22 @@
                         (log/info "      [>>] Sending validation error feedback to LLM")
                            ;; Call action again with error in trail
                         (if-let [action (get-in context [:id->action a])]
-                          (action new-context fsm ix state error-trail handler)
+                          (action new-context fsm ix state event error-trail handler)
                           (handler new-context (second (first error-trail)) error-trail))))
                        ;; Max retries exceeded
                     (fn []
                       (log/error (str "   [X] Max Retries Exceeded: Validation failed after " max-retries " attempts"))
-                      (log/error (str "   Final output: " (pr-str event)))
+                      (log/error (str "   Final output: " (pr-str output-event)))
                       (log/debug (str "   Validation errors: " (pr-str es)))))))
                (catch Throwable t
                  (log/error t "Error in handler processing")))))]
 
-      ;; Call action with handler
+      ;; Call action with event and trail separately
       (if-let [action (get-in context [:id->action a])]
         (do
           (log/info (str "   Action: " a))
-          (action context fsm ix state initial-trail handler))
-        (handler context (second (first initial-trail)))))
+          (action context fsm ix state event trail handler))
+        (handler context event)))
     (catch Throwable t
       (log/error t "Error in xform"))))
 
@@ -392,10 +407,10 @@
 
         ;; Create interface functions
         submit (fn [input-data]
-                 ;; Wrap trail with context in message
-                 (let [trail [{"role" "user"
-                               "content" [entry-schema input-data output-schema]}]
-                       message {:context context :trail trail}]
+                 ;; Send event and empty trail to entry channel
+                 (let [message {:context context
+                                :event input-data
+                                :trail []}]
                    (safe-channel-operation #(>!! entry-channel %) message)
                    (log/info (str "   Submitted document to FSM: " start-state))))
 
@@ -419,10 +434,10 @@
             cs (keys ic->ix)]
         (when (seq cs)
           (go-loop []
-            (let [[{ctx :context trail :trail :as msg} ic] (alts! cs)]
+            (let [[{ctx :context event :event trail :trail :as msg} ic] (alts! cs)]
               (when msg
                 (let [ix (ic->ix ic)]
-                  (xform ctx fsm ix s ox-and-cs trail)
+                  (xform ctx fsm ix s ox-and-cs event trail)
                   (recur))))))))
 
     ;; Return interface
@@ -543,22 +558,43 @@
 
 (defn llm-action
   "FSM action: call LLM with prompts built from FSM config and trail.
-   Extracts provider/model from input data, defaults to openai/gpt-4o-mini."
-  [context fsm ix state trail handler]
-  (let [[{[_input-schema input-data _output-schema] "content"} & _tail] trail
-        {provider "provider" model "model"} (get input-data "llm")
-        provider (or provider "openai")
-        model (or model "gpt-4o-mini")
+   Extracts provider/model from event, defaults to openai/gpt-4o-mini.
+   
+   Passes the output schema (oneOf valid output transitions) to open-router-async
+   for structured output enforcement."
+  [context {xs "xitions" :as fsm} ix {sid "id" :as state} event trail handler]
+  (println ">>> LLM-ACTION ENTRY - event:" (pr-str event))
+  (println ">>> LLM-ACTION trail count:" (count trail))
+  (flush)
+  (log/info "llm-action entry, event:" (pr-str event) "trail-count:" (count trail))
+  (let [{provider "provider" model "model"} (get event "llm")
+        provider (or provider "google")
+        model (or model "gemini-2.5-flash")
+
+        ;; Compute output transitions from current state
+        output-xitions (filter (fn [{[from _to] "id"}] (= from sid)) xs)
+        output-schema (state-schema context fsm state output-xitions)
+
         prompts (make-prompts fsm ix state trail provider model)]
-    (println ">>> llm-action CALLED:" provider "/" model "prompts:" (count prompts))
+    (println ">>> LLM-ACTION prompts count:" (count prompts))
+    (println ">>> LLM-ACTION output schema:" (pr-str output-schema))
     (flush)
+    (log/info (str "   Using LLM: " provider "/" model " with " (count prompts) " prompts"))
     (open-router-async
      provider model
      prompts
      (fn [output]
-       (println ">>> llm-action GOT OUTPUT:" (pr-str output))
+       (prn ">>> LLM-ACTION GOT OUTPUT - id:"  (get output "id") " input:" trail)
        (flush)
-       (handler context output)))))
+       (log/info "llm-action got output, id:" (get output "id"))
+       (handler context output))
+     {:schema output-schema
+      :error (fn [error-info]
+               (println ">>> LLM-ACTION ERROR:" (pr-str error-info))
+               (flush)
+               (log/error "LLM action failed:" (pr-str error-info))
+               ;; Return error to handler so FSM can see it
+               (handler context {"id" "error" "error" error-info}))})))
 
 ;; a correlation id threaded through the data
 ;; a monitor or callback on each state

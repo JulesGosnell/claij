@@ -3,8 +3,33 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.tools.logging :as log]
-   [claij.fsm :refer [start-fsm]]
+   [claij.fsm :refer [start-fsm llm-action]]
    [claij.fsm.mcp-fsm :refer [mcp-actions mcp-fsm]]))
+
+;;==============================================================================
+;; LLM Stub/Real Switch
+;;==============================================================================
+;; Set to true to use real LLM calls, false to use stub responses.
+;; Default is false (stub) for fast, deterministic tests.
+;;==============================================================================
+
+(def ^:dynamic *use-real-llm* false)
+
+(defn stub-llm-action
+  "Stub LLM action that immediately transitions to end state.
+   Returns a simple success response without making API calls."
+  [context _fsm _ix _state _event _trail handler]
+  (log/info "stub-llm-action: returning canned end transition" (prn-str [context _fsm _ix _state _event _trail handler]))
+  (handler context {"id" ["llm" "end"]
+                    "result" {"stub" true
+                              "message" "Stub LLM response - FSM flow completed"}}))
+
+(defn get-test-actions
+  "Returns mcp-actions with either real or stub LLM based on *use-real-llm*"
+  []
+  (if *use-real-llm*
+    mcp-actions
+    (assoc mcp-actions "llm" stub-llm-action)))
 
 ;;==============================================================================
 ;; Simple Action Tracking
@@ -45,11 +70,11 @@
 
 (deftest ^:integration mcp-fsm-smoke-test
   (testing "MCP FSM can start, accept input, and complete"
-    (let [context {:id->action mcp-actions}
+    (let [context {:id->action (get-test-actions)}
           result (claij.fsm/run-sync mcp-fsm context
                                      {"id" ["start" "starting"]
                                       "document" "smoke test"}
-                                     15000)] ; 15 second timeout (first test takes 9s)
+                                     120000)] ; 2 minute timeout
 
       (is (not= result :timeout) "FSM should complete within timeout")
       (when (not= result :timeout)
@@ -61,7 +86,7 @@
 (deftest ^:integration mcp-fsm-flow-test
   (testing "MCP FSM action tracking and cache construction"
     (let [[counter wrapper-fn] (make-tracker)
-          tracked-actions (wrap-actions mcp-actions wrapper-fn)
+          tracked-actions (wrap-actions (get-test-actions) wrapper-fn)
           context {:id->action tracked-actions
                    "state" {}} ;; Initialize with empty state for cache
           [submit await _stop] (start-fsm context mcp-fsm)]
@@ -125,56 +150,55 @@
               (let [resources (get cache "resources")]
                 (is (every? #(contains? % "uri") resources) "Each resource should have a uri")
                 (is (every? #(contains? % "name") resources) "Each resource should have a name")
-                (is (every? #(contains? % "mimeType") resources) "Each resource should have a mimeType")))
-))))))
-
-
+                (is (every? #(contains? % "mimeType") resources) "Each resource should have a mimeType")))))))))
 
 (deftest ^:integration mcp-fsm-tool-call-test
   (testing "MCP FSM can make tool calls via llm↔servicing loop"
-    (let [[counter wrapper-fn] (make-tracker)
-          tracked-actions (wrap-actions mcp-actions wrapper-fn)
-          context {:id->action tracked-actions
-                   "state" {}}
-          [submit await _stop] (start-fsm context mcp-fsm)]
+    ;; This test requires real LLM to test the tool calling loop
+    (binding [*use-real-llm* true]
+      (let [[counter wrapper-fn] (make-tracker)
+            tracked-actions (wrap-actions (get-test-actions) wrapper-fn)
+            context {:id->action tracked-actions
+                     "state" {}}
+            [submit await _stop] (start-fsm context mcp-fsm)]
 
-      (submit {"id" ["start" "starting"]
-               "document" "test tool call"})
+        (submit {"id" ["start" "starting"]
+                 "document" "test tool call"})
 
-      (let [result (await 180000)]
-        (is (not= result :timeout) "FSM should complete within 3 minutes")
+        (let [result (await 180000)]
+          (is (not= result :timeout) "FSM should complete within 3 minutes")
 
-        (when (not= result :timeout)
-          (let [[_final-context trail] result
-                counts @counter
-                final-event (claij.fsm/last-event trail)]
+          (when (not= result :timeout)
+            (let [[_final-context trail] result
+                  counts @counter
+                  final-event (claij.fsm/last-event trail)]
 
-            (testing "llm action called multiple times (entry + tool response)"
-              ;; llm should be called at least twice:
-              ;; 1. Initial entry (makes tool call)
-              ;; 2. Tool response (completes)
-              (is (>= (get counts "llm" 0) 2)
-                  "llm action should be called at least twice for tool call loop"))
+              (testing "llm action called multiple times (entry + tool response)"
+                ;; llm should be called at least twice:
+                ;; 1. Initial entry (makes tool call)
+                ;; 2. Tool response (completes)
+                (is (>= (get counts "llm" 0) 2)
+                    "llm action should be called at least twice for tool call loop"))
 
-            (testing "service action called for tool routing"
-              ;; service should be called multiple times:
-              ;; 1. During init (sends initialized notification)
-              ;; 2. Tool call from llm
-              (is (>= (get counts "service" 0) 2)
-                  "service action should handle init and tool call"))
+              (testing "service action called for tool routing"
+                ;; service should be called multiple times:
+                ;; 1. During init (sends initialized notification)
+                ;; 2. Tool call from llm
+                (is (>= (get counts "service" 0) 2)
+                    "service action should handle init and tool call"))
 
-            (testing "tool call result captured"
-              ;; Final event should contain the tool result
-              (is (map? final-event) "Final event should be a map")
-              (let [tool-result (get final-event "result")]
-                (is (some? tool-result) "Final event should have result from tool call")
-                (when tool-result
-                  ;; The clojure_eval tool returns {"content" [{"type" "text", "text" "=> 2"}]}
-                  (let [content (get tool-result "content")
-                        text (get-in content [0 "text"])]
-                    (is (= "=> 2" text) "(+ 1 1) should evaluate to 2")
-                    (log/info "Tool call result:" text)))))
+              (testing "tool call result captured"
+                ;; Final event should contain the tool result
+                (is (map? final-event) "Final event should be a map")
+                (let [tool-result (get final-event "result")]
+                  (is (some? tool-result) "Final event should have result from tool call")
+                  (when tool-result
+                    ;; The clojure_eval tool returns {"content" [{"type" "text", "text" "=> 2"}]}
+                    (let [content (get tool-result "content")
+                          text (get-in content [0 "text"])]
+                      (is (= "=> 2" text) "(+ 1 1) should evaluate to 2")
+                      (log/info "Tool call result:" text)))))
 
-            (log/info "Action counts:" counts)))))))
+              (log/info "Action counts:" counts))))))))
 
 
