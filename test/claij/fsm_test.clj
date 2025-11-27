@@ -143,18 +143,18 @@
 
 (deftest context-threading-test
   (testing "Context flows through FSM transitions"
-    (let [state-a-action (fn [context _fsm _ix _state _trail handler]
+    (let [state-a-action (fn [context _fsm _ix _state _event _trail handler]
                           ;; Add cache to context and transition
                            (handler (assoc context :cache {:tools []})
                                     {"id" ["state-a" "state-b"]
                                      "data" "test"}))
-          state-b-action (fn [context _fsm _ix _state _trail handler]
+          state-b-action (fn [context _fsm _ix _state _event _trail handler]
                           ;; Assert cache is present from previous state
                            (is (= {:tools []} (:cache context)))
                           ;; Add more to cache and transition to end
                            (handler (assoc context :cache {:tools ["bash" "read_file"]})
                                     {"id" ["state-b" "end"]}))
-          end-action (fn [context _fsm _ix _state trail _handler]
+          end-action (fn [context _fsm _ix _state _event trail _handler]
                       ;; Deliver [context trail] to promise
                        (when-let [p (:fsm/completion-promise context)]
                          (deliver p [context trail]))

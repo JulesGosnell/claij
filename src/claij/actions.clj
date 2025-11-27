@@ -13,7 +13,7 @@
   "Standard LLM action - constructs prompts from FSM/state/trail and calls LLM.
    
    Takes context containing :provider and :model for LLM configuration."
-  [context fsm ix state trail handler]
+  [context fsm ix state event trail handler]
   (let [{:keys [provider model]} context
         {fsm-schema "schema" fsm-prompts "prompts"} fsm
         {ix-prompts "prompts"} ix
@@ -43,11 +43,10 @@
   "Loads all FSMs from store and asks LLM to choose the best one.
    
    Queries the store for FSM metadata and presents them to the LLM for selection."
-  [context fsm ix state trail handler]
-  ;; Extract user's problem description from the trail
+  [context fsm ix state event trail handler]
+  ;; Extract user's problem description from the event
   (let [{:keys [store provider model]} context
-        [{[_input-schema input-data _output-schema] "content"}] trail
-        user-text (get input-data "document")
+        user-text (get event "document")
 
         ;; Query store for all FSM [id, version, description] triples
         available-fsms (store/fsm-list-all store)
@@ -82,12 +81,13 @@
   "Loads the chosen FSM, starts it, delegates the user's text, waits for result.
    
    Creates a child context with a custom end action to capture the result."
-  [context fsm ix state trail handler]
-  ;; Extract the chosen FSM info and original user text
-  (let [[{[_input-schema input-data _output-schema] "content"} original-request] trail
-        fsm-id (get input-data "fsm-id")
-        fsm-version (get input-data "fsm-version")
-        original-text (get-in original-request ["content" 1 "document"])
+  [context fsm ix state event trail handler]
+  ;; Extract the chosen FSM info from event, original text from trail
+  (let [fsm-id (get event "fsm-id")
+        fsm-version (get event "fsm-version")
+        ;; Get original text from the first trail entry if available
+        original-text (when (seq trail)
+                        (get-in (first trail) ["content" 1 "document"]))
 
         {:keys [store provider model]} context]
 
@@ -138,7 +138,7 @@
 
 (defn fork-action
   "Placeholder for FSM forking (NOT IMPLEMENTED)"
-  [context fsm ix state trail handler]
+  [context fsm ix state event trail handler]
   (log/warn "   Fork: NOT IMPLEMENTED - this is a placeholder")
   (handler context {"id" ["fork" "end"]
                     "success" false
@@ -146,7 +146,7 @@
 
 (defn generate-action
   "Placeholder for FSM generation (NOT IMPLEMENTED)"
-  [context fsm ix state trail handler]
+  [context fsm ix state event trail handler]
   (log/warn "   Generate: NOT IMPLEMENTED - this is a placeholder")
   (handler context {"id" ["generate" "end"]
                     "success" false
@@ -157,11 +157,10 @@
    
    Checks for :fsm/completion-promise in context (new API) and delivers [context trail].
    This is called automatically by the FSM when reaching an end state."
-  [context _fsm _ix _state trail _handler]
-  (let [[{[_input-schema input-data _output-schema] "content"}] trail]
-    (log/info "   [OK] End")
-    (when-let [p (:fsm/completion-promise context)]
-      (deliver p [context trail]))))
+  [context _fsm _ix _state event trail _handler]
+  (log/info "   [OK] End")
+  (when-let [p (:fsm/completion-promise context)]
+    (deliver p [context trail])))
 
 ;;------------------------------------------------------------------------------
 ;; Central Action Registry
@@ -181,6 +180,16 @@
 ;;------------------------------------------------------------------------------
 ;; Context Helpers
 ;;------------------------------------------------------------------------------
+
+(defn with-actions
+  "Add actions to a context, merging with any existing actions."
+  [context actions]
+  (update context :id->action merge actions))
+
+(defn with-default-actions
+  "Add the default actions to a context."
+  [context]
+  (with-actions context default-actions))
 
 (defn make-context
   "Create a context for FSM execution.

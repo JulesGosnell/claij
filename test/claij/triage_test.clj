@@ -67,7 +67,7 @@
 
           ;; Mock LLM actions that simulate the decision flow
           mock-triage-llm
-          (fn [context fsm ix state trail handler]
+          (fn [context fsm ix state event trail handler]
             (log/info "   Mock Triage: Choosing code-review FSM")
             ;; Simulate LLM deciding to use code-review FSM
             (handler context {"id" ["triage" "reuse"]
@@ -77,9 +77,8 @@
 
           ;; Mock code-review LLM that provides a simple response
           mock-review-llm
-          (fn [context fsm ix state trail handler]
-            (let [[{[_is input _os] "content"}] trail
-                  {xid "id"} input]
+          (fn [context fsm ix state event trail handler]
+            (let [{xid "id"} event]
               (log/info (str "   Mock Review: Processing " xid))
               (cond
                 ;; Entry: submit code for review

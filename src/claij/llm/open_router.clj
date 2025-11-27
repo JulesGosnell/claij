@@ -168,11 +168,12 @@
                  (when (> retry-count 0) (str " (retry " retry-count "/" max-retries ")"))))
   (let [body-map (cond-> {:model (str provider "/" model)
                           :messages prompts}
-                   schema (assoc :response_format
-                                 {:type "json_schema"
-                                  :json_schema {:name "response"
-                                                :strict true
-                                                :schema schema}}))]
+                   ;; schema (assoc :response_format
+                   ;;               {:type "json_schema"
+                   ;;                :json_schema {:name "response"
+                   ;;                              :strict true
+                   ;;                              :schema schema}})
+                   )]
     ;; DEBUG: Capture inputs
     (log/info ">>>>>> CAPTURING LLM CALL <<<<<<")
     (reset! llm-call-capture {:provider provider :model model :prompts prompts :body-map body-map :timestamp (java.time.Instant/now)})
@@ -207,7 +208,7 @@
                       (log/warn (str "      [X] JSON Parse Error: " (.getMessage e)))
                       (log/info (str "      [>>] Sending error feedback to LLM"))
                       (open-router-async provider model retry-prompts handler
-                                         {:schema schema
+                                         {;;:schema schema
                                           :error error
                                           :retry-count (inc retry-count)
                                           :max-retries max-retries})))

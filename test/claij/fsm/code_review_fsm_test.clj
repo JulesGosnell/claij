@@ -117,10 +117,10 @@
            request2-data response2-data
            response2-data summary-data}
 
-          llm-action (fn [context _fsm _ix _state [{[_input-schema input-data _output-schema] "content"} & _tail] handler]
-                       (handler context (event-map input-data)))
+          llm-action (fn [context _fsm _ix _state event _trail handler]
+                       (handler context (event-map event)))
 
-          end-action (fn [context _fsm _ix _state trail _handler]
+          end-action (fn [context _fsm _ix _state _event trail _handler]
                        ;; Deliver [context trail] to completion promise
                        (when-let [p (:fsm/completion-promise context)]
                          (deliver p [context trail])))
@@ -158,13 +158,11 @@
           fsm code-review-fsm
           ix (first (filter #(= (get % "id") ["start" "mc"]) (get fsm "xitions")))
           state (first (filter #(= (get % "id") "mc") (get fsm "states")))
-          trail [{"role" "user"
-                  "content" [{"$ref" "#/$defs/entry"}
-                             {"id" ["start" "mc"]
-                              "document" "test"
-                              "llms" [{"provider" "openai" "model" "gpt-4o"}]
-                              "concerns" ["test concern"]}
-                             {"$ref" "#/$defs/request"}]}]
+          event {"id" ["start" "mc"]
+                 "document" "test"
+                 "llms" [{"provider" "openai" "model" "gpt-4o"}]
+                 "concerns" ["test concern"]}
+          trail []
           context {:test true}]
       ;; Call the real llm-action with mocked open-router-async
       (with-redefs [open-router-async (fn [_provider _model _prompts success-handler & _opts]
@@ -175,7 +173,7 @@
                                                           "concerns" ["test"]
                                                           "llm" {"provider" "openai" "model" "gpt-4o"}}))]
         (try
-          (llm-action context fsm ix state trail mock-handler)
+          (llm-action context fsm ix state event trail mock-handler)
           ;; If we get here without exception, check handler was called with 2 args
           (is (= 1 (count @handler-calls)) "handler should be called once")
           (is (= 2 (count (first @handler-calls))) "handler should receive 2 args (context, event)")
