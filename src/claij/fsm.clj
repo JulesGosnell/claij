@@ -539,10 +539,10 @@
                    (concat
                     ["All your requests and responses will be in JSON."
                      "You are being given the following reference JSON schema. Later schemas may refer to $defs in this one:" (write-str fsm-schema) "."
-                     "Requests will arrive as [INPUT-SCHEMA, DOCUMENT, OUTPUT-SCHEMA] triples."
-                     "The INPUT-SCHEMA describes the structure of the DOCUMENT."
-                     "You must respond to the contents of the DOCUMENT."
-                     "Your response must be a single JSON document that is STRICTLY CONFORMANT (please pay particular attention to the \"id\" which must be present as a pair of strings) to the OUTPUT-SCHEMA:"]
+                     "Requests will arrive as [INPUT-SCHEMA, INPUT-DOCUMENT, OUTPUT-SCHEMA] triples."
+                     "The INPUT-SCHEMA describes the structure of the INPUT-DOCUMENT."
+                     "You must respond to the contents of the INPUT-DOCUMENT."
+                     "Your response (The OUTPUT-DOCUMENT) must be a single JSON document that is STRICTLY CONFORMANT (please pay particular attention to the \"id\" which must be present as a pair of strings) to the OUTPUT-SCHEMA:"]
                     fsm-prompts
                     ix-prompts
                     state-prompts
