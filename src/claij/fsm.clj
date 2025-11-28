@@ -515,7 +515,9 @@
 (defn trail->prompts
   "Convert audit trail to LLM conversation prompts.
    
-   Currently identity - trail format IS prompt format.
+   Currently identity with reversal - trail is stored newest-first (cons order),
+   but prompts need oldest-first order.
+   
    Will be refactored to derive prompts from audit-style trail entries.
    
    Parameters:
@@ -529,7 +531,9 @@
   ;; - Determine role based on from-state's action type
   ;; - Look up schemas from FSM
   ;; - Format as [input-schema, input-doc, output-schema] triples
-  trail)
+  ;;
+  ;; Trail is stored newest-first (cons order), prompts need oldest-first
+  (reverse trail))
 
 (defn make-prompts
   "Build prompt messages from FSM configuration and conversation trail.
@@ -573,7 +577,7 @@
           "content" (join "\n" llm-user-prompts)}])
 
       ;; Add conversation trail
-      (map (fn [m] (update m "content" write-str)) (reverse trail))))))
+      (map (fn [m] (update m "content" write-str)) trail)))))
 
 (defn llm-action
   "FSM action: call LLM with prompts built from FSM config and trail.
