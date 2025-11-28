@@ -181,21 +181,18 @@
             (is false (str "BUG: handler called with wrong arity - " (.getMessage e)))))))))
 
 (deftest trail->prompts-test
-  (testing "trail->prompts reverses trail (newest-first to oldest-first)"
+  (testing "trail->prompts returns trail unchanged (oldest-first order)"
     (let [fsm code-review-fsm
-          ;; Trail stored newest-first (cons order)
-          sample-trail [{"role" "assistant" "content" ["schema2" "event2" nil]}
-                        {"role" "user" "content" ["schema1" "event1" "out-schema1"]}]
-          ;; Prompts need oldest-first order
-          expected [{"role" "user" "content" ["schema1" "event1" "out-schema1"]}
-                    {"role" "assistant" "content" ["schema2" "event2" nil]}]]
-      (is (= expected (trail->prompts fsm sample-trail))
-          "trail->prompts should reverse trail order")))
+          ;; Trail stored oldest-first (vector/conj order)
+          sample-trail [{"role" "user" "content" ["schema1" "event1" "out-schema1"]}
+                        {"role" "assistant" "content" ["schema2" "event2" nil]}]]
+      (is (= sample-trail (trail->prompts fsm sample-trail))
+          "trail->prompts should return trail unchanged (already oldest-first)")))
 
   (testing "trail->prompts handles empty trail"
-    (is (= () (trail->prompts code-review-fsm []))
+    (is (= [] (trail->prompts code-review-fsm []))
         "Empty trail should return empty"))
 
   (testing "trail->prompts handles nil trail"
-    (is (= () (trail->prompts code-review-fsm nil))
-        "nil trail should return empty seq")))
+    (is (= nil (trail->prompts code-review-fsm nil))
+        "nil trail should return nil")))
