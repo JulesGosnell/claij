@@ -276,12 +276,12 @@
                            ;; ox omit is irrelevant here - checked when ox becomes next ix
                            new-trail (if ix-omit?
                                        ;; Omit user triple, keep assistant entry
-                                       (cons {"role" "assistant" "content" [ox-schema output-event nil]}
-                                             current-trail)
-                                       ;; Add both entries
-                                       (cons {"role" "assistant" "content" [ox-schema output-event nil]}
-                                             (cons {"role" "user" "content" [ix-schema event s-schema]}
-                                                   current-trail)))]
+                                       (conj (vec current-trail)
+                                             {"role" "assistant" "content" [ox-schema output-event nil]})
+                                       ;; Add both entries (user then assistant, oldest-first order)
+                                       (-> (vec current-trail)
+                                           (conj {"role" "user" "content" [ix-schema event s-schema]})
+                                           (conj {"role" "assistant" "content" [ox-schema output-event nil]})))]
                        (>!! c {:context new-context
                                :event output-event
                                :trail new-trail}))
@@ -298,14 +298,14 @@
                                            "Please review the schema and provide a corrected response.")
                             error-schema {"type" "string"}
                                ;; Build error trail entry: [input-schema, error-message, event-schema]
-                            error-trail (cons {"role" "user"
-                                               "content" [error-schema error-msg ox-schema]}
-                                              current-trail)]
+                            error-trail (conj (vec current-trail)
+                                              {"role" "user"
+                                               "content" [error-schema error-msg ox-schema]})]
                         (log/info "      [>>] Sending validation error feedback to LLM")
                            ;; Call action again with error in trail
                         (if-let [action (get-in context [:id->action a])]
                           (action new-context fsm ix state event error-trail handler)
-                          (handler new-context (second (first error-trail)) error-trail))))
+                          (handler new-context (second (peek error-trail)) error-trail))))
                        ;; Max retries exceeded
                     (fn []
                       (log/error (str "   [X] Max Retries Exceeded: Validation failed after " max-retries " attempts"))
@@ -447,13 +447,13 @@
   "Extract the final event from a trail.
    
    Takes a trail (vector of trail entries) and returns the event from the
-   most recent entry (the head of the trail).
+   most recent entry (the last element of the trail vector).
    
    Usage:
      (let [[context trail] (await)]
        (last-event trail))  ; Returns the final event"
   [trail]
-  (second (get (first trail) "content")))
+  (second (get (peek trail) "content")))
 
 (defn run-sync
   "Run an FSM synchronously, blocking until completion.
@@ -515,8 +515,8 @@
 (defn trail->prompts
   "Convert audit trail to LLM conversation prompts.
    
-   Currently identity with reversal - trail is stored newest-first (cons order),
-   but prompts need oldest-first order.
+   Trail is stored oldest-first (vector/conj order), which is the order
+   prompts need to be in.
    
    Will be refactored to derive prompts from audit-style trail entries.
    
@@ -532,8 +532,8 @@
   ;; - Look up schemas from FSM
   ;; - Format as [input-schema, input-doc, output-schema] triples
   ;;
-  ;; Trail is stored newest-first (cons order), prompts need oldest-first
-  (reverse trail))
+  ;; Trail is stored oldest-first (vector/conj), same order prompts need
+  trail)
 
 (defn make-prompts
   "Build prompt messages from FSM configuration and conversation trail.
