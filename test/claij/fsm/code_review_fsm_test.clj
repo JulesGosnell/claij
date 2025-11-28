@@ -181,18 +181,35 @@
             (is false (str "BUG: handler called with wrong arity - " (.getMessage e)))))))))
 
 (deftest trail->prompts-test
-  (testing "trail->prompts returns trail unchanged (oldest-first order)"
+  (testing "trail->prompts splits entries into user+assistant messages"
     (let [fsm code-review-fsm
-          ;; Trail stored oldest-first (vector/conj order)
-          sample-trail [{"role" "user" "content" ["schema1" "event1" "out-schema1"]}
-                        {"role" "assistant" "content" ["schema2" "event2" nil]}]]
-      (is (= sample-trail (trail->prompts fsm sample-trail))
-          "trail->prompts should return trail unchanged (already oldest-first)")))
+          ;; New format: one entry per transition with [ix-schema, event, s-schema, output-event]
+          sample-trail [{"role" "user" "content" ["ix-schema1" "input1" "s-schema1" "output1"]}
+                        {"role" "user" "content" ["ix-schema2" "input2" "s-schema2" "output2"]}]
+          ;; Expands to user+assistant pairs
+          expected [{"role" "user" "content" ["ix-schema1" "input1" "s-schema1"]}
+                    {"role" "assistant" "content" [nil "output1" nil]}
+                    {"role" "user" "content" ["ix-schema2" "input2" "s-schema2"]}
+                    {"role" "assistant" "content" [nil "output2" nil]}]]
+      (is (= expected (trail->prompts fsm sample-trail))
+          "trail->prompts should split each entry into user+assistant pair")))
+
+  (testing "trail->prompts handles entry without output (retry case)"
+    (let [fsm code-review-fsm
+          ;; Entry with nil output (error/retry in progress)
+          sample-trail [{"role" "user" "content" ["ix-schema1" "input1" "s-schema1" "output1"]}
+                        {"role" "user" "content" ["error-schema" "error-msg" "expected-schema" nil]}]
+          ;; Error entry becomes user-only (no assistant message)
+          expected [{"role" "user" "content" ["ix-schema1" "input1" "s-schema1"]}
+                    {"role" "assistant" "content" [nil "output1" nil]}
+                    {"role" "user" "content" ["error-schema" "error-msg" "expected-schema"]}]]
+      (is (= expected (trail->prompts fsm sample-trail))
+          "Entry with nil output should produce user message only")))
 
   (testing "trail->prompts handles empty trail"
-    (is (= [] (trail->prompts code-review-fsm []))
+    (is (= [] (vec (trail->prompts code-review-fsm [])))
         "Empty trail should return empty"))
 
   (testing "trail->prompts handles nil trail"
-    (is (= nil (trail->prompts code-review-fsm nil))
-        "nil trail should return nil")))
+    (is (= [] (vec (trail->prompts code-review-fsm nil)))
+        "nil trail should return empty")))
