@@ -512,6 +512,25 @@
    ;; Google models
    ["google" "gemini-2.5-flash"] {}})
 
+(defn trail->prompts
+  "Convert audit trail to LLM conversation prompts.
+   
+   Currently identity - trail format IS prompt format.
+   Will be refactored to derive prompts from audit-style trail entries.
+   
+   Parameters:
+   - fsm: The FSM definition (needed for schema/omit lookups)
+   - trail: The audit trail
+   
+   Returns: Sequence of prompt messages suitable for make-prompts."
+  [_fsm trail]
+  ;; TODO: When trail format changes to audit entries, this function will:
+  ;; - Filter out entries where xition has omit=true
+  ;; - Determine role based on from-state's action type
+  ;; - Look up schemas from FSM
+  ;; - Format as [input-schema, input-doc, output-schema] triples
+  trail)
+
 (defn make-prompts
   "Build prompt messages from FSM configuration and conversation trail.
    Optionally accepts provider/model for LLM-specific prompts."
@@ -575,7 +594,8 @@
         output-xitions (filter (fn [{[from _to] "id"}] (= from sid)) xs)
         output-schema (state-schema context fsm state output-xitions)
 
-        prompts (make-prompts fsm ix state trail provider model)]
+        prompt-trail (trail->prompts fsm trail)
+        prompts (make-prompts fsm ix state prompt-trail provider model)]
     (println ">>> LLM-ACTION prompts count:" (count prompts))
     (println ">>> LLM-ACTION output schema:" (pr-str output-schema))
     (flush)
@@ -584,7 +604,7 @@
      provider model
      prompts
      (fn [output]
-       (prn ">>> LLM-ACTION GOT OUTPUT - id:"  (get output "id") " input:" trail)
+       (prn ">>> LLM-ACTION GOT OUTPUT - id:" (get output "id") " input:" trail)
        (flush)
        (log/info "llm-action got output, id:" (get output "id"))
        (handler context output))

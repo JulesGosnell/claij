@@ -3,21 +3,55 @@
 ## FSM Architecture
 State machines as explicit data with schema-validated transitions
 
-Actions signature: (fn [context fsm ix state trail handler] ...)
+Actions signature: (fn [context fsm ix state event trail handler] ...)
+- context: Threading state (caches, configs, etc)
+- fsm: The FSM definition
+- ix: Input transition that got us here
+- state: Current state definition
+- event: The input document/event
+- trail: Audit log (vector of traversal entries)
+- handler: Callback to signal output (fn [context output-event])
+
 Context threads through all actions
-Actions return updated context
+Actions return updated context via handler
+
+## Trail Structure (Audit Log)
+
+Trail is a **vector** of traversal entries (first→last order).
+
+**Successful traversal entry:**
+```clojure
+{:fsm-id "my-fsm"
+ :fsm-version 1
+ :from "state-a"
+ :to "state-b"
+ :event {...the input document...}}
+```
+
+**Failure entry (no :to):**
+```clojure
+{:fsm-id "my-fsm"
+ :fsm-version 1
+ :from "state-a"
+ :event {...}
+ :failure {:type :validation
+           :errors [...]
+           :attempt 2}}
+```
+
+Trail is for **audit/debugging**. LLM prompts derived via `trail->prompts`.
 
 ## Destructuring ix for Multi-Entry States
 
 When a state has multiple incoming transitions, destructure the transition id:
 ```clojure
-(defn my-action [context fsm {id "id"} state [{[is {m "message"} os] "content"} :as trail] handler]
+(defn my-action [context fsm {id "id"} state event trail handler]
   (case id
     ["state-a" "my-state"] (handle-from-a ...)
     ["state-b" "my-state"] (handle-from-b ...)))
 ```
 
-Or check message content when same transition serves multiple purposes.
+Or check event content when same transition serves multiple purposes.
 
 ## Context Threading (Issue 5 DONE)
 Actions receive context, return updated context to handler

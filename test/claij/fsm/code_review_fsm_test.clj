@@ -6,7 +6,7 @@
    [m3.validate :refer [validate]]
    [claij.util :refer [index-by ->key]]
    [claij.llm.open-router :refer [open-router-async]]
-   [claij.fsm :refer [start-fsm make-prompts llm-action]]
+   [claij.fsm :refer [start-fsm make-prompts llm-action trail->prompts]]
    [claij.fsm.code-review-fsm :refer [code-review-schema
                                       code-review-fsm]]))
 
@@ -179,3 +179,19 @@
           (is (= 2 (count (first @handler-calls))) "handler should receive 2 args (context, event)")
           (catch clojure.lang.ArityException e
             (is false (str "BUG: handler called with wrong arity - " (.getMessage e)))))))))
+
+(deftest trail->prompts-test
+  (testing "trail->prompts currently returns trail unchanged (identity)"
+    (let [fsm code-review-fsm
+          sample-trail [{"role" "user" "content" ["schema1" "event1" "out-schema1"]}
+                        {"role" "assistant" "content" ["schema2" "event2" nil]}]]
+      (is (= sample-trail (trail->prompts fsm sample-trail))
+          "trail->prompts should return trail unchanged for now")))
+
+  (testing "trail->prompts handles empty trail"
+    (is (= [] (trail->prompts code-review-fsm []))
+        "Empty trail should return empty"))
+
+  (testing "trail->prompts handles nil trail"
+    (is (= nil (trail->prompts code-review-fsm nil))
+        "nil trail should return nil")))
