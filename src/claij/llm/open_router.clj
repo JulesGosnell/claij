@@ -167,15 +167,7 @@
   (log/info (str "      LLM Call: " provider "/" model
                  (when (> retry-count 0) (str " (retry " retry-count "/" max-retries ")"))))
   (let [body-map (cond-> {:model (str provider "/" model)
-                          :messages prompts}
-                   ;; schema (assoc :response_format
-                   ;;               {:type "json_schema"
-                   ;;                :json_schema {:name "response"
-                   ;;                              :strict true
-                   ;;                              :schema schema}})
-                   )]
-    ;; DEBUG: Capture inputs
-    (log/info ">>>>>> CAPTURING LLM CALL <<<<<<")
+                          :messages prompts})]
     (reset! llm-call-capture {:provider provider :model model :prompts prompts :body-map body-map :timestamp (java.time.Instant/now)})
     (post
      (str api-url "/chat/completions")
@@ -185,10 +177,6 @@
      (fn [r]
        (try
          (let [d (strip-md-json (unpack r))]
-           (log/info ">>>>>> RAW LLM RESPONSE <<<<<<")
-           (log/info (str "Response length: " (count d)))
-           (println ">>> RAW LLM RESPONSE:" d)
-           (flush)
            (reset! llm-response-capture {:raw d :status :received :timestamp (java.time.Instant/now)})
            (try
              (let [j (read-str d)]
@@ -210,8 +198,7 @@
                       (log/warn (str "      [X] JSON Parse Error: " (.getMessage e)))
                       (log/info (str "      [>>] Sending error feedback to LLM"))
                       (open-router-async provider model retry-prompts handler
-                                         {;;:schema schema
-                                          :error error
+                                         {:error error
                                           :retry-count (inc retry-count)
                                           :max-retries max-retries})))
                    ;; Max retries handler
@@ -223,7 +210,6 @@
          (catch Throwable t
            (log/error t "Error processing LLM response"))))
      (fn [exception]
-       (log/error ">>>>>> LLM REQUEST EXCEPTION <<<<<<")
        (reset! llm-response-capture {:exception exception :status :error :timestamp (java.time.Instant/now)})
        (try
          (let [m (read-str (:body (.getData exception)))]

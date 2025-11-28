@@ -623,13 +623,10 @@
    Passes the output schema (oneOf valid output transitions) to open-router-async
    for structured output enforcement."
   [context {xs "xitions" :as fsm} ix {sid "id" :as state} event trail handler]
-  (println ">>> LLM-ACTION ENTRY - event:" (pr-str event))
-  (println ">>> LLM-ACTION trail count:" (count trail))
-  (flush)
-  (log/info "llm-action entry, event:" (pr-str event) "trail-count:" (count trail))
+  (log/info "llm-action entry, trail-count:" (count trail))
   (let [{provider "provider" model "model"} (get event "llm")
-        provider (or provider "anthropic")
-        model (or model "claude-opus-4.5")
+        provider (or provider "google")
+        model (or model "gemini-2.5-flash")
 
         ;; Compute output transitions from current state
         output-xitions (filter (fn [{[from _to] "id"}] (= from sid)) xs)
@@ -637,22 +634,15 @@
 
         prompt-trail (trail->prompts fsm trail)
         prompts (make-prompts fsm ix state prompt-trail provider model)]
-    (println ">>> LLM-ACTION prompts count:" (count prompts))
-    (println ">>> LLM-ACTION output schema:" (pr-str output-schema))
-    (flush)
     (log/info (str "   Using LLM: " provider "/" model " with " (count prompts) " prompts"))
     (open-router-async
      provider model
      prompts
      (fn [output]
-       (println ">>> LLM-ACTION GOT OUTPUT:" (pr-str output))
-       (flush)
        (log/info "llm-action got output, id:" (get output "id"))
        (handler context output))
      {:schema output-schema
       :error (fn [error-info]
-               (println ">>> LLM-ACTION ERROR:" (pr-str error-info))
-               (flush)
                (log/error "LLM action failed:" (pr-str error-info))
                ;; Return error to handler so FSM can see it
                (handler context {"id" "error" "error" error-info}))})))
