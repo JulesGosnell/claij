@@ -64,11 +64,10 @@
    "final-action" final-action})
 
 (defn trail-contains-event-id? [trail event-id]
-  ;; Audit-style entries: {:from :to :input-event :output-event}
-  ;; Check both input-event and output-event for the event id
-  (some (fn [{:keys [input-event output-event]}]
-          (or (= event-id (get input-event "id"))
-              (= event-id (get output-event "id"))))
+  ;; Audit-style entries: {:from :to :event}
+  ;; Check the event for the event id
+  (some (fn [{:keys [event]}]
+          (= event-id (get event "id")))
         trail))
 
 (deftest omit-test
