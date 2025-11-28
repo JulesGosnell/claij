@@ -3,7 +3,8 @@
    [clojure.test :refer [deftest testing is]]
    [m3.uri :refer [parse-uri]]
    [m3.validate :refer [validate]]
-   [claij.fsm :refer [state-schema xition-schema schema-base-uri uri->schema resolve-schema]]
+   [claij.fsm :refer [state-schema xition-schema schema-base-uri uri->schema
+                      resolve-schema start-fsm llm-action trail->prompts]]
    [claij.llm.open-router :refer [open-router-async]]))
 
 ;;------------------------------------------------------------------------------
@@ -291,3 +292,89 @@
       ;; Second should be passed through
       (is (= {"type" "string"}
              (second (get result "oneOf")))))))
+
+;;------------------------------------------------------------------------------
+;; Trail Infrastructure Tests
+;; 
+;; These test core FSM infrastructure (trail->prompts, llm-action) 
+;; and should not depend on specific FSMs like code-review-fsm.
+
+;; Minimal FSM for infrastructure tests
+(def ^:private infra-test-fsm
+  {"id" "infra-test"
+   "schema" {"$schema" "https://json-schema.org/draft/2020-12/schema"
+             "$$id" "https://claij.org/schemas/infra-test"
+             "$version" 0}
+   "states" [{"id" "processor" "action" "llm"}
+             {"id" "end" "action" "end"}]
+   "xitions" [{"id" ["start" "processor"]
+               "schema" {"type" "object"
+                         "properties" {"id" {"const" ["start" "processor"]}
+                                       "input" {"type" "string"}}
+                         "required" ["id" "input"]
+                         "additionalProperties" false}}
+              {"id" ["processor" "end"]
+               "schema" {"type" "object"
+                         "properties" {"id" {"const" ["processor" "end"]}
+                                       "result" {"type" "string"}}
+                         "required" ["id" "result"]
+                         "additionalProperties" false}}]})
+
+(deftest trail->prompts-test
+  (testing "trail->prompts splits entries into user+assistant messages"
+    (let [;; New format: one entry per transition with [ix-schema, event, s-schema, output-event]
+          sample-trail [{"role" "user" "content" ["ix-schema1" "input1" "s-schema1" "output1"]}
+                        {"role" "user" "content" ["ix-schema2" "input2" "s-schema2" "output2"]}]
+          ;; Expands to user+assistant pairs
+          expected [{"role" "user" "content" ["ix-schema1" "input1" "s-schema1"]}
+                    {"role" "assistant" "content" [nil "output1" nil]}
+                    {"role" "user" "content" ["ix-schema2" "input2" "s-schema2"]}
+                    {"role" "assistant" "content" [nil "output2" nil]}]]
+      (is (= expected (trail->prompts infra-test-fsm sample-trail))
+          "trail->prompts should split each entry into user+assistant pair")))
+
+  (testing "trail->prompts handles entry without output (retry case)"
+    (let [;; Entry with nil output (error/retry in progress)
+          sample-trail [{"role" "user" "content" ["ix-schema1" "input1" "s-schema1" "output1"]}
+                        {"role" "user" "content" ["error-schema" "error-msg" "expected-schema" nil]}]
+          ;; Error entry becomes user-only (no assistant message)
+          expected [{"role" "user" "content" ["ix-schema1" "input1" "s-schema1"]}
+                    {"role" "assistant" "content" [nil "output1" nil]}
+                    {"role" "user" "content" ["error-schema" "error-msg" "expected-schema"]}]]
+      (is (= expected (trail->prompts infra-test-fsm sample-trail))
+          "Entry with nil output should produce user message only")))
+
+  (testing "trail->prompts handles empty trail"
+    (is (= [] (vec (trail->prompts infra-test-fsm [])))
+        "Empty trail should return empty"))
+
+  (testing "trail->prompts handles nil trail"
+    (is (= [] (vec (trail->prompts infra-test-fsm nil)))
+        "nil trail should return empty")))
+
+(deftest llm-action-handler-arity-test
+  (testing "llm-action calls handler with 2 args (context, event)"
+    (let [handler-calls (atom [])
+          ;; Mock handler that records how it was called
+          mock-handler (fn [& args]
+                         (swap! handler-calls conj args)
+                         nil)
+          fsm infra-test-fsm
+          ix (first (filter #(= (get % "id") ["start" "processor"]) (get fsm "xitions")))
+          state (first (filter #(= (get % "id") "processor") (get fsm "states")))
+          event {"id" ["start" "processor"]
+                 "input" "test data"}
+          trail []
+          context {:test true}]
+      ;; Call the real llm-action with mocked open-router-async
+      (with-redefs [open-router-async (fn [_provider _model _prompts success-handler & _opts]
+                                        ;; Immediately call success with fake LLM response
+                                        (success-handler {"id" ["processor" "end"]
+                                                          "result" "processed"}))]
+        (try
+          (llm-action context fsm ix state event trail mock-handler)
+          ;; If we get here without exception, check handler was called with 2 args
+          (is (= 1 (count @handler-calls)) "handler should be called once")
+          (is (= 2 (count (first @handler-calls))) "handler should receive 2 args (context, event)")
+          (catch clojure.lang.ArityException e
+            (is false (str "BUG: handler called with wrong arity - " (.getMessage e)))))))))
