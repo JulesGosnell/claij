@@ -271,17 +271,13 @@
                      ;; SUCCESS - Put context, event, and trail on channel
                    (do
                      (log/info (str "   [OK] Validation: " ox-id))
-                     (let [;; Build new trail - only check input transition for omit
-                           ;; ix-omit?: omit the user entry (the input triple)
-                           ;; ox omit is irrelevant here - checked when ox becomes next ix
+                     (let [;; One entry per transition: [input-schema, input-event, output-options, output-event]
+                           ;; When omit=true, skip entirely (internal protocol traffic)
                            new-trail (if ix-omit?
-                                       ;; Omit user triple, keep assistant entry
+                                       (vec current-trail)
                                        (conj (vec current-trail)
-                                             {"role" "assistant" "content" [ox-schema output-event nil]})
-                                       ;; Add both entries (user then assistant, oldest-first order)
-                                       (-> (vec current-trail)
-                                           (conj {"role" "user" "content" [ix-schema event s-schema]})
-                                           (conj {"role" "assistant" "content" [ox-schema output-event nil]})))]
+                                             {"role" "user"
+                                              "content" [ix-schema event s-schema output-event]}))]
                        (>!! c {:context new-context
                                :event output-event
                                :trail new-trail}))
@@ -297,10 +293,10 @@
                                            "Validation errors: " (pr-str es) "\n\n"
                                            "Please review the schema and provide a corrected response.")
                             error-schema {"type" "string"}
-                               ;; Build error trail entry: [input-schema, error-message, event-schema]
+;; Error entry has nil output (retry in progress)
                             error-trail (conj (vec current-trail)
                                               {"role" "user"
-                                               "content" [error-schema error-msg ox-schema]})]
+                                               "content" [error-schema error-msg ox-schema nil]})]
                         (log/info "      [>>] Sending validation error feedback to LLM")
                            ;; Call action again with error in trail
                         (if-let [action (get-in context [:id->action a])]
@@ -446,14 +442,14 @@
 (defn last-event
   "Extract the final event from a trail.
    
-   Takes a trail (vector of trail entries) and returns the event from the
-   most recent entry (the last element of the trail vector).
+   Takes a trail (vector of trail entries) and returns the output event from the
+   most recent entry. Each entry has content [ix-schema, event, s-schema, output-event].
    
    Usage:
      (let [[context trail] (await)]
-       (last-event trail))  ; Returns the final event"
+       (last-event trail))  ; Returns the final output event"
   [trail]
-  (second (get (peek trail) "content")))
+  (get (get (peek trail) "content") 3))
 
 (defn run-sync
   "Run an FSM synchronously, blocking until completion.
@@ -515,25 +511,26 @@
 (defn trail->prompts
   "Convert audit trail to LLM conversation prompts.
    
-   Trail is stored oldest-first (vector/conj order), which is the order
-   prompts need to be in.
-   
-   Will be refactored to derive prompts from audit-style trail entries.
+   Each trail entry contains [input-schema, input-event, output-options, output-event].
+   This function splits each entry into a user message and assistant message.
    
    Parameters:
-   - fsm: The FSM definition (needed for schema/omit lookups)
-   - trail: The audit trail
+   - fsm: The FSM definition (for future schema/omit lookups)
+   - trail: The audit trail (vector, oldest-first)
    
-   Returns: Sequence of prompt messages suitable for make-prompts."
+   Returns: Sequence of prompt messages (user/assistant pairs)."
   [_fsm trail]
-  ;; TODO: When trail format changes to audit entries, this function will:
-  ;; - Filter out entries where xition has omit=true
-  ;; - Determine role based on from-state's action type
-  ;; - Look up schemas from FSM
-  ;; - Format as [input-schema, input-doc, output-schema] triples
-  ;;
-  ;; Trail is stored oldest-first (vector/conj), same order prompts need
-  trail)
+  ;; Each entry: [ix-schema, event, s-schema, output-event]
+  ;; Split into:
+  ;;   user: [ix-schema, event, s-schema]
+  ;;   assistant: [nil, output-event, nil] (only if output-event present)
+  (mapcat (fn [{[ix-schema event s-schema output-event] "content"}]
+            (if output-event
+              [{"role" "user" "content" [ix-schema event s-schema]}
+               {"role" "assistant" "content" [nil output-event nil]}]
+              ;; No output yet (e.g., error/retry entry) - user message only
+              [{"role" "user" "content" [ix-schema event s-schema]}]))
+          trail))
 
 (defn make-prompts
   "Build prompt messages from FSM configuration and conversation trail.
