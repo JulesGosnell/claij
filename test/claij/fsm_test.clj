@@ -322,37 +322,37 @@
 
 (deftest trail->prompts-test
   (testing "trail->prompts converts audit entries to user+assistant messages"
-    (let [;; Audit-style entries
+    (let [;; Audit-style entries - one event per transition
+          ;; Entry 0: event triggers start→processor (processor is LLM)
+          ;; Entry 1: event triggers processor→end (end is not LLM)
           sample-trail [{:from "start" :to "processor"
-                         :input-event {"id" ["start" "processor"] "input" "test1"}
-                         :output-event {"id" ["processor" "end"] "result" "done1"}}
+                         :event {"id" ["start" "processor"] "input" "test1"}}
                         {:from "processor" :to "end"
-                         :input-event {"id" ["processor" "end"] "result" "done1"}
-                         :output-event {"id" ["end" "final"] "status" "complete"}}]
+                         :event {"id" ["processor" "end"] "result" "done1"}}]
           prompts (trail->prompts infra-test-fsm sample-trail)]
-      ;; Should produce 4 messages (2 user + 2 assistant)
-      (is (= 4 (count prompts)))
-      ;; First user message
+      ;; processor is LLM, so entry 0 generates user+assistant
+      ;; entry 1 goes to "end" which is not LLM, so no prompts
+      (is (= 2 (count prompts)) "Should have 2 messages (user + assistant for LLM state)")
+      ;; User message with input
       (is (= "user" (get (nth prompts 0) "role")))
       (is (= {"id" ["start" "processor"] "input" "test1"}
              (get-in (nth prompts 0) ["content" 1])))
-      ;; First assistant message
+      ;; Assistant message with output (next entry's event)
       (is (= "assistant" (get (nth prompts 1) "role")))
       (is (= {"id" ["processor" "end"] "result" "done1"}
              (get-in (nth prompts 1) ["content" 1])))))
 
-  (testing "trail->prompts handles error entries (retry case)"
-    (let [;; Entry with error instead of output-event
+  (testing "trail->prompts handles error entries"
+    (let [;; Entry with error
           sample-trail [{:from "start" :to "processor"
-                         :input-event {"id" ["start" "processor"] "input" "test"}
-                         :output-event {"id" ["processor" "end"] "result" "ok"}}
+                         :event {"id" ["start" "processor"] "input" "test"}}
                         {:from "processor" :to "end"
-                         :input-event {"id" ["processor" "end"] "result" "ok"}
+                         :event {"id" ["processor" "end"] "result" "bad"}
                          :error {:message "Validation failed" :errors [] :attempt 1}}]
           prompts (trail->prompts infra-test-fsm sample-trail)]
-      ;; Should produce 3 messages (2 from first entry, 1 from error entry)
+      ;; First entry: user + assistant (LLM state)
+      ;; Second entry: error generates user message only
       (is (= 3 (count prompts)))
-      ;; Error entry becomes user message only
       (is (= "user" (get (nth prompts 2) "role")))
       (is (= "Validation failed" (get-in (nth prompts 2) ["content" 1])))))
 

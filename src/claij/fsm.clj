@@ -271,15 +271,18 @@
                      ;; SUCCESS - Put context, event, and trail on channel
                    (do
                      (log/info (str "   [OK] Validation: " ox-id))
-                     (let [;; Audit-style entry: one per transition
-                           ;; When omit=true, skip entirely (internal protocol traffic)
-                           new-trail (if ix-omit?
+                     (let [;; One entry per transition: {:from :to :event}
+                           ;; Record the OUTPUT transition - event validates against ox-schema
+                           ;; ox-id = [current-state, next-state]
+                           ;; Check omit on OUTPUT transition (ox), not input (ix)
+                           [ox-from ox-to] ox-id
+                           ox-omit? (get ox "omit")
+                           new-trail (if ox-omit?
                                        (vec current-trail)
                                        (conj (vec current-trail)
-                                             {:from from
-                                              :to to
-                                              :input-event event
-                                              :output-event output-event}))]
+                                             {:from ox-from
+                                              :to ox-to
+                                              :event output-event}))]
                        (>!! c {:context new-context
                                :event output-event
                                :trail new-trail}))
@@ -295,11 +298,13 @@
                                            "Validation errors: " (pr-str es) "\n\n"
                                            "Please review the schema and provide a corrected response.")
                             error-schema {"type" "string"}
-;; Error entry: audit-style with :error instead of :output-event
+;; Error entry: records the failed attempt
+                            ;; Use ox-id since that's the transition we tried to make
+                            [err-from err-to] ox-id
                             error-trail (conj (vec current-trail)
-                                              {:from from
-                                               :to to
-                                               :input-event event
+                                              {:from err-from
+                                               :to err-to
+                                               :event output-event
                                                :error {:message error-msg
                                                        :errors es
                                                        :attempt @retry-count}})]
@@ -448,14 +453,14 @@
 (defn last-event
   "Extract the final event from a trail.
    
-   Takes a trail (vector of audit entries) and returns the output event from the
-   most recent entry.
+   Takes a trail (vector of audit entries) and returns the event from the
+   most recent entry. Each entry has {:from :to :event}.
    
    Usage:
      (let [[context trail] (await)]
-       (last-event trail))  ; Returns the final output event"
+       (last-event trail))  ; Returns the final event"
   [trail]
-  (:output-event (peek trail)))
+  (:event (peek trail)))
 
 (defn run-sync
   "Run an FSM synchronously, blocking until completion.
@@ -517,11 +522,14 @@
 (defn trail->prompts
   "Convert audit trail to LLM conversation prompts.
    
-   Each audit entry contains {:from :to :input-event :output-event} (or :error).
-   This function converts to prompt format [schema, event, output-schema].
+   Each audit entry contains {:from :to :event} where event triggered transition from→to.
+   
+   For consecutive entries N and N+1 where N's destination is an LLM state:
+   - Entry N's event = input to the LLM
+   - Entry N+1's event = output from the LLM
    
    Parameters:
-   - fsm: The FSM definition (for schema lookups)
+   - fsm: The FSM definition (for schema lookups and state actions)
    - trail: The audit trail (vector, oldest-first)
    
    Returns: Sequence of prompt messages (user/assistant pairs)."
@@ -531,22 +539,43 @@
         id->s (index-by (->key "id") ss)
         ;; Get output transitions from a state
         state-output-xitions (fn [state-id]
-                               (filter (fn [{[from _to] "id"}] (= from state-id)) xs))]
+                               (filter (fn [{[from _to] "id"}] (= from state-id)) xs))
+        ;; Process pairs of consecutive entries
+        trail-vec (vec trail)
+        n (count trail-vec)]
     (mapcat
-     (fn [{:keys [from to input-event output-event error]}]
-       (let [;; Look up transition schema
+     (fn [i]
+       (let [{:keys [from to event error] :as entry} (nth trail-vec i)
+             ;; Look up destination state to check if it's an LLM
+             dest-state (id->s to)
+             is-llm? (= "llm" (get dest-state "action"))
+             ;; Get the transition schema
              ix (id->x [from to])
              ix-schema (get ix "schema")
              ;; Compute output schema (oneOf from destination state's outgoing transitions)
              output-xitions (state-output-xitions to)
-             s-schema {"oneOf" (mapv #(get % "schema") output-xitions)}]
-         (if error
+             s-schema {"oneOf" (mapv #(get % "schema") output-xitions)}
+             ;; Get next entry's event (if exists) - this is the LLM's output
+             next-event (when (< (inc i) n)
+                          (:event (nth trail-vec (inc i))))]
+         (cond
            ;; Error entry - generate user message with error feedback
+           error
            [{"role" "user" "content" [{"type" "string"} (:message error) ix-schema]}]
-           ;; Normal entry - generate user + assistant messages
-           [{"role" "user" "content" [ix-schema input-event s-schema]}
-            {"role" "assistant" "content" [nil output-event nil]}])))
-     trail)))
+
+           ;; LLM state with output - generate user + assistant
+           (and is-llm? next-event)
+           [{"role" "user" "content" [ix-schema event s-schema]}
+            {"role" "assistant" "content" [nil next-event nil]}]
+
+           ;; LLM state without output (last entry or pending)
+           is-llm?
+           [{"role" "user" "content" [ix-schema event s-schema]}]
+
+           ;; Non-LLM state - no prompts needed
+           :else
+           [])))
+     (range n))))
 
 (defn make-prompts
   "Build prompt messages from FSM configuration and conversation trail.
