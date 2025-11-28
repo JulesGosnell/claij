@@ -321,28 +321,40 @@
                          "additionalProperties" false}}]})
 
 (deftest trail->prompts-test
-  (testing "trail->prompts splits entries into user+assistant messages"
-    (let [;; New format: one entry per transition with [ix-schema, event, s-schema, output-event]
-          sample-trail [{"role" "user" "content" ["ix-schema1" "input1" "s-schema1" "output1"]}
-                        {"role" "user" "content" ["ix-schema2" "input2" "s-schema2" "output2"]}]
-          ;; Expands to user+assistant pairs
-          expected [{"role" "user" "content" ["ix-schema1" "input1" "s-schema1"]}
-                    {"role" "assistant" "content" [nil "output1" nil]}
-                    {"role" "user" "content" ["ix-schema2" "input2" "s-schema2"]}
-                    {"role" "assistant" "content" [nil "output2" nil]}]]
-      (is (= expected (trail->prompts infra-test-fsm sample-trail))
-          "trail->prompts should split each entry into user+assistant pair")))
+  (testing "trail->prompts converts audit entries to user+assistant messages"
+    (let [;; Audit-style entries
+          sample-trail [{:from "start" :to "processor"
+                         :input-event {"id" ["start" "processor"] "input" "test1"}
+                         :output-event {"id" ["processor" "end"] "result" "done1"}}
+                        {:from "processor" :to "end"
+                         :input-event {"id" ["processor" "end"] "result" "done1"}
+                         :output-event {"id" ["end" "final"] "status" "complete"}}]
+          prompts (trail->prompts infra-test-fsm sample-trail)]
+      ;; Should produce 4 messages (2 user + 2 assistant)
+      (is (= 4 (count prompts)))
+      ;; First user message
+      (is (= "user" (get (nth prompts 0) "role")))
+      (is (= {"id" ["start" "processor"] "input" "test1"}
+             (get-in (nth prompts 0) ["content" 1])))
+      ;; First assistant message
+      (is (= "assistant" (get (nth prompts 1) "role")))
+      (is (= {"id" ["processor" "end"] "result" "done1"}
+             (get-in (nth prompts 1) ["content" 1])))))
 
-  (testing "trail->prompts handles entry without output (retry case)"
-    (let [;; Entry with nil output (error/retry in progress)
-          sample-trail [{"role" "user" "content" ["ix-schema1" "input1" "s-schema1" "output1"]}
-                        {"role" "user" "content" ["error-schema" "error-msg" "expected-schema" nil]}]
-          ;; Error entry becomes user-only (no assistant message)
-          expected [{"role" "user" "content" ["ix-schema1" "input1" "s-schema1"]}
-                    {"role" "assistant" "content" [nil "output1" nil]}
-                    {"role" "user" "content" ["error-schema" "error-msg" "expected-schema"]}]]
-      (is (= expected (trail->prompts infra-test-fsm sample-trail))
-          "Entry with nil output should produce user message only")))
+  (testing "trail->prompts handles error entries (retry case)"
+    (let [;; Entry with error instead of output-event
+          sample-trail [{:from "start" :to "processor"
+                         :input-event {"id" ["start" "processor"] "input" "test"}
+                         :output-event {"id" ["processor" "end"] "result" "ok"}}
+                        {:from "processor" :to "end"
+                         :input-event {"id" ["processor" "end"] "result" "ok"}
+                         :error {:message "Validation failed" :errors [] :attempt 1}}]
+          prompts (trail->prompts infra-test-fsm sample-trail)]
+      ;; Should produce 3 messages (2 from first entry, 1 from error entry)
+      (is (= 3 (count prompts)))
+      ;; Error entry becomes user message only
+      (is (= "user" (get (nth prompts 2) "role")))
+      (is (= "Validation failed" (get-in (nth prompts 2) ["content" 1])))))
 
   (testing "trail->prompts handles empty trail"
     (is (= [] (vec (trail->prompts infra-test-fsm [])))
