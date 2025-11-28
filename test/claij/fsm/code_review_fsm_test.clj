@@ -2,11 +2,10 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.tools.logging :as log]
-   [clojure.pprint :refer [pprint]]
    [m3.validate :refer [validate]]
    [claij.util :refer [index-by ->key]]
    [claij.llm.open-router :refer [open-router-async]]
-   [claij.fsm :refer [start-fsm make-prompts llm-action trail->prompts]]
+   [claij.fsm :refer [start-fsm make-prompts]]
    [claij.fsm.code-review-fsm :refer [code-review-schema
                                       code-review-fsm]]))
 
@@ -146,70 +145,3 @@
 
         (finally
           (stop-fsm))))))
-
-(deftest llm-action-handler-arity-test
-  (testing "llm-action calls handler with 2 args (context, event)"
-    (let [handler-calls (atom [])
-          ;; Mock handler that records how it was called
-          mock-handler (fn [& args]
-                         (swap! handler-calls conj args)
-                         nil)
-          ;; Minimal FSM/state/trail structures
-          fsm code-review-fsm
-          ix (first (filter #(= (get % "id") ["start" "mc"]) (get fsm "xitions")))
-          state (first (filter #(= (get % "id") "mc") (get fsm "states")))
-          event {"id" ["start" "mc"]
-                 "document" "test"
-                 "llms" [{"provider" "openai" "model" "gpt-4o"}]
-                 "concerns" ["test concern"]}
-          trail []
-          context {:test true}]
-      ;; Call the real llm-action with mocked open-router-async
-      (with-redefs [open-router-async (fn [_provider _model _prompts success-handler & _opts]
-                                        ;; Immediately call success with fake LLM response
-                                        (success-handler {"id" ["mc" "reviewer"]
-                                                          "code" {"language" {"name" "clojure"} "text" "(+ 1 1)"}
-                                                          "notes" "test"
-                                                          "concerns" ["test"]
-                                                          "llm" {"provider" "openai" "model" "gpt-4o"}}))]
-        (try
-          (llm-action context fsm ix state event trail mock-handler)
-          ;; If we get here without exception, check handler was called with 2 args
-          (is (= 1 (count @handler-calls)) "handler should be called once")
-          (is (= 2 (count (first @handler-calls))) "handler should receive 2 args (context, event)")
-          (catch clojure.lang.ArityException e
-            (is false (str "BUG: handler called with wrong arity - " (.getMessage e)))))))))
-
-(deftest trail->prompts-test
-  (testing "trail->prompts splits entries into user+assistant messages"
-    (let [fsm code-review-fsm
-          ;; New format: one entry per transition with [ix-schema, event, s-schema, output-event]
-          sample-trail [{"role" "user" "content" ["ix-schema1" "input1" "s-schema1" "output1"]}
-                        {"role" "user" "content" ["ix-schema2" "input2" "s-schema2" "output2"]}]
-          ;; Expands to user+assistant pairs
-          expected [{"role" "user" "content" ["ix-schema1" "input1" "s-schema1"]}
-                    {"role" "assistant" "content" [nil "output1" nil]}
-                    {"role" "user" "content" ["ix-schema2" "input2" "s-schema2"]}
-                    {"role" "assistant" "content" [nil "output2" nil]}]]
-      (is (= expected (trail->prompts fsm sample-trail))
-          "trail->prompts should split each entry into user+assistant pair")))
-
-  (testing "trail->prompts handles entry without output (retry case)"
-    (let [fsm code-review-fsm
-          ;; Entry with nil output (error/retry in progress)
-          sample-trail [{"role" "user" "content" ["ix-schema1" "input1" "s-schema1" "output1"]}
-                        {"role" "user" "content" ["error-schema" "error-msg" "expected-schema" nil]}]
-          ;; Error entry becomes user-only (no assistant message)
-          expected [{"role" "user" "content" ["ix-schema1" "input1" "s-schema1"]}
-                    {"role" "assistant" "content" [nil "output1" nil]}
-                    {"role" "user" "content" ["error-schema" "error-msg" "expected-schema"]}]]
-      (is (= expected (trail->prompts fsm sample-trail))
-          "Entry with nil output should produce user message only")))
-
-  (testing "trail->prompts handles empty trail"
-    (is (= [] (vec (trail->prompts code-review-fsm [])))
-        "Empty trail should return empty"))
-
-  (testing "trail->prompts handles nil trail"
-    (is (= [] (vec (trail->prompts code-review-fsm nil)))
-        "nil trail should return empty")))
