@@ -321,40 +321,38 @@
                          "additionalProperties" false}}]})
 
 (deftest trail->prompts-test
-  (testing "trail->prompts converts audit entries to user+assistant messages"
+  (testing "trail->prompts assigns role based on source state"
     (let [;; Audit-style entries - one event per transition
-          ;; Entry 0: event triggers start→processor (processor is LLM)
-          ;; Entry 1: event triggers processor→end (end is not LLM)
+          ;; Entry 0: from "start" (not LLM) → user
+          ;; Entry 1: from "processor" (LLM) → assistant
           sample-trail [{:from "start" :to "processor"
                          :event {"id" ["start" "processor"] "input" "test1"}}
                         {:from "processor" :to "end"
                          :event {"id" ["processor" "end"] "result" "done1"}}]
           prompts (trail->prompts infra-test-fsm sample-trail)]
-      ;; processor is LLM, so entry 0 generates user+assistant
-      ;; entry 1 goes to "end" which is not LLM, so no prompts
-      (is (= 2 (count prompts)) "Should have 2 messages (user + assistant for LLM state)")
-      ;; User message with input
+      ;; Should have 2 messages
+      (is (= 2 (count prompts)))
+      ;; First: from "start" (no action) → user
       (is (= "user" (get (nth prompts 0) "role")))
       (is (= {"id" ["start" "processor"] "input" "test1"}
              (get-in (nth prompts 0) ["content" 1])))
-      ;; Assistant message with output (next entry's event)
+      ;; Second: from "processor" (action="llm") → assistant
       (is (= "assistant" (get (nth prompts 1) "role")))
       (is (= {"id" ["processor" "end"] "result" "done1"}
              (get-in (nth prompts 1) ["content" 1])))))
 
-  (testing "trail->prompts handles error entries"
-    (let [;; Entry with error
-          sample-trail [{:from "start" :to "processor"
+  (testing "trail->prompts handles error entries as user messages"
+    (let [sample-trail [{:from "start" :to "processor"
                          :event {"id" ["start" "processor"] "input" "test"}}
                         {:from "processor" :to "end"
                          :event {"id" ["processor" "end"] "result" "bad"}
                          :error {:message "Validation failed" :errors [] :attempt 1}}]
           prompts (trail->prompts infra-test-fsm sample-trail)]
-      ;; First entry: user + assistant (LLM state)
-      ;; Second entry: error generates user message only
-      (is (= 3 (count prompts)))
-      (is (= "user" (get (nth prompts 2) "role")))
-      (is (= "Validation failed" (get-in (nth prompts 2) ["content" 1])))))
+      ;; 2 messages: user (from start), user (error feedback)
+      (is (= 2 (count prompts)))
+      ;; Error entry always becomes user message
+      (is (= "user" (get (nth prompts 1) "role")))
+      (is (= "Validation failed" (get-in (nth prompts 1) ["content" 1])))))
 
   (testing "trail->prompts handles empty trail"
     (is (= [] (vec (trail->prompts infra-test-fsm [])))

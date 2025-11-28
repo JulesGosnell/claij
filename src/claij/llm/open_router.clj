@@ -187,6 +187,8 @@
          (let [d (strip-md-json (unpack r))]
            (log/info ">>>>>> RAW LLM RESPONSE <<<<<<")
            (log/info (str "Response length: " (count d)))
+           (println ">>> RAW LLM RESPONSE:" d)
+           (flush)
            (reset! llm-response-capture {:raw d :status :received :timestamp (java.time.Instant/now)})
            (try
              (let [j (read-str d)]

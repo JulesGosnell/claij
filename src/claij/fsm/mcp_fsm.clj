@@ -366,11 +366,23 @@
 
     {"id" ["llm" "end"]
      "label" "output"
-     "description" "LLM completes work"
+     "description" "LLM completes work - result must use MCP content format"
      "schema"
      {"type" "object"
       "properties"
       {"id" {"const" ["llm" "end"]}
-       "result" {"type" "object"}}
+       "result" {"type" "object"
+                 "properties"
+                 {"content" {"type" "array"
+                             "items" {"type" "object"
+                                      "properties"
+                                      {"type" {"type" "string"
+                                               "enum" ["text" "image" "resource"]}
+                                       "text" {"type" "string"}}
+                                      "required" ["type" "text"]
+                                      "additionalProperties" false}}
+                  "isError" {"type" "boolean"}}
+                 "required" ["content"]
+                 "additionalProperties" false}}
       "additionalProperties" false
       "required" ["id" "result"]}}]})
