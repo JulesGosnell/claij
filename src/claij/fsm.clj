@@ -524,58 +524,43 @@
    
    Each audit entry contains {:from :to :event} where event triggered transition from→to.
    
-   For consecutive entries N and N+1 where N's destination is an LLM state:
-   - Entry N's event = input to the LLM
-   - Entry N+1's event = output from the LLM
+   Role is determined by what PRODUCED the event:
+   - If 'from' state has action='llm' → assistant (LLM produced this)
+   - Otherwise → user (request to LLM)
    
    Parameters:
    - fsm: The FSM definition (for schema lookups and state actions)
    - trail: The audit trail (vector, oldest-first)
    
-   Returns: Sequence of prompt messages (user/assistant pairs)."
+   Returns: Sequence of prompt messages."
   [{xs "xitions" ss "states" :as fsm} trail]
   (let [;; Index for lookups
         id->x (index-by (->key "id") xs)
         id->s (index-by (->key "id") ss)
         ;; Get output transitions from a state
         state-output-xitions (fn [state-id]
-                               (filter (fn [{[from _to] "id"}] (= from state-id)) xs))
-        ;; Process pairs of consecutive entries
-        trail-vec (vec trail)
-        n (count trail-vec)]
+                               (filter (fn [{[from _to] "id"}] (= from state-id)) xs))]
     (mapcat
-     (fn [i]
-       (let [{:keys [from to event error] :as entry} (nth trail-vec i)
-             ;; Look up destination state to check if it's an LLM
-             dest-state (id->s to)
-             is-llm? (= "llm" (get dest-state "action"))
+     (fn [{:keys [from to event error]}]
+       (let [;; Look up source state to determine role
+             source-state (id->s from)
+             from-is-llm? (= "llm" (get source-state "action"))
+             role (if from-is-llm? "assistant" "user")
              ;; Get the transition schema
              ix (id->x [from to])
              ix-schema (get ix "schema")
              ;; Compute output schema (oneOf from destination state's outgoing transitions)
              output-xitions (state-output-xitions to)
-             s-schema {"oneOf" (mapv #(get % "schema") output-xitions)}
-             ;; Get next entry's event (if exists) - this is the LLM's output
-             next-event (when (< (inc i) n)
-                          (:event (nth trail-vec (inc i))))]
+             s-schema {"oneOf" (mapv #(get % "schema") output-xitions)}]
          (cond
-           ;; Error entry - generate user message with error feedback
+           ;; Error entry - always user message with error feedback
            error
            [{"role" "user" "content" [{"type" "string"} (:message error) ix-schema]}]
 
-           ;; LLM state with output - generate user + assistant
-           (and is-llm? next-event)
-           [{"role" "user" "content" [ix-schema event s-schema]}
-            {"role" "assistant" "content" [nil next-event nil]}]
-
-           ;; LLM state without output (last entry or pending)
-           is-llm?
-           [{"role" "user" "content" [ix-schema event s-schema]}]
-
-           ;; Non-LLM state - no prompts needed
+           ;; Normal entry - role based on what produced it
            :else
-           [])))
-     (range n))))
+           [{"role" role "content" [ix-schema event s-schema]}])))
+     trail)))
 
 (defn make-prompts
   "Build prompt messages from FSM configuration and conversation trail.
@@ -607,7 +592,17 @@
                      "Requests will arrive as [INPUT-SCHEMA, INPUT-DOCUMENT, OUTPUT-SCHEMA] triples."
                      "The INPUT-SCHEMA describes the structure of the INPUT-DOCUMENT."
                      "You must respond to the contents of the INPUT-DOCUMENT."
-                     "Your response (The OUTPUT-DOCUMENT) must be a single JSON document that is STRICTLY CONFORMANT (please pay particular attention to the \"id\" which must be present as a pair of strings) to the OUTPUT-SCHEMA:"]
+                     "Your response (The OUTPUT-DOCUMENT) must be a single JSON document that is STRICTLY CONFORMANT to the OUTPUT-SCHEMA."
+                     ""
+                     "CRITICAL - The \"id\" field is a UNIQUE DISCRIMINATOR that determines routing:"
+                     "- The \"id\" MUST be an array of exactly two strings, e.g. [\"llm\", \"servicing\"] or [\"llm\", \"end\"]"
+                     "- The \"id\" value MUST match EXACTLY one of the const values specified in the OUTPUT-SCHEMA options"
+                     "- Getting the \"id\" wrong will cause validation failure and break the workflow"
+                     ""
+                     "IMPORTANT: The OUTPUT-SCHEMA is a oneOf with multiple options. Choose based on what you need to do:"
+                     "- To call a tool/service: use \"id\": [\"llm\", \"servicing\"] and include the JSON-RPC tool call in \"message\""
+                     "- To return a final answer: use \"id\": [\"llm\", \"end\"] and put your result in \"result\""
+                     "You MUST call tools via the servicing route - do NOT embed tool calls in the end result."]
                     fsm-prompts
                     ix-prompts
                     state-prompts
@@ -623,7 +618,7 @@
 
 (defn llm-action
   "FSM action: call LLM with prompts built from FSM config and trail.
-   Extracts provider/model from event, defaults to openai/gpt-4o-mini.
+   Extracts provider/model from event, defaults to anthropic/claude-opus-4.5.
    
    Passes the output schema (oneOf valid output transitions) to open-router-async
    for structured output enforcement."
@@ -633,8 +628,8 @@
   (flush)
   (log/info "llm-action entry, event:" (pr-str event) "trail-count:" (count trail))
   (let [{provider "provider" model "model"} (get event "llm")
-        provider (or provider "google")
-        model (or model "gemini-2.5-flash")
+        provider (or provider "anthropic")
+        model (or model "claude-opus-4.5")
 
         ;; Compute output transitions from current state
         output-xitions (filter (fn [{[from _to] "id"}] (= from sid)) xs)
@@ -650,7 +645,7 @@
      provider model
      prompts
      (fn [output]
-       (prn ">>> LLM-ACTION GOT OUTPUT - id:" (get output "id") " input:" trail)
+       (println ">>> LLM-ACTION GOT OUTPUT:" (pr-str output))
        (flush)
        (log/info "llm-action got output, id:" (get output "id"))
        (handler context output))
