@@ -271,13 +271,15 @@
                      ;; SUCCESS - Put context, event, and trail on channel
                    (do
                      (log/info (str "   [OK] Validation: " ox-id))
-                     (let [;; One entry per transition: [input-schema, input-event, output-options, output-event]
+                     (let [;; Audit-style entry: one per transition
                            ;; When omit=true, skip entirely (internal protocol traffic)
                            new-trail (if ix-omit?
                                        (vec current-trail)
                                        (conj (vec current-trail)
-                                             {"role" "user"
-                                              "content" [ix-schema event s-schema output-event]}))]
+                                             {:from from
+                                              :to to
+                                              :input-event event
+                                              :output-event output-event}))]
                        (>!! c {:context new-context
                                :event output-event
                                :trail new-trail}))
@@ -293,15 +295,19 @@
                                            "Validation errors: " (pr-str es) "\n\n"
                                            "Please review the schema and provide a corrected response.")
                             error-schema {"type" "string"}
-;; Error entry has nil output (retry in progress)
+;; Error entry: audit-style with :error instead of :output-event
                             error-trail (conj (vec current-trail)
-                                              {"role" "user"
-                                               "content" [error-schema error-msg ox-schema nil]})]
+                                              {:from from
+                                               :to to
+                                               :input-event event
+                                               :error {:message error-msg
+                                                       :errors es
+                                                       :attempt @retry-count}})]
                         (log/info "      [>>] Sending validation error feedback to LLM")
                            ;; Call action again with error in trail
                         (if-let [action (get-in context [:id->action a])]
                           (action new-context fsm ix state event error-trail handler)
-                          (handler new-context (second (peek error-trail)) error-trail))))
+                          (handler new-context (get-in (peek error-trail) [:error :message]) error-trail))))
                        ;; Max retries exceeded
                     (fn []
                       (log/error (str "   [X] Max Retries Exceeded: Validation failed after " max-retries " attempts"))
@@ -442,14 +448,14 @@
 (defn last-event
   "Extract the final event from a trail.
    
-   Takes a trail (vector of trail entries) and returns the output event from the
-   most recent entry. Each entry has content [ix-schema, event, s-schema, output-event].
+   Takes a trail (vector of audit entries) and returns the output event from the
+   most recent entry.
    
    Usage:
      (let [[context trail] (await)]
        (last-event trail))  ; Returns the final output event"
   [trail]
-  (get (get (peek trail) "content") 3))
+  (:output-event (peek trail)))
 
 (defn run-sync
   "Run an FSM synchronously, blocking until completion.
@@ -511,26 +517,36 @@
 (defn trail->prompts
   "Convert audit trail to LLM conversation prompts.
    
-   Each trail entry contains [input-schema, input-event, output-options, output-event].
-   This function splits each entry into a user message and assistant message.
+   Each audit entry contains {:from :to :input-event :output-event} (or :error).
+   This function converts to prompt format [schema, event, output-schema].
    
    Parameters:
-   - fsm: The FSM definition (for future schema/omit lookups)
+   - fsm: The FSM definition (for schema lookups)
    - trail: The audit trail (vector, oldest-first)
    
    Returns: Sequence of prompt messages (user/assistant pairs)."
-  [_fsm trail]
-  ;; Each entry: [ix-schema, event, s-schema, output-event]
-  ;; Split into:
-  ;;   user: [ix-schema, event, s-schema]
-  ;;   assistant: [nil, output-event, nil] (only if output-event present)
-  (mapcat (fn [{[ix-schema event s-schema output-event] "content"}]
-            (if output-event
-              [{"role" "user" "content" [ix-schema event s-schema]}
-               {"role" "assistant" "content" [nil output-event nil]}]
-              ;; No output yet (e.g., error/retry entry) - user message only
-              [{"role" "user" "content" [ix-schema event s-schema]}]))
-          trail))
+  [{xs "xitions" ss "states" :as fsm} trail]
+  (let [;; Index for lookups
+        id->x (index-by (->key "id") xs)
+        id->s (index-by (->key "id") ss)
+        ;; Get output transitions from a state
+        state-output-xitions (fn [state-id]
+                               (filter (fn [{[from _to] "id"}] (= from state-id)) xs))]
+    (mapcat
+     (fn [{:keys [from to input-event output-event error]}]
+       (let [;; Look up transition schema
+             ix (id->x [from to])
+             ix-schema (get ix "schema")
+             ;; Compute output schema (oneOf from destination state's outgoing transitions)
+             output-xitions (state-output-xitions to)
+             s-schema {"oneOf" (mapv #(get % "schema") output-xitions)}]
+         (if error
+           ;; Error entry - generate user message with error feedback
+           [{"role" "user" "content" [{"type" "string"} (:message error) ix-schema]}]
+           ;; Normal entry - generate user + assistant messages
+           [{"role" "user" "content" [ix-schema input-event s-schema]}
+            {"role" "assistant" "content" [nil output-event nil]}])))
+     trail)))
 
 (defn make-prompts
   "Build prompt messages from FSM configuration and conversation trail.

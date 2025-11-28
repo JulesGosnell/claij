@@ -64,14 +64,11 @@
    "final-action" final-action})
 
 (defn trail-contains-event-id? [trail event-id]
-  ;; New format: content = [ix-schema, input-event, s-schema, output-event]
-  ;; Check both input (content[1]) and output (content[3]) for the event id
-  (some (fn [entry]
-          (let [content (get entry "content")
-                input-id (get-in content [1 "id"])
-                output-id (get-in content [3 "id"])]
-            (or (= event-id input-id)
-                (= event-id output-id))))
+  ;; Audit-style entries: {:from :to :input-event :output-event}
+  ;; Check both input-event and output-event for the event id
+  (some (fn [{:keys [input-event output-event]}]
+          (or (= event-id (get input-event "id"))
+              (= event-id (get output-event "id"))))
         trail))
 
 (deftest omit-test
