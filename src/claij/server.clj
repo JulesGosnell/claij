@@ -101,7 +101,7 @@
   (cond
     ;; Health check endpoint
     (= uri "/health")
-    (content-type (response "ok") "text/plain")
+    (content-type (response "ok v0.1.0") "text/plain")
 
     ;; LLM endpoints
     :else
