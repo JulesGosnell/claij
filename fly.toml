@@ -1,0 +1,30 @@
+# fly.toml - Fly.io configuration for claij
+# See https://fly.io/docs/reference/configuration/
+
+app = "claij"
+primary_region = "lhr"  # London
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # Non-secret environment variables
+  # OPENROUTER_API_KEY is set via `fly secrets set`
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  timeout = "5s"
+  path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
