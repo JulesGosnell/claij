@@ -41,8 +41,7 @@
                      ;; MCP dependencies (only in dev, excluded from production builds)
                      com.bhauman/clojure-mcp {:mvn/version "0.1.6-SNAPSHOT"
                                               :exclusions [org.slf4j/slf4j-nop]}
-                     com.taoensso/timbre {:mvn/version "6.8.0"}
-                     }
+                     com.taoensso/timbre {:mvn/version "6.8.0"}}
         :main-opts ["-m" "nrepl.cmdline" "--interactive"]}
 
   ;;:run {:main-opts ["-m" "claij.agent.core"]}
@@ -90,4 +89,7 @@
 
   :piper-repl {:extra-deps {org.slf4j/slf4j-simple {:mvn/version "2.0.16"}
                             ;; Python interop - only needed to run TTS services
-                            clj-python/libpython-clj {:mvn/version "2.025"}}}}}
+                            clj-python/libpython-clj {:mvn/version "2.025"}}}
+
+  :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
+          :ns-default build}}}

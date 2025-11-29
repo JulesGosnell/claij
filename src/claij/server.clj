@@ -20,13 +20,14 @@
 ;;------------------------------------------------------------------------------
 ;; agent stuff
 
-(def api-key (assert-env-var "OPENROUTER_API_KEY"))
+(defn api-key []
+  (assert-env-var "OPENROUTER_API_KEY"))
 
 (def api-base "https://openrouter.ai")
 (def api-url (str api-base "/api/v1"))
 
-(def headers
-  {"Authorization" (str "Bearer " api-key)
+(defn headers []
+  {"Authorization" (str "Bearer " (api-key))
    "content-type" "application/json"})
 
 (def separator "041083c4-7bb7-4cb7-884b-3dc4b2bd0413")
@@ -41,7 +42,7 @@
         answer
         (post
          (str api-url "/chat/completions")
-         {:headers headers
+         {:headers (headers)
           :body
           (clj->json
            {:model (str provider "/" model)
@@ -77,11 +78,10 @@
 (def state (atom initial-summary))
 
 (def llms
-  {"grok"   (partial open-router "grok"   "x-ai"      "grok-code-fast-1"   state)
-   "gpt"    (partial open-router "gpt"    "openai"    "gpt-5-codex"        state)
-   "claude" (partial open-router "claude" "anthropic" "claude-sonnet-4.5"  state)
-   "gemini" (partial open-router "gemini" "google"    "gemini-2.5-flash"   state)})
-
+  {"grok" (partial open-router "grok" "x-ai" "grok-code-fast-1" state)
+   "gpt" (partial open-router "gpt" "openai" "gpt-5-codex" state)
+   "claude" (partial open-router "claude" "anthropic" "claude-sonnet-4.5" state)
+   "gemini" (partial open-router "gemini" "google" "gemini-2.5-flash" state)})
 
 ;; (defn handler [request]
 ;;   (let [uri (:uri request)
@@ -98,13 +98,20 @@
 ;;   (content-type (response (<!! oc)) "text/plain"))
 
 (defn handler [ic oc {uri :uri body :body}]
-  (if-let [llm(last (split uri #"/"))]
-    (let [input (slurp body)
-          output ((llms llm) input)]
-      (log/info (str llm "->: " input))
-      (log/info (str llm "<-: " output))
-      (content-type (response output) "text/plain"))
-    (not-found uri)))
+  (cond
+    ;; Health check endpoint
+    (= uri "/health")
+    (content-type (response "ok") "text/plain")
+
+    ;; LLM endpoints
+    :else
+    (if-let [llm (last (split uri #"/"))]
+      (let [input (slurp body)
+            output ((llms llm) input)]
+        (log/info (str llm "->: " input))
+        (log/info (str llm "<-: " output))
+        (content-type (response output) "text/plain"))
+      (not-found uri))))
 
 (defn start [port ic oc]
   (run-jetty (partial handler ic oc) {:port port}))
@@ -113,22 +120,21 @@
 
 ;;------------------------------------------------------------------------------
 
-
 (defn -main
   [& args]
   (let [[options _ documentation]
         (cli
          args
          "server: integrate a given LLM into a CLAIJ team"
-         ["-p" "--port"    "http port"         :parse-fn #(Integer/parseInt %) :default 8000]
-         ["-t" "--tts-url" "tts url"           :parse-fn string->url           :default (string->url "http://localhost:8001/synthesize")]
-         ["-l" "--llm"     "llm"               :parse-fn identity              :default "/claude-sonnet-4.5"])
+         ["-p" "--port" "http port" :parse-fn #(Integer/parseInt %) :default 8000]
+         ["-t" "--tts-url" "tts url" :parse-fn string->url :default (string->url "http://localhost:8001/synthesize")]
+         ["-l" "--llm" "llm" :parse-fn identity :default "/claude-sonnet-4.5"])
         {:keys [port tts-url llm]} options]
 
     ;; join up pipework
 
     (ai
-     (partial open-router "claude" "anthropic" "claude-sonnet-4.5"  (atom initial-summary))
+     (partial open-router "claude" "anthropic" "claude-sonnet-4.5" (atom initial-summary))
      chat->ai
      ai->chat)
 

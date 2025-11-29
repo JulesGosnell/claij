@@ -53,11 +53,13 @@
      "items" {"type" "string"}}
 
     "llm"
-    {"description" "specification of an LLM to use"
+    {"description" "specification of an LLM to use - MUST be one of the allowed combinations"
      "type" "object"
      "properties"
-     {"provider" {"type" "string"}
-      "model" {"type" "string"}}
+     {"provider" {"type" "string"
+                  "enum" ["anthropic" "google" "openai" "x-ai"]}
+      "model" {"type" "string"
+               "enum" ["claude-sonnet-4" "gemini-2.5-flash" "gpt-4o" "grok-3-beta"]}}
      "additionalProperties" false
      "required" ["provider" "model"]}
 
@@ -130,6 +132,12 @@
      ["You are an MC orchestrating a code review."
       "You have been provided with a list of code quality concerns and a list of available LLMs."
       "Your role is to distribute the concerns effectively across multiple LLM reviewers to ensure thorough code review."
+      ""
+      "CRITICAL - LLM SELECTION:"
+      "- You MUST only use LLMs from the 'llms' list provided in the entry message"
+      "- Copy the exact 'provider' and 'model' strings from that list"
+      "- DO NOT invent or guess model names - only use what was provided"
+      "- If you use a model not in the list, the request will fail"
       ""
       "CONCERN DISTRIBUTION:"
       "- Review the provided concerns list carefully"
