@@ -145,6 +145,35 @@
     {:status 404
      :body {:error (str "LLM not found: " provider)}}))
 
+(defn claij-api-key []
+  (System/getenv "CLAIJ_API_KEY"))
+
+(defn wrap-auth
+  "Middleware that checks for valid Bearer token.
+   Returns 401 if token missing or invalid."
+  [handler]
+  (fn [request]
+    (let [auth-header (get-in request [:headers "authorization"])
+          token (when auth-header
+                  (second (re-matches #"Bearer\s+(.*)" auth-header)))
+          expected (claij-api-key)]
+      (cond
+        ;; No API key configured - allow all (dev mode)
+        (str/blank? expected)
+        (handler request)
+
+        ;; Valid token
+        (= token expected)
+        (handler request)
+
+        ;; Missing or invalid token
+        :else
+        {:status 401
+         :headers {"WWW-Authenticate" "Bearer realm=\"claij\""
+                   "content-type" "application/json"}
+         :body {:error "Unauthorized"
+                :message "Valid Bearer token required"}}))))
+
 ;;------------------------------------------------------------------------------
 ;; Routes
 
@@ -153,9 +182,14 @@
     {:get {:no-doc true
            :swagger {:info {:title "claij API"
                             :description "Clojure AI Integration Junction"
-                            :version "0.1.2"}}
+                            :version "0.1.2"}
+                     :securityDefinitions {:bearer {:type "apiKey"
+                                                    :name "Authorization"
+                                                    :in "header"
+                                                    :description "Bearer token (format: 'Bearer <token>')"}}}
            :handler (swagger/create-swagger-handler)}}]
 
+   ;; Public endpoints
    ["/health"
     {:get {:summary "Health check"
            :responses {200 {:body string?}}
@@ -187,11 +221,15 @@
             :produces ["text/vnd.graphviz"]
             :handler fsm-graph-dot-handler}}]]
 
+   ;; Protected endpoints (require Bearer token)
    ["/llm/:provider"
-    {:post {:summary "Send message to LLM"
+    {:post {:summary "Send message to LLM (requires auth)"
+            :middleware [wrap-auth]
+            :swagger {:security [{:bearer []}]}
             :parameters {:path {:provider [:enum "grok" "gpt" "claude" "gemini"]}
                          :body {:message :string}}
             :responses {200 {:body {:response :string}}
+                        401 {:body {:error :string :message :string}}
                         404 {:body :map}}
             :handler llm-handler}}]])
 
