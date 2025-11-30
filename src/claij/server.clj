@@ -13,6 +13,7 @@
    [claij.util :refer [assert-env-var clj->json json->clj]]
 
    ;; FSM graph endpoint
+   [clojure.java.shell :refer [sh]]
    [claij.graph :refer [fsm->dot]]
    [claij.fsm.code-review-fsm :refer [code-review-fsm]]
    [claij.fsm.mcp-fsm :refer [mcp-fsm]])
@@ -94,7 +95,7 @@
    "mcp-fsm" mcp-fsm})
 
 (defn dot->svg [dot-str]
-  (let [{:keys [out err exit]} (clojure.java.shell/sh "dot" "-Tsvg" :in dot-str)]
+  (let [{:keys [out err exit]} (sh "dot" "-Tsvg" :in dot-str)]
     (if (zero? exit)
       out
       (throw (ex-info "GraphViz rendering failed" {:stderr err :exit exit})))))
