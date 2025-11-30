@@ -1,0 +1,12 @@
+
+multiple LLMs cooperating to achieve same task
+in parallel, as many as you need/can afford
+coordinated via a workflow/finite-state-machine - think flow-chart
+all workflows defined as data (not code - langchain) - can be human or machine edited
+- speech to text/text-speech
+dynamic, so llms can:
+- install new [mcp] tools for themselves at runtime
+- define new workflows at runtime
+- integrate new llms at runtime
+- define and evolve a custom built protocol between the llms and the service to reduce token count
+

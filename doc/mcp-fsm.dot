@@ -1,0 +1,31 @@
+digraph "mcp" {
+  rankdir=TB;
+  node [shape=box, style=rounded, fontname="Helvetica", fontsize=10];
+  edge [fontname="Helvetica", fontsize=9];
+  title [shape=plaintext label=<<FONT POINT-SIZE="14" COLOR="gray40">Orchestrates MCP protocol interactions</FONT>>];
+  { rank=same title }
+  title -> start [style=invis];
+  start [shape=doublecircle, fillcolor=lightgreen, style=filled];
+  end   [shape=doublecircle, fillcolor=lightcoral, style=filled];
+
+  // states
+  starting [label="starting\n(start)"];
+  shedding [label="shedding\n(shed)"];
+  initing [label="initing\n(init)"];
+  servicing [label="servicing\n(service)"];
+  caching [label="caching\n(cache)"];
+  llm [label="llm\n(llm)"];
+
+  // transitions
+  start -> starting [label="document\nstarts the MCP service. Returns an initialise-request."];
+  starting -> shedding [label="initialise\nrequest\n(timeout)\nShed unwanted list-changed messages."];
+  starting -> initing [label="initialise\nresponse\nDirect path when initialize response received"];
+  shedding -> initing [label="initialise\nresponse"];
+  initing -> servicing [label="initialise\nnotification"];
+  servicing -> caching [label="list_changed,\nlist_response,\nread_response"];
+  caching -> servicing [label="list_request,\nread_request"];
+  servicing -> llm [label="tool\nresponse\nTool response returning to LLM - schema dynamically generated from MCP cache"];
+  caching -> llm [label="cache\nready\nCache is ready, LLM can start work"];
+  llm -> servicing [label="tool\ncall\nLLM makes MCP request - schema dynamically generated from MCP cache"];
+  llm -> end [label="output\nLLM completes work - result must use MCP content format"];
+}

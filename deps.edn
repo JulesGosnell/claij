@@ -14,6 +14,11 @@
         ring/ring {:mvn/version "1.14.1"} ; 1.15.0-beta1 is available but using stable
         metosin/reitit {:mvn/version "0.9.1"}
         metosin/reitit-ring {:mvn/version "0.9.1"}
+        metosin/reitit-swagger {:mvn/version "0.9.1"}
+        metosin/reitit-swagger-ui {:mvn/version "0.9.1"}
+        metosin/reitit-malli {:mvn/version "0.9.1"}
+        metosin/malli {:mvn/version "0.16.4"}
+        metosin/muuntaja {:mvn/version "0.6.10"}
 
         ;; HTTP client for Claude API
         clj-http/clj-http {:mvn/version "3.13.1"}
