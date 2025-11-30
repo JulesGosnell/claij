@@ -115,7 +115,10 @@
 
     ;; FSM graph endpoint: /fsm/graph/<fsm-id>
     (starts-with? uri "/fsm/graph/")
-    (let [fsm-id (subs uri (count "/fsm/graph/"))]
+    (let [suffix (subs uri (count "/fsm/graph/"))
+          fsm-id (if (clojure.string/ends-with? suffix ".dot")
+                   (subs suffix 0 (- (count suffix) 4))
+                   suffix)]
       (if-let [fsm (get fsms fsm-id)]
         (content-type (response (fsm->dot fsm)) "text/vnd.graphviz")
         (not-found (str "FSM not found: " fsm-id))))
