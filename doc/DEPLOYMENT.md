@@ -57,13 +57,62 @@ fly logs
 curl https://claij.fly.dev/health
 ```
 
-## Subsequent Deployments
+## Subsequent Deployments (Redeploy)
 
 Just run:
 
 ```bash
 fly deploy
 ```
+
+### Manual Redeploy Process (documented for FSM encoding)
+
+**Tested 2024-11-29** - Changed health endpoint from "ok" to "ok v0.1.0"
+
+```bash
+# Step 1: Verify current version
+curl https://claij.fly.dev/health
+# Returns: "ok"
+
+# Step 2: Make code changes
+# (edit files locally)
+
+# Step 3: Commit changes
+git add -A
+git commit -m "description of changes"
+
+# Step 4: Deploy to Fly.io
+fly deploy
+# - Waits for depot builder
+# - Builds Docker image (pulls deps, compiles uberjar)
+# - Pushes image to Fly registry  
+# - Updates machines
+# - Runs health checks
+
+# Step 5: Verify deployment
+curl https://claij.fly.dev/health
+# Returns: "ok v0.1.0"
+```
+
+**Observations for FSM:**
+- `fly deploy` is the key command - handles build + push + deploy
+- No need to manually build Docker image or push to registry
+- Health check verification is important (confirm new version is live)
+- Deps are re-downloaded each build (TODO: optimize Docker caching)
+- Typical redeploy time: 2-5 minutes
+
+### Redeploy FSM Design
+
+States:
+1. `start` → verify current health
+2. `deploy` → run `fly deploy`
+3. `verify` → check health returns new version
+4. `end` → success / failure
+
+Actions needed:
+- Shell execution (`fly deploy`)
+- HTTP GET (health check)
+- Version comparison (old vs new)
 
 Or, once we have CI/CD set up:
 
@@ -142,10 +191,14 @@ fly machines restart
 
 1. [x] Run manual deployment - **DONE 2024-11-29** 
 2. [x] Verify health endpoint works - **https://claij.fly.dev/health returns "ok"**
-3. [ ] Set up custom domain (claij.org)
-4. [ ] Create GitHub Action for auto-deploy
-5. [ ] Encode redeploy into FSM
-6. [ ] Add webhook listener for self-deployment
+3. [x] Manual redeploy tested - **health now returns "ok v0.1.0"**
+4. [ ] Write deploy-fsm (encode the manual process)
+5. [ ] Add FSM HTTP endpoints to claij (`POST /fsm/:id/submit`)
+6. [ ] Set up custom domain (claij.org)
+7. [ ] Add GitHub webhook endpoint
+8. [ ] Connect webhook to deploy-fsm (self-deploying!)
+9. [ ] Add Postgres for FSM storage
+10. [ ] Create GitHub Action for auto-deploy (alternative to webhook)
 
 ## TODO / Technical Debt
 
