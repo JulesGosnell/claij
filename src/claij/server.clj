@@ -17,8 +17,7 @@
    [claij.fsm.code-review-fsm :refer [code-review-fsm]]
    [claij.fsm.mcp-fsm :refer [mcp-fsm]])
   (:import
-   [java.net URL]
-   [guru.nidi.graphviz.engine Format Graphviz])
+   [java.net URL])
   (:gen-class))
 
 (set! *warn-on-reflection* true)
@@ -95,9 +94,10 @@
    "mcp-fsm" mcp-fsm})
 
 (defn dot->svg [dot-str]
-  (-> (Graphviz/fromString dot-str)
-      (.render Format/SVG)
-      (.toString)))
+  (let [{:keys [out err exit]} (clojure.java.shell/sh "dot" "-Tsvg" :in dot-str)]
+    (if (zero? exit)
+      out
+      (throw (ex-info "GraphViz rendering failed" {:stderr err :exit exit})))))
 
 ;; (defn handler [request]
 ;;   (let [uri (:uri request)

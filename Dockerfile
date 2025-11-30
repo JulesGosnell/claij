@@ -25,6 +25,9 @@ FROM eclipse-temurin:21-jre-alpine
 
 WORKDIR /app
 
+# Install graphviz for SVG rendering
+RUN apk add --no-cache graphviz
+
 # Copy uberjar from builder
 COPY --from=builder /app/target/claij.jar ./claij.jar
 
