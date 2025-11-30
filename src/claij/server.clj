@@ -17,7 +17,8 @@
    [claij.fsm.code-review-fsm :refer [code-review-fsm]]
    [claij.fsm.mcp-fsm :refer [mcp-fsm]])
   (:import
-   [java.net URL])
+   [java.net URL]
+   [guru.nidi.graphviz.engine Format Graphviz])
   (:gen-class))
 
 (set! *warn-on-reflection* true)
@@ -93,6 +94,11 @@
   {"code-review-fsm" code-review-fsm
    "mcp-fsm" mcp-fsm})
 
+(defn dot->svg [dot-str]
+  (-> (Graphviz/fromString dot-str)
+      (.render Format/SVG)
+      (.toString)))
+
 ;; (defn handler [request]
 ;;   (let [uri (:uri request)
 ;;         parts (split uri #"/")
@@ -116,11 +122,17 @@
     ;; FSM graph endpoint: /fsm/graph/<fsm-id>
     (starts-with? uri "/fsm/graph/")
     (let [suffix (subs uri (count "/fsm/graph/"))
-          fsm-id (if (clojure.string/ends-with? suffix ".dot")
-                   (subs suffix 0 (- (count suffix) 4))
-                   suffix)]
+          [fsm-id fmt] (cond
+                         (clojure.string/ends-with? suffix ".svg")
+                         [(subs suffix 0 (- (count suffix) 4)) :svg]
+                         (clojure.string/ends-with? suffix ".dot")
+                         [(subs suffix 0 (- (count suffix) 4)) :dot]
+                         :else [suffix :dot])]
       (if-let [fsm (get fsms fsm-id)]
-        (content-type (response (fsm->dot fsm)) "text/vnd.graphviz")
+        (let [dot (fsm->dot fsm)]
+          (case fmt
+            :dot (content-type (response dot) "text/vnd.graphviz")
+            :svg (content-type (response (dot->svg dot)) "image/svg+xml")))
         (not-found (str "FSM not found: " fsm-id))))
 
     ;; LLM endpoints

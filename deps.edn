@@ -18,6 +18,9 @@
         ;; HTTP client for Claude API
         clj-http/clj-http {:mvn/version "3.13.1"}
 
+        ;; GraphViz rendering (DOT -> SVG)
+        guru.nidi/graphviz-java {:mvn/version "0.18.1"}
+
         ;; Async processing
         org.clojure/core.async {:mvn/version "1.8.741"}
 
