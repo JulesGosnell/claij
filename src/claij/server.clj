@@ -7,10 +7,15 @@
    [ring.util.response :refer [response content-type not-found]]
 
    ;; tmp
-   [clojure.string :refer [split trim join]]
+   [clojure.string :refer [split trim join starts-with?]]
    [clojure.core.async :refer [go-loop <! >! chan]]
    [clj-http.client :refer [post]]
-   [claij.util :refer [assert-env-var clj->json json->clj]])
+   [claij.util :refer [assert-env-var clj->json json->clj]]
+
+   ;; FSM graph endpoint
+   [claij.graph :refer [fsm->dot]]
+   [claij.fsm.code-review-fsm :refer [code-review-fsm]]
+   [claij.fsm.mcp-fsm :refer [mcp-fsm]])
   (:import
    [java.net URL])
   (:gen-class))
@@ -83,6 +88,11 @@
    "claude" (partial open-router "claude" "anthropic" "claude-sonnet-4.5" state)
    "gemini" (partial open-router "gemini" "google" "gemini-2.5-flash" state)})
 
+;; FSM registry - hardcoded for now, will come from storage later
+(def fsms
+  {"code-review-fsm" code-review-fsm
+   "mcp-fsm" mcp-fsm})
+
 ;; (defn handler [request]
 ;;   (let [uri (:uri request)
 ;;         parts (split uri #"/")
@@ -101,7 +111,14 @@
   (cond
     ;; Health check endpoint
     (= uri "/health")
-    (content-type (response "ok v0.1.0") "text/plain")
+    (content-type (response "ok v0.1.1") "text/plain")
+
+    ;; FSM graph endpoint: /fsm/graph/<fsm-id>
+    (starts-with? uri "/fsm/graph/")
+    (let [fsm-id (subs uri (count "/fsm/graph/"))]
+      (if-let [fsm (get fsms fsm-id)]
+        (content-type (response (fsm->dot fsm)) "text/vnd.graphviz")
+        (not-found (str "FSM not found: " fsm-id))))
 
     ;; LLM endpoints
     :else
