@@ -1,19 +1,29 @@
 (ns claij.server
   (:require
    [clojure.tools.cli :refer [cli]]
-   [clojure.core.async :refer [>!! <!!]]
    [clojure.tools.logging :as log]
-   [ring.adapter.jetty :refer [run-jetty]]
-   [ring.util.response :refer [response content-type not-found]]
-
-   ;; tmp
-   [clojure.string :refer [split trim join starts-with?]]
-   [clojure.core.async :refer [go-loop <! >! chan]]
-   [clj-http.client :refer [post]]
-   [claij.util :refer [assert-env-var clj->json json->clj]]
-
-   ;; FSM graph endpoint
    [clojure.java.shell :refer [sh]]
+   [clojure.string :as str]
+
+   ;; Ring
+   [ring.adapter.jetty :refer [run-jetty]]
+   [ring.util.response :as resp]
+
+   ;; Reitit
+   [reitit.ring :as ring]
+   [reitit.swagger :as swagger]
+   [reitit.swagger-ui :as swagger-ui]
+   [reitit.ring.coercion :as coercion]
+   [reitit.coercion.malli :as malli-coercion]
+   [reitit.ring.middleware.muuntaja :as muuntaja]
+   [reitit.ring.middleware.parameters :as parameters]
+   [muuntaja.core :as m]
+
+   ;; HTTP client
+   [clj-http.client :refer [post]]
+
+   ;; Internal
+   [claij.util :refer [assert-env-var clj->json json->clj]]
    [claij.graph :refer [fsm->dot]]
    [claij.fsm.code-review-fsm :refer [code-review-fsm]]
    [claij.fsm.mcp-fsm :refer [mcp-fsm]])
@@ -24,7 +34,7 @@
 (set! *warn-on-reflection* true)
 
 ;;------------------------------------------------------------------------------
-;; agent stuff
+;; LLM Backend
 
 (defn api-key []
   (assert-env-var "OPENROUTER_API_KEY"))
@@ -40,8 +50,6 @@
 (def pattern (re-pattern separator))
 
 (def initial-summary "This is the beginning of our conversation")
-
-(defn trc [prefix x] (prn prefix x) x)
 
 (defn open-router [id provider model summary message]
   (let [old-summary @summary
@@ -59,27 +67,16 @@
              {:role "user" :content (str "Please append this separator to your response: '" separator "'.")}
              {:role "user" :content "Please merge your summary and answer tersely into a fresh summary and append to your response after the separator. It will be passed back to you in the next request."}]})
           :throw-exceptions false})]
-    (join
+    (str/join
      ","
      (map
       (comp
-       (fn [[answer new-summary]] (compare-and-set! summary old-summary (trim new-summary)) (trim answer))
-       (fn [s] (split s pattern))
+       (fn [[answer new-summary]] (compare-and-set! summary old-summary (str/trim new-summary)) (str/trim answer))
+       (fn [s] (str/split s pattern))
        :content
        :message)
       (:choices
        (json->clj (:body answer)))))))
-
-(defn ai [f input-channel output-channel]
-  (go-loop []
-    (when-some [m (<! input-channel)]
-      (>! output-channel (f m))
-      (recur))))
-
-(def ai->chat (chan 1024 (map (partial trc "ai->chat:"))))
-(def chat->ai (chan 1024 (map (partial trc "chat->ai:"))))
-
-;;------------------------------------------------------------------------------
 
 (def state (atom initial-summary))
 
@@ -89,10 +86,15 @@
    "claude" (partial open-router "claude" "anthropic" "claude-sonnet-4.5" state)
    "gemini" (partial open-router "gemini" "google" "gemini-2.5-flash" state)})
 
-;; FSM registry - hardcoded for now, will come from storage later
+;;------------------------------------------------------------------------------
+;; FSM Registry
+
 (def fsms
   {"code-review-fsm" code-review-fsm
    "mcp-fsm" mcp-fsm})
+
+;;------------------------------------------------------------------------------
+;; Handlers
 
 (defn dot->svg [dot-str]
   (let [{:keys [out err exit]} (sh "dot" "-Tsvg" :in dot-str)]
@@ -100,89 +102,175 @@
       out
       (throw (ex-info "GraphViz rendering failed" {:stderr err :exit exit})))))
 
-;; (defn handler [request]
-;;   (let [uri (:uri request)
-;;         parts (split uri #"/")
-;;         llm (if (= (count parts) 3) (lower-case (nth parts 2)) "claude")
-;;         backend (get backends llm)]
-;;     (if backend
-;;       (content-type (response (backend (slurp (:body request)))) "text/plain")
-;;       (not-found "LLM not found"))))
+(defn health-handler [_]
+  {:status 200
+   :headers {"content-type" "text/plain"}
+   :body "ok v0.1.2"})
 
-;; (defn handler [ic oc {uri :uri body :body}]
-;;   (prn "HAHA:" (last (split uri #"/")))
-;;   (>!! ic (slurp body))
-;;   (content-type (response (<!! oc)) "text/plain"))
+(defn list-fsms-handler [_]
+  {:status 200
+   :body (vec (keys fsms))})
 
-(defn handler [ic oc {uri :uri body :body}]
-  (cond
-    ;; Health check endpoint
-    (= uri "/health")
-    (content-type (response "ok v0.1.1") "text/plain")
+(defn fsm-document-handler [{{:keys [fsm-id]} :path-params}]
+  (if-let [fsm (get fsms fsm-id)]
+    {:status 200
+     :body fsm}
+    {:status 404
+     :body {:error (str "FSM not found: " fsm-id)}}))
 
-    ;; FSM graph endpoint: /fsm/graph/<fsm-id>
-    (starts-with? uri "/fsm/graph/")
-    (let [suffix (subs uri (count "/fsm/graph/"))
-          [fsm-id fmt] (cond
-                         (clojure.string/ends-with? suffix ".svg")
-                         [(subs suffix 0 (- (count suffix) 4)) :svg]
-                         (clojure.string/ends-with? suffix ".dot")
-                         [(subs suffix 0 (- (count suffix) 4)) :dot]
-                         :else [suffix :dot])]
-      (if-let [fsm (get fsms fsm-id)]
-        (let [dot (fsm->dot fsm)]
-          (case fmt
-            :dot (content-type (response dot) "text/vnd.graphviz")
-            :svg (content-type (response (dot->svg dot)) "image/svg+xml")))
-        (not-found (str "FSM not found: " fsm-id))))
+(defn fsm-graph-svg-handler [{{:keys [fsm-id]} :path-params}]
+  (if-let [fsm (get fsms fsm-id)]
+    {:status 200
+     :headers {"content-type" "image/svg+xml"}
+     :body (dot->svg (fsm->dot fsm))}
+    {:status 404
+     :body {:error (str "FSM not found: " fsm-id)}}))
 
-    ;; LLM endpoints
-    :else
-    (if-let [llm (last (split uri #"/"))]
-      (let [input (slurp body)
-            output ((llms llm) input)]
-        (log/info (str llm "->: " input))
-        (log/info (str llm "<-: " output))
-        (content-type (response output) "text/plain"))
-      (not-found uri))))
+(defn fsm-graph-dot-handler [{{:keys [fsm-id]} :path-params}]
+  (if-let [fsm (get fsms fsm-id)]
+    {:status 200
+     :headers {"content-type" "text/vnd.graphviz"}
+     :body (fsm->dot fsm)}
+    {:status 404
+     :body {:error (str "FSM not found: " fsm-id)}}))
 
-(defn start [port ic oc]
-  (run-jetty (partial handler ic oc) {:port port}))
+(defn llm-handler [{{:keys [provider]} :path-params :keys [body-params]}]
+  (if-let [llm-fn (get llms provider)]
+    (let [input (or (:message body-params) (str body-params))
+          output (llm-fn input)]
+      (log/info (str provider "->: " input))
+      (log/info (str provider "<-: " output))
+      {:status 200
+       :body {:response output}})
+    {:status 404
+     :body {:error (str "LLM not found: " provider)}}))
+
+(defn claij-api-key []
+  (System/getenv "CLAIJ_API_KEY"))
+
+(defn wrap-auth
+  "Middleware that checks for valid Bearer token.
+   Returns 401 if token missing or invalid."
+  [handler]
+  (fn [request]
+    (let [auth-header (get-in request [:headers "authorization"])
+          token (when auth-header
+                  (second (re-matches #"Bearer\s+(.*)" auth-header)))
+          expected (claij-api-key)]
+      (cond
+        ;; No API key configured - allow all (dev mode)
+        (str/blank? expected)
+        (handler request)
+
+        ;; Valid token
+        (= token expected)
+        (handler request)
+
+        ;; Missing or invalid token
+        :else
+        {:status 401
+         :headers {"WWW-Authenticate" "Bearer realm=\"claij\""
+                   "content-type" "application/json"}
+         :body {:error "Unauthorized"
+                :message "Valid Bearer token required"}}))))
+
+;;------------------------------------------------------------------------------
+;; Routes
+
+(def routes
+  [["/swagger.json"
+    {:get {:no-doc true
+           :swagger {:info {:title "claij API"
+                            :description "Clojure AI Integration Junction"
+                            :version "0.1.2"}
+                     :securityDefinitions {:bearer {:type "apiKey"
+                                                    :name "Authorization"
+                                                    :in "header"
+                                                    :description "Bearer token (format: 'Bearer <token>')"}}}
+           :handler (swagger/create-swagger-handler)}}]
+
+   ;; Public endpoints
+   ["/health"
+    {:get {:summary "Health check"
+           :responses {200 {:body string?}}
+           :handler health-handler}}]
+
+   ["/fsms"
+    ["/list"
+     {:get {:summary "List available FSMs"
+            :responses {200 {:body [:vector :string]}}
+            :handler list-fsms-handler}}]]
+
+   ["/fsm/:fsm-id"
+    ["/document"
+     {:get {:summary "Get FSM definition"
+            :parameters {:path {:fsm-id :string}}
+            :responses {200 {:body :map}
+                        404 {:body :map}}
+            :handler fsm-document-handler}}]
+
+    ["/graph.svg"
+     {:get {:summary "Get FSM as SVG visualization"
+            :parameters {:path {:fsm-id :string}}
+            :produces ["image/svg+xml"]
+            :handler fsm-graph-svg-handler}}]
+
+    ["/graph.dot"
+     {:get {:summary "Get FSM as DOT source"
+            :parameters {:path {:fsm-id :string}}
+            :produces ["text/vnd.graphviz"]
+            :handler fsm-graph-dot-handler}}]]
+
+   ;; Protected endpoints (require Bearer token)
+   ["/llm/:provider"
+    {:post {:summary "Send message to LLM (requires auth)"
+            :middleware [wrap-auth]
+            :swagger {:security [{:bearer []}]}
+            :parameters {:path {:provider [:enum "grok" "gpt" "claude" "gemini"]}
+                         :body {:message :string}}
+            :responses {200 {:body {:response :string}}
+                        401 {:body {:error :string :message :string}}
+                        404 {:body :map}}
+            :handler llm-handler}}]])
+
+;;------------------------------------------------------------------------------
+;; App
+
+(def app
+  (ring/ring-handler
+   (ring/router
+    routes
+    {:data {:coercion malli-coercion/coercion
+            :muuntaja m/instance
+            :middleware [swagger/swagger-feature
+                         parameters/parameters-middleware
+                         muuntaja/format-negotiate-middleware
+                         muuntaja/format-response-middleware
+                         muuntaja/format-request-middleware
+                         coercion/coerce-exceptions-middleware
+                         coercion/coerce-request-middleware
+                         coercion/coerce-response-middleware]}})
+   (ring/routes
+    (swagger-ui/create-swagger-ui-handler
+     {:path "/swagger"
+      :config {:validatorUrl nil}})
+    (ring/create-default-handler))))
+
+;;------------------------------------------------------------------------------
+;; Server
+
+(defn start [port]
+  (run-jetty app {:port port :join? false}))
 
 (defn string->url [s] (URL. s))
 
-;;------------------------------------------------------------------------------
-
 (defn -main
   [& args]
-  (let [[options _ documentation]
+  (let [[options _ _]
         (cli
          args
-         "server: integrate a given LLM into a CLAIJ team"
-         ["-p" "--port" "http port" :parse-fn #(Integer/parseInt %) :default 8000]
-         ["-t" "--tts-url" "tts url" :parse-fn string->url :default (string->url "http://localhost:8001/synthesize")]
-         ["-l" "--llm" "llm" :parse-fn identity :default "/claude-sonnet-4.5"])
-        {:keys [port tts-url llm]} options]
-
-    ;; join up pipework
-
-    (ai
-     (partial open-router "claude" "anthropic" "claude-sonnet-4.5" (atom initial-summary))
-     chat->ai
-     ai->chat)
-
-    (start port chat->ai ai->chat)))
-
-;;------------------------------------------------------------------------------
-
-;; next steps
-;; - move memory strategy into e.g. accumulating-memory-strategy
-;; - integrate speech to text input
-;; - integrate text to speech output
-;; - integrate LLM switching (very cool)
-;; - integrate a REPL and a repl-results-strategy
-;; - encourage AIs to do their own mcp access via REPL
-;; - begin to buld an MCP dsl for use at REPL
-;; - each different LLM gets a differnt voice
-;; - looking very good !
-;; - handle timeouts
+         "server: claij API server"
+         ["-p" "--port" "http port" :parse-fn #(Integer/parseInt %) :default 8080])
+        {:keys [port]} options]
+    (log/info (str "Starting claij server on port " port))
+    (start port)))
