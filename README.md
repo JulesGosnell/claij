@@ -1,106 +1,150 @@
-# CLAIJ - "...an elastic collection of LLMs able to coordinate on the execution of a self-improving process..."
+# CLAIJ - Clojure AI Integration Junction
+
+> *"The factory is the product."* — Elon Musk
+>
+> *"...we envision a mind (or brain) as composed of many partially autonomous 'agents'—a 'Society' of smaller minds..."* — Marvin Minsky, The Society of Mind
+>
+> *"Anything you can do, I can do Meta."* — Julian Gosnell
 
 [![CI](https://github.com/JulesGosnell/claij/actions/workflows/ci.yml/badge.svg)](https://github.com/JulesGosnell/claij/actions/workflows/ci.yml)
 
-## Disclaimers
+---
 
-A few disclaimers:
+## The Philosophy
 
-- This project is currently in experimental mode
-- This project is trying to eat its own dogfood - it is largely AI generated and consequently a mess
+**For a system to improve itself, it must first understand itself.**
 
-So, please don't jump in thinking this is production-ready or that this is the way that I write code, because neither could be further from the truth.
+To understand itself, it must have a description of itself. But that description is part of the system. So the description must describe... itself.
 
-However, the way that software development is done is changing forever, and CLAIJ allows me to both experience this and potentially influence it.
+This is not optional. Without reflexive self-description, you face infinite regress—an endless tower of meta-levels, each describing the one below, never grounding out. A self-improving system *must* be a reflexively self-descriptive system. There is no other architecture that works.
 
-## The Core Idea
+CLAIJ is built on this foundation. The system is data. The data describes itself. Therefore the system understands itself. Therefore the system can improve itself—constrained by its own rules.
 
-I started with a gut-feeling: *The whole is greater than the sum of its parts*. A society of LLMs ([The Society of Mind - Minsky](https://en.wikipedia.org/wiki/Society_of_Mind)) would do a better job of software development than a single LLM working in isolation.
+📖 **[Read the full philosophical foundation →](doc/SELF-DESCRIPTIVE-SYSTEMS.md)**
 
-I had a couple of other intuitions:
+---
 
-- A single LLM may halucinate but a group of LLMs are unlikely to share the same halucination.
+## The Three Pillars
 
-- An LLM is like a junior developer
-  - The more structure I can give them, the better they will perform
-  - The fewer concerns I ask them to worry about, the better job they will do on the stuff I really want focused on
+### 1. The Factory is the Product
 
-So my initial goal was simply to get a bunch of LLMs to cooperate on a shared goal.
+CLAIJ isn't just a tool for building LLM workflows—it's a system that builds itself. FSMs define processes. An FSM-FSM defines how to build FSMs. The meta-schema validates schemas. The same code walks documents, schemas, and the meta-schema itself.
 
-## Token Efficiency
+At any point, an LLM within the system can decide to improve the system—better prompts, extended schemas, new states. The improvement is validated by the system's own rules, loaded, and execution continues. The factory improves the factory.
 
-I had one other premise: the most important thing in any new LLM-accelerated project going forward will be "bang-for-token".
+### 2. A Society of Minds
 
-If you assume that the conversation between LLMs and their development boxes will be some structured format and not just plain text, this opens the door to the question: *"I want to save tokens - What is the most concise shape that this protocol could take?"* 
+A single LLM hallucinates. A society of LLMs—each with focused concerns, constrained by schemas, coordinated by finite state machines—produces emergent reliability. The Master of Ceremonies delegates. Specialists review. Consensus emerges. Hallucinations are caught by the group.
 
-The answer seems to be, by definition: **A Domain Specific Language (DSL)**—a language devised explicitly for the problem at hand. Furthermore, this DSL needs to evolve dynamically with the project. As the project moves forward, the DSL will need extending to accommodate new concepts and requirements, and we don't want to have to keep manually extending, rebuilding, and redeploying the server.
+Each LLM is like a junior developer: the more structure you give them, the better they perform. The fewer concerns they juggle, the better they focus on what matters.
 
-Fortunately, I have a background in LISP.
+### 3. Anything You Can Do, I Can Do Meta
 
-> "Lisp isn't a language, it's a building material." - Alan Kay
+The system's power comes from reflexivity:
 
-LISP's (Clojure henceforth—my favorite language) homoiconicity means that it is essentially a DSL for building DSLs.
+```
+Documents (m1) validated by Schemas (m2)
+Schemas (m2) validated by Meta-schema (m3)  
+Meta-schema (m3) validated by Meta-schema (m3) ← FIXED POINT
+```
 
-## Initial Experiments
+The chain terminates. The system is complete. And because m3 validates m3, the system understands its own understanding. The same forms library generates editors for documents, schemas, and the meta-schema itself. Same code, all levels.
 
-So the initial idea for the project was a bunch of LLMs all coordinated by talking to each other on a chat channel that was actually a Clojure REPL (like an interpreter/compiler rolled into one).
+---
 
-I played with that for a while and soon came to the conclusion that it quickly led to chaos, and that the conversation itself suffered from all the issues I had identified above. Whilst a cool idea, just throwing everyone at a REPL wouldn't fly.
+## Architecture
 
-I considered what had been achieved with LangChain and LangGraph, but neither went far enough for me, so I've rolled my own experimental code to do the following:
+### Schema-Guided FSMs
 
-## Current Implementation
+CLAIJ defines workflows as Finite State Machines where:
 
-### Done:
+- **States** are processing nodes (LLMs, MCP tools, Clojure REPLs)
+- **Transitions** are guarded by schemas—you can only cross if your document validates
+- **LLMs** receive input schemas, documents, and output schemas—they produce conformant responses or the system retries with error feedback
 
-- Define a Finite State Machine (FSM) as a data structure (JSON)
-  - To cross a transition, you must be a JSON document conformant to that transition's JSON Schema
-  - When you get to a state it may:
-    - Be an LLM, in which case the input transition's schema and document, plus an output schema reflecting the transitions leaving this state, are sent to the LLM
-    - **(WIP)** Be an MCP bridge, in which case the underlying MCP service is sent the input (request) and returns a response as output
-    - **(In future)** Be a Clojure REPL, which will evaluate the input producing an output—keeping the DSL dream (above) alive
-    - Handle other custom requirements as they arrive
-- The state's output is then matched against the transitions leaving that state—rinse and repeat as you traverse the FSM
+```
+┌─────────┐    schema    ┌─────────┐    schema    ┌─────────┐
+│  START  │─────────────▶│   LLM   │─────────────▶│   END   │
+└─────────┘              └─────────┘              └─────────┘
+                              │
+                              │ schema (loop)
+                              ▼
+                         ┌─────────┐
+                         │   LLM   │
+                         └─────────┘
+```
 
-### Proof of Concept
+### Token Efficiency via DSL
 
-As a proof of concept, I've defined a code-review-fsm with a Master of Ceremonies (MC) and bunch of reviewers. The MC is given some code, chooses and requests some other LLMs to review the code. He iterates around this loop until he is not seeing any new issues, summarizes the changes and the code, and exits at the end of the FSM.
+The most important metric in LLM-accelerated development is **bang-for-token**. The most concise protocol is, by definition, a Domain Specific Language—evolved dynamically as the project grows.
 
-This idea seems to work very well.
+Clojure's homoiconicity makes it a DSL for building DSLs:
 
-## Future Directions
+> *"Lisp isn't a language, it's a building material."* — Alan Kay
 
-### Rebootstrapping
+Schemas are EDN data. FSMs are EDN data. The meta-schema is EDN data. LLMs see EDN directly in prompts—no JSON marshalling, no special modes. The system speaks one language at every level.
 
-To rebootstrap the whole project on itself—proof that the concept works:
+### MCP Integration
 
-**TODO:**
+CLAIJ integrates with the Model Context Protocol, allowing LLMs to access external tools (file systems, databases, APIs) through schema-validated requests and responses. The MCP protocol itself is managed by an FSM.
 
-- Define an fsm-fsm—i.e., an FSM that can produce a new or improve an existing FSM
-- Use that to define new FSMs for reviewing and refactoring a whole software project
-- Run this on itself
+---
 
-This would also allow, for example:
-- Definition of a Kanban workflow
-- Definition of a TDD development process
-- Definition of any workflow you could describe to the LLMs or they could mine for themselves from the web
+## Working Examples
 
-### Self-Improvement
+### Multi-LLM Code Review
 
-Another important aspect: at any point in the FSM, an LLM should be able to decide to enter the fsm-fsm and kick off a process to improve the current FSM—a mini-retrospective, if you like. Once the improvements (better prompts, data structures, or DSL extensions, etc.) have been made, the new version of the FSM should be loaded and the LLM should be able to continue from the current state into the new version of the FSM.
+A Master of Ceremonies coordinates specialist reviewers. The MC delegates, aggregates feedback, iterates until no new issues emerge, then summarizes. Multiple LLMs, focused concerns, emergent quality.
 
-If I can get this going, then theoretically we have an elastic collection of LLMs able to coordinate on the execution of a self-improving process...
+![Code Review FSM](doc/code-review-fsm.svg)
 
-**Watch this space...**
+### MCP Protocol Management
 
-BTW - I am looking for a job at the moment - so if you have a Clojure project, particularly one using Agents etc., on which you think I might be able to be useful, please [get in touch](https://www.linkedin.com/in/jules-gosnell-15952a1/)
+The FSM platform manages the MCP protocol itself—initialization, tool discovery, request/response cycles—all as schema-guarded state transitions.
 
-### Visualisation
+![MCP FSM](doc/mcp-fsm.svg)
 
-I've just added some code that allows me to view CLAIJ's FSMs as a graph diagram - So, to be clear, these are visual representations of runnable FSMs. As soon as I have MCP working and an FSM-FSM for building FSMs, I will build out and document an FSM library. Here are a couple of examples:
+---
 
-## A Working Multi-LLM Code Review FSM.
-- ![Code Review FSM](doc/code-review-fsm.svg)
+## Roadmap
 
-## WIP - An MCP integration that uses the FSM platform to manage the MCP protocol itself
-- ![MCP FSM](doc/mcp-fsm.svg)
+### The FSM-FSM (In Progress)
+
+An FSM that produces FSMs. Feed it a workflow description; it outputs a runnable FSM. Use it to define:
+
+- Kanban workflows
+- TDD development processes  
+- Project review and refactoring pipelines
+- Any workflow an LLM can understand or mine from documentation
+
+### Self-Improvement Loop
+
+At any point in execution, an LLM can enter the FSM-FSM to improve the *current* FSM—a mini-retrospective. Better prompts, extended schemas, new states. The improvement validates against the meta-schema, loads, and execution continues from the current state into the improved FSM.
+
+This is the vision: **an elastic collection of LLMs coordinating on a self-improving process.**
+
+### Malli Migration
+
+Moving from JSON Schema to Malli for native Clojure schemas—more token-efficient, better error messages, and enabling the reflexive m1→m2→m3→m3 hierarchy that grounds the entire architecture.
+
+---
+
+## Current Status
+
+**This project is experimental.** It's eating its own dogfood—largely AI-generated, iteratively refined, sometimes messy. Don't mistake this for production code or my normal coding style.
+
+But the architecture is sound. The philosophy is necessary. And the way software development is done is changing forever.
+
+---
+
+## Get Involved
+
+I'm looking for collaborators and opportunities. If you have a Clojure project—particularly one involving AI agents, LLM orchestration, or self-improving systems—I'd love to talk.
+
+**[Connect on LinkedIn →](https://www.linkedin.com/in/jules-gosnell-15952a1/)**
+
+---
+
+## License
+
+EPL-2.0
