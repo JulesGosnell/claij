@@ -6,7 +6,8 @@
    [clojure.core.async :refer [chan go-loop alts! >!! close!]]
    [m3.uri :refer [parse-uri uri-base]]
    [m3.validate :refer [validate make-context uri->continuation uri-base->dir]]
-   [claij.util :refer [def-m2 def-m1 index-by ->key map-values make-retrier]]
+   [claij.util :refer [index-by ->key map-values make-retrier]]
+   [claij.malli :refer [def-fsm fsm-registry]]
    [claij.llm.open-router :refer [open-router-async]]))
 
 ;; the plan
@@ -39,127 +40,9 @@
 ;; we need to use async http calls ...
 ;;------------------------------------------------------------------------------
 
+;; FSM structure validation now uses Malli - see claij.malli/def-fsm
+;; Event validation still uses JSON Schema (m3) for $ref support
 (def schema-draft :draft2020-12)
-
-(def-m2
-  fsm-m2
-  {"$schema" "https://json-schema.org/draft/2020-12/schema"
-   ;;"$id" "https://example.com/fsm-schema" ;; $id is messing up $refs :-(
-   "$version" 0
-
-   "$defs"
-   {"prompt"
-    {"type" "string"}
-    ;; {"type" "object"
-    ;;  "properties"
-    ;;  {"role"
-    ;;   {"type" "string"
-    ;;    "enum" ["system" "user" "assistant"]}
-    ;;   "content"
-    ;;   {"type" "string"}}
-    ;;  "additionalProperties" false
-    ;;  "required" ["role" "content"]}
-
-    "prompts"
-    {"type" "array"
-     "items" {"$ref" "#/$defs/prompt"}}
-
-;; Schema reference constraint - enforces $ref format only for compression
-    "schema-ref"
-    {"type" "object"
-     "properties"
-     {"$ref" {"type" "string"
-              "pattern" "^#/\\$defs/.+"}}
-     "required" ["$ref"]
-     "additionalProperties" false}
-
-    ;; Valid JSON Schema constraint
-    "json-schema"
-    {"$ref" "https://json-schema.org/draft/2020-12/schema"}
-
-    "state"
-    {"type" "object"
-     "properties"
-     {"id"
-      {"type" "string"}
-
-      "description"
-      {"type" "string"}
-
-      "action"
-      {"type" "string"}
-
-      "prompts"
-      {"$ref" "#/$defs/prompts"}}
-
-     ;; "if"
-     ;; {"properties" {"action" {"const" "llm"}}}
-     ;; "then"
-     ;; {"required" ["prompts"]}
-     ;; "else"
-     ;; {"properties" {"prompts" false}}
-
-     "additionalProperties" false
-     "required" ["id"
-                 ;;"action" ;; TODO
-                 ]}
-
-    "xition"
-    {"type" "object"
-     "properties"
-     {"id"
-      {"type" "array"
-       "prefixItems"
-       [{"type" "string"}
-        {"type" "string"}]
-       "unevaluatedItems" false}
-
-      "label"
-      {"type" "string"}
-
-      "description"
-      {"type" "string"}
-
-      "prompts"
-      {"$ref" "#/$defs/prompts"}
-
-      ;; TODO: tighten to {"oneOf" [{"$ref" "#/$defs/json-schema"} {"type" "string"}]}
-      ;; String values are lookup keys into context :id->schema for dynamic schema generation
-      "schema" true
-
-      ;; When true, this transition's event will not be added to the trail.
-      ;; Useful for internal FSM transitions (e.g. MCP protocol) that shouldn't
-      ;; pollute the conversation history sent to LLMs.
-      "omit"
-      {"type" "boolean"}}
-     "additionalProperties" false
-     "required" ["id" "schema"]}}
-
-   "type" "object"
-   "properties"
-   {"id"
-    {"type" "string"}
-
-    "description"
-    {"type" "string"}
-
-    "schema" {"$ref" "#/$defs/json-schema"}
-
-    "prompts"
-    {"$ref" "#/$defs/prompts"}
-
-    "states"
-    {"type" "array"
-     "items" {"$ref" "#/$defs/state"}}
-
-    "xitions"
-    {"type" "array"
-     "items" {"$ref" "#/$defs/xition"}}}
-
-   "additionalProperties" false})
-
-(defmacro def-fsm [name m1]
-  `(def-m1 ~name fsm-m2 ~m1))
 
 ;;------------------------------------------------------------------------------
 

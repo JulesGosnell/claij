@@ -2,8 +2,11 @@
  ;; Note: examples in src/claij/examples/ are already on classpath via src/
  :deps {org.clojure/clojure {:mvn/version "1.12.3"}
 
-        ;; M3 validation
+        ;; M3 validation (legacy - being replaced by Malli)
         org.clojars.jules_gosnell/m3 {:mvn/version "0.1.0-SNAPSHOT"}
+
+        ;; Malli - schema validation (replacing m3)
+        metosin/malli {:mvn/version "0.18.0"}
 
         ;; Database
         com.github.seancorfield/next.jdbc {:mvn/version "1.3.939"}

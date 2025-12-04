@@ -5,8 +5,9 @@
    [clojure.data.json :refer [write-str read-str]]
    [clojure.core.async :refer [chan go-loop >! alts! <!! >!!]]
    [claij.util :refer [def-m2 map-values]]
+   [claij.malli :refer [def-fsm]]
    [clj-http.client :refer [get] :rename {get http-get}]
-   [claij.fsm :refer [def-fsm schema-base-uri start-fsm]]
+   [claij.fsm :refer [schema-base-uri start-fsm]]
    ;;[claij.llm :refer [llm-action]]
    [claij.mcp.bridge :refer [start-mcp-bridge]]))
 
