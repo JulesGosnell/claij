@@ -12,7 +12,8 @@
    [clojure.data.json :refer [write-str read-str]]
    [clojure.core.async :refer [chan alt!! timeout <!! >!!]]
    [claij.util :refer [def-m2]]
-   [claij.fsm :refer [def-fsm llm-action]]
+   [claij.malli :refer [def-fsm]]
+   [claij.fsm :refer [llm-action]]
    [claij.mcp.bridge :refer [start-mcp-bridge]]
    [claij.mcp :refer [initialise-request
                       initialised-notification

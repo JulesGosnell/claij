@@ -25,6 +25,6 @@ Content: [brief outline]
 4. Exit context (GC, keep summary)
 
 ## Current Skills
-token, test, clojure, development, claij, meta
+token, test, clojure, development, claij, meta, decomposition
 
 Remember: Skills are live docs - suggest updates when patterns evolve

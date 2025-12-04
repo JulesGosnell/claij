@@ -5,7 +5,6 @@
    [clojure.data.json :refer [write-str read-str]]
    [clojure.core.async :refer [chan <!! >!!] :as async]
    [claij.mcp.bridge :refer [start-mcp-bridge]]
-   [claij.fsm :refer [def-fsm]]
    [claij.mcp :refer [initialise-request
                       initialised-notification
                       list-tools-request
@@ -463,7 +462,6 @@
 ;;------------------------------------------------------------------------------
 
 (deftest mcp-test
-
 
   (testing "initialize-mcp-cache"
     (let [capabilities {"tools" {"listChanged" true}

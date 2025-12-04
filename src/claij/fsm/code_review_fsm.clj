@@ -1,7 +1,8 @@
 (ns claij.fsm.code-review-fsm
   (:require
    [claij.util :refer [def-m2]]
-   [claij.fsm :refer [def-fsm llm-action]]))
+   [claij.malli :refer [def-fsm]]
+   [claij.fsm :refer [llm-action]]))
 
 ;;------------------------------------------------------------------------------
 ;; Code Review FSM Schema and Definition

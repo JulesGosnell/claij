@@ -1,7 +1,8 @@
 (ns claij.triage
   (:require
    [claij.util :refer [def-m2]]
-   [claij.fsm :refer [def-fsm start-fsm]]
+   [claij.malli :refer [def-fsm]]
+   [claij.fsm :refer [start-fsm]]
    [claij.actions :as actions]))
 
 ;;------------------------------------------------------------------------------
