@@ -4,14 +4,14 @@
    [clojure.string :refer [starts-with?]]
    [clojure.data.json :refer [write-str read-str]]
    [clojure.core.async :refer [chan go-loop >! alts! <!! >!!]]
-   [claij.util :refer [def-m2 map-values]]
+   [claij.util :refer [map-values]]
    [claij.malli :refer [def-fsm]]
+   [claij.mcp.schema :refer [def-json-schema]]
    [clj-http.client :refer [get] :rename {get http-get}]
    [claij.fsm :refer [schema-base-uri start-fsm]]
-   ;;[claij.llm :refer [llm-action]]
    [claij.mcp.bridge :refer [start-mcp-bridge]]))
 
-(def-m2
+(def-json-schema
   mcp-schema
   (assoc
    ;; N.B. This is a BIG schema - 1598 lines

@@ -11,8 +11,8 @@
    [clojure.string :refer [starts-with?]]
    [clojure.data.json :refer [write-str read-str]]
    [clojure.core.async :refer [chan alt!! timeout <!! >!!]]
-   [claij.util :refer [def-m2]]
    [claij.malli :refer [def-fsm]]
+   [claij.mcp.schema :refer [def-json-schema]]
    [claij.fsm :refer [llm-action]]
    [claij.mcp.bridge :refer [start-mcp-bridge]]
    [claij.mcp :refer [initialise-request
@@ -28,7 +28,7 @@
 ;; MCP Schema
 ;;==============================================================================
 
-(def-m2
+(def-json-schema
   mcp-schema
   (assoc
    (read-str (slurp (resource "mcp/schema.json")))
