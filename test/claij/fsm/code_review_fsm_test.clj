@@ -2,49 +2,48 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.tools.logging :as log]
-   [m3.validate :refer [validate]]
+   [malli.core :as m]
    [claij.util :refer [index-by ->key]]
    [claij.llm.open-router :refer [open-router-async]]
    [claij.fsm :refer [start-fsm make-prompts]]
-   [claij.fsm.code-review-fsm :refer [code-review-schema
+   [claij.fsm.code-review-fsm :refer [code-review-registry
                                       code-review-fsm]]))
 
 ;;------------------------------------------------------------------------------
 ;; Code Review Schema Tests
 
 (deftest code-review-schema-test
-  (testing "code-review"
-    (doseq [[provider model]
-            [;; ["openai" "gpt-5-codex"]
-             ;; ["google" "gemini-2.5-flash"]
-             ;; ["x-ai" "grok-code-fast-1"]
-             ;; ["anthropic" "claude-sonnet-4.5"]
-             ;; ["meta-llama" "llama-4-maverick:free"] ;; Disabled: moderation issues with error messages
-             ]]
-      (testing (str provider "/" model)
-        (let [schema code-review-schema
-              prompts (make-prompts
-                       code-review-fsm
-                       ((index-by (->key "id") (code-review-fsm "xitions")) ["" "mc"])
-                       ((index-by (->key "id") (code-review-fsm "states")) "mc")
+  (testing "Malli registry validates code-review events"
+    (testing "entry event validation"
+      (let [entry {"id" ["start" "mc"]
+                   "document" "Some code to review"
+                   "llms" [{"provider" "openai" "model" "gpt-4o"}]
+                   "concerns" ["Performance" "Readability"]}]
+        (is (m/validate [:ref :entry] entry {:registry code-review-registry}))))
 
-                       [;; previous conversation
-                        ;; ...
-                        ;; latest request
-                        {"role" "user"
-                         "content"
-                         [;; describes request
-                          {"$ref" "#/$defs/entry"}
-                         ;; request
-                          {"id" ["" "mc"] "document" "I have this piece of Clojure code to calculate the fibonacci series - can we improve it through a code review?: `(def fibs (lazy-seq (cons 0 (cons 1 (map + fibs (rest fibs))))))`"}
-                         ;; describes response
-                          {"oneOf" [{"$ref" "#/$defs/request"}
-                                    {"$ref" "#/$defs/summary"}]}]}])]
-          (let [p (promise)]
-            (log/info (deref (open-router-async provider model prompts (partial deliver p) (partial deliver p)) 60000 "timed out after 60s"))
-            (is (:valid? (validate {:draft :draft7} schema {} (deref p 60000 "timed out after 60s"))))))))
-    ;; Test passes vacuously when no models configured
-    (is true "No models configured for testing")))
+    (testing "request event validation"
+      (let [request {"id" ["mc" "reviewer"]
+                     "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
+                     "notes" "Please review"
+                     "concerns" ["Simplicity"]
+                     "llm" {"provider" "anthropic" "model" "claude-sonnet-4"}}]
+        (is (m/validate [:ref :request] request {:registry code-review-registry}))))
+
+    (testing "response event validation"
+      (let [response {"id" ["reviewer" "mc"]
+                      "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
+                      "comments" ["Looks good!"]}]
+        (is (m/validate [:ref :response] response {:registry code-review-registry}))))
+
+    (testing "summary event validation"
+      (let [summary {"id" ["mc" "end"]
+                     "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
+                     "notes" "Review complete"}]
+        (is (m/validate [:ref :summary] summary {:registry code-review-registry}))))
+
+    (testing "invalid events are rejected"
+      (is (not (m/validate [:ref :entry] {"wrong" "data"} {:registry code-review-registry})))
+      (is (not (m/validate [:ref :request] {"id" ["wrong" "transition"]} {:registry code-review-registry}))))))
 
 ;;------------------------------------------------------------------------------
 ;; Code Review FSM Mock Tests

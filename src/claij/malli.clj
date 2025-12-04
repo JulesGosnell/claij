@@ -381,7 +381,8 @@
     :fsm/definition [:map {:closed true}
                      ["id" :string]
                      ["description" {:optional true} :string]
-                     ["schema" {:optional true} :any] ;; Reference schema for $defs
+                     ["schema" {:optional true} :any]
+                     ["registry" {:optional true} :any]
                      ["prompts" {:optional true} [:ref :fsm/prompts]]
                      ["states" [:vector [:ref :fsm/state]]]
                      ["xitions" [:vector [:ref :fsm/xition]]]]}))

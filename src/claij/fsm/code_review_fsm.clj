@@ -1,130 +1,62 @@
 (ns claij.fsm.code-review-fsm
   (:require
-   [claij.util :refer [def-m2]]
-   [claij.malli :refer [def-fsm]]
+   [malli.core :as m]
+   [malli.registry :as mr]
+   [claij.malli :refer [def-fsm base-registry]]
    [claij.fsm :refer [llm-action]]))
 
 ;;------------------------------------------------------------------------------
 ;; Code Review FSM Schema and Definition
 
-(def-m2
-  code-review-schema
+(def code-review-registry
+  "Malli registry for code review event schemas.
+   Uses string keys for refs compatibility."
+  {"code" [:map {:closed true}
+           ["language" [:map {:closed true}
+                        ["name" :string]
+                        ["version" {:optional true} :string]]]
+           ["text" :string]]
 
-  {"$schema" "https://json-schema.org/draft/2020-12/schema"
-   ;;"$id" "https://example.com/code-review-schema" ;; $id is messing up $refs :-(
-   "$$id" "https://claij.org/schemas/code-review-schema"
-   "$version" 0
+   "notes" :string
 
-   "description" "structures defining possible interactions during a code review workflow"
+   "comments" [:vector :string]
 
-   "type" "object"
+   "concerns" [:vector :string]
 
-   "$defs"
-   {"code"
-    {"type" "object"
-     "properties"
-     {"language"
-      {"type" "object"
-       "properties"
-       {"name"
-        {"type" "string"}
-        "version"
-        {"type" "string"}}
-       "additionalProperties" false
-       "required" ["name"]}
+   "llm" [:map {:closed true}
+          ["provider" [:enum "anthropic" "google" "openai" "x-ai"]]
+          ["model" [:enum "claude-sonnet-4" "gemini-2.5-flash" "gpt-4o" "grok-3-beta"]]]
 
-      "text"
-      {"type" "string"}}
-     "additionalProperties" false
-     "required" ["language" "text"]}
+   "llms" [:vector {:min 1} [:ref "llm"]]
 
-    "notes"
-    {"description" "general notes that you wish to communicate during the workflow"
-     "type" "string"}
+   "entry" [:map {:closed true}
+            ["id" [:= ["start" "mc"]]]
+            ["document" :string]
+            ["llms" [:ref "llms"]]
+            ["concerns" [:ref "concerns"]]]
 
-    "comments"
-    {"description" "a list of specific issues that you feel should be addressed"
-     "type" "array"
-     "items" {"type" "string"}
-     "additionalItems" false}
+   "request" [:map {:closed true}
+              ["id" [:= ["mc" "reviewer"]]]
+              ["code" [:ref "code"]]
+              ["notes" [:ref "notes"]]
+              ["concerns" [:vector {:max 3} :string]]
+              ["llm" [:ref "llm"]]]
 
-    "concerns"
-    {"description" "a list of code quality concerns to review"
-     "type" "array"
-     "items" {"type" "string"}}
+   "response" [:map {:closed true}
+               ["id" [:= ["reviewer" "mc"]]]
+               ["code" [:ref "code"]]
+               ["notes" {:optional true} [:ref "notes"]]
+               ["comments" [:ref "comments"]]]
 
-    "llm"
-    {"description" "specification of an LLM to use - MUST be one of the allowed combinations"
-     "type" "object"
-     "properties"
-     {"provider" {"type" "string"
-                  "enum" ["anthropic" "google" "openai" "x-ai"]}
-      "model" {"type" "string"
-               "enum" ["claude-sonnet-4" "gemini-2.5-flash" "gpt-4o" "grok-3-beta"]}}
-     "additionalProperties" false
-     "required" ["provider" "model"]}
-
-    "llms"
-    {"description" "list of available LLMs"
-     "type" "array"
-     "items" {"$ref" "#/$defs/llm"}
-     "minItems" 1}
-
-    "entry"
-    {"description" "use this to enter code review loop"
-     "type" "object"
-     "properties"
-     {"id" {"const" ["start" "mc"]}
-      "document" {"type" "string"}
-      "llms" {"$ref" "#/$defs/llms"}
-      "concerns" {"$ref" "#/$defs/concerns"}}
-     "additionalProperties" false
-     "required" ["id" "document" "llms" "concerns"]}
-
-    "request"
-    {"description" "use this to make a request to start/continue a code review"
-     "type" "object"
-     "properties"
-     {"id" {"const" ["mc" "reviewer"]}
-      "code" {"$ref" "#/$defs/code"}
-      "notes" {"$ref" "#/$defs/notes"}
-      "concerns" {"description" "specific concerns for this review (max 3 to avoid overwhelming the reviewer)"
-                  "type" "array"
-                  "items" {"type" "string"}
-                  "maxItems" 3}
-      "llm" {"$ref" "#/$defs/llm"}}
-     "additionalProperties" false
-     "required" ["id" "code" "notes" "concerns" "llm"]}
-
-    "response"
-    {"description" "use this to respond with your comments during a code review"
-     "type" "object"
-     "properties"
-     {"id" {"const" ["reviewer" "mc"]}
-      "code" {"$ref" "#/$defs/code"}
-      "notes" {"$ref" "#/$defs/notes"}
-      "comments" {"$ref" "#/$defs/comments"}}
-     "additionalProperties" false
-     "required" ["id" "code" "comments"]}
-
-    "summary"
-    {"description" "use this to summarise and exit a code review loop"
-     "type" "object"
-     "properties"
-     {"id" {"const" ["mc" "end"]}
-      "code" {"$ref" "#/$defs/code"}
-      "notes" {"$ref" "#/$defs/notes"}}
-     "additionalProperties" false
-     "required" ["id" "code" "notes"]}}})
-
-   ;; "oneOf" [{"$ref" "#/$defs/request"}
-   ;;          {"$ref" "#/$defs/response"}
-   ;;          {"$ref" "#/$defs/summary"}]
+   "summary" [:map {:closed true}
+              ["id" [:= ["mc" "end"]]]
+              ["code" [:ref "code"]]
+              ["notes" [:ref "notes"]]]})
 
 (def-fsm
   code-review-fsm
-  {"schema" code-review-schema
-   "id" "code-review"
+  {"id" "code-review"
+   "registry" code-review-registry
    "prompts" ["You are involved in a code review workflow"]
    "states"
    [{"id" "mc"
@@ -176,16 +108,16 @@
 
    "xitions"
    [{"id" ["start" "mc"]
-     "schema" {"$ref" "#/$defs/entry"}}
+     "schema" [:ref "entry"]}
     {"id" ["mc" "reviewer"]
      "prompts" []
-     "schema" {"$ref" "#/$defs/request"}}
+     "schema" [:ref "request"]}
     {"id" ["reviewer" "mc"]
      "prompts" []
-     "schema" {"$ref" "#/$defs/response"}}
+     "schema" [:ref "response"]}
     {"id" ["mc" "end"]
      "prompts" []
-     "schema" {"$ref" "#/$defs/summary"}}]})
+     "schema" [:ref "summary"]}]})
 
 ;;------------------------------------------------------------------------------
 ;; LLM Configuration Registry

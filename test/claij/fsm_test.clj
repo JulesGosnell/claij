@@ -3,6 +3,7 @@
    [clojure.test :refer [deftest testing is]]
    [m3.uri :refer [parse-uri]]
    [m3.validate :refer [validate]]
+   [claij.malli :refer [valid-fsm?]]
    [claij.fsm :refer [state-schema xition-schema schema-base-uri uri->schema
                       resolve-schema start-fsm llm-action trail->prompts]]
    [claij.llm.open-router :refer [open-router-async]]))
@@ -233,17 +234,14 @@
         (is (= 2 (count string-schemas))
             "Should have 2 transitions with string schema references"))))
 
-  (testing "def-m1 validates FSM with string schemas"
-    ;; Use the validation machinery directly
-    (let [fsm-m2 @(resolve 'claij.fsm/fsm-m2)
-          test-fsm {"id" "validation-test"
+  (testing "valid-fsm? validates FSM with string schemas"
+    ;; Use Malli validation (FSM schema migrated from JSON Schema to Malli)
+    (let [test-fsm {"id" "validation-test"
                     "states" [{"id" "a"} {"id" "b"}]
                     "xitions" [{"id" ["a" "b"]
-                                "schema" "dynamic-schema-key"}]}
-          result (validate {:draft :draft2020-12} fsm-m2 {} test-fsm)]
-      (is (:valid? result)
-          (str "FSM with string schema should validate against fsm-m2. Errors: "
-               (:errors result)))))
+                                "schema" "dynamic-schema-key"}]}]
+      (is (valid-fsm? test-fsm)
+          "FSM with string schema should validate against Malli fsm-schema")))
 
   (testing "resolve-schema with map schema passes through unchanged"
     (let [context {}
