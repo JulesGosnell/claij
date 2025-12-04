@@ -382,7 +382,7 @@
                      ["id" :string]
                      ["description" {:optional true} :string]
                      ["schema" {:optional true} :any]
-                     ["registry" {:optional true} :any]
+                     ["schemas" {:optional true} :any] ;; Map of schema-key -> Malli schema (data)
                      ["prompts" {:optional true} [:ref :fsm/prompts]]
                      ["states" [:vector [:ref :fsm/state]]]
                      ["xitions" [:vector [:ref :fsm/xition]]]]}))

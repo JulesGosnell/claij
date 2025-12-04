@@ -19,7 +19,7 @@
                    "document" "Some code to review"
                    "llms" [{"provider" "openai" "model" "gpt-4o"}]
                    "concerns" ["Performance" "Readability"]}]
-        (is (m/validate [:ref :entry] entry {:registry code-review-registry}))))
+        (is (m/validate [:ref "entry"] entry {:registry code-review-registry}))))
 
     (testing "request event validation"
       (let [request {"id" ["mc" "reviewer"]
@@ -27,23 +27,23 @@
                      "notes" "Please review"
                      "concerns" ["Simplicity"]
                      "llm" {"provider" "anthropic" "model" "claude-sonnet-4"}}]
-        (is (m/validate [:ref :request] request {:registry code-review-registry}))))
+        (is (m/validate [:ref "request"] request {:registry code-review-registry}))))
 
     (testing "response event validation"
       (let [response {"id" ["reviewer" "mc"]
                       "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
                       "comments" ["Looks good!"]}]
-        (is (m/validate [:ref :response] response {:registry code-review-registry}))))
+        (is (m/validate [:ref "response"] response {:registry code-review-registry}))))
 
     (testing "summary event validation"
       (let [summary {"id" ["mc" "end"]
                      "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
                      "notes" "Review complete"}]
-        (is (m/validate [:ref :summary] summary {:registry code-review-registry}))))
+        (is (m/validate [:ref "summary"] summary {:registry code-review-registry}))))
 
     (testing "invalid events are rejected"
-      (is (not (m/validate [:ref :entry] {"wrong" "data"} {:registry code-review-registry})))
-      (is (not (m/validate [:ref :request] {"id" ["wrong" "transition"]} {:registry code-review-registry}))))))
+      (is (not (m/validate [:ref "entry"] {"wrong" "data"} {:registry code-review-registry})))
+      (is (not (m/validate [:ref "request"] {"id" ["wrong" "transition"]} {:registry code-review-registry}))))))
 
 ;;------------------------------------------------------------------------------
 ;; Code Review FSM Mock Tests

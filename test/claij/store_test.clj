@@ -35,7 +35,7 @@
                      ["CREATE TABLE IF NOT EXISTS fsm (
             id VARCHAR(255) NOT NULL,
             version INTEGER NOT NULL,
-            document JSONB NOT NULL,
+            document TEXT NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id, version)
           )"]))
@@ -111,7 +111,7 @@
       (is (= {"doc-a" 2 "doc-b" 1} versions))))
 
   (testing "Refresh operations - initial load"
-    (let [loader (store/make-json-bytes-loader doc-c-v1)
+    (let [loader (store/make-edn-loader doc-c-v1)
           result (store/fsm-refresh! *store* "doc-c" loader)]
       (is (= doc-c-v1 result))
       (is (= 1 (store/fsm-latest-version *store* "doc-c")))
@@ -121,7 +121,7 @@
     ;; Wait to ensure timestamp difference
     (Thread/sleep 1000)
 
-    (let [loader (store/make-json-bytes-loader doc-c-v2)
+    (let [loader (store/make-edn-loader doc-c-v2)
           result (store/fsm-refresh! *store* "doc-c" loader)]
       (is (= doc-c-v2 result))
       (is (= 2 (store/fsm-latest-version *store* "doc-c")))
@@ -132,7 +132,7 @@
     ;; Wait to ensure timestamp difference
     (Thread/sleep 1000)
 
-    (let [loader (store/make-json-bytes-loader doc-c-v2)
+    (let [loader (store/make-edn-loader doc-c-v2)
           result (store/fsm-refresh! *store* "doc-c" loader)]
       (is (= doc-c-v2 result))
       (is (= 2 (store/fsm-latest-version *store* "doc-c")))

@@ -34,7 +34,7 @@
                      ["CREATE TABLE IF NOT EXISTS fsm (
                          id VARCHAR(255) NOT NULL,
                          version INTEGER NOT NULL,
-                         document JSONB NOT NULL,
+                         document TEXT NOT NULL,
                          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                          PRIMARY KEY (id, version)
                        )"]))

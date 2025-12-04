@@ -1,7 +1,7 @@
 (ns claij.triage
   (:require
-   [claij.util :refer [def-m2]]
-   [claij.malli :refer [def-fsm]]
+   [malli.registry :as mr]
+   [claij.malli :refer [def-fsm base-registry]]
    [claij.fsm :refer [start-fsm]]
    [claij.actions :as actions]))
 
@@ -9,72 +9,44 @@
 ;; Triage Schema
 ;;------------------------------------------------------------------------------
 
-(def-m2
-  triage-schema
+(def triage-schemas
+  "Schema definitions for triage FSM events.
+   Uses string keys for LLM JSON compatibility."
+  {;; Entry event: start → triage
+   "entry" [:map {:closed true}
+            ["id" [:= ["start" "triage"]]]
+            ["document" :string]]
 
-  {"$schema" "https://json-schema.org/draft/2020-12/schema"
-   "$$id" "https://claij.org/schemas/triage-schema"
-   "$version" 0
+   ;; Reuse existing FSM
+   "reuse" [:map {:closed true}
+            ["id" [:= ["triage" "reuse"]]]
+            ["fsm-id" :string]
+            ["fsm-version" :int]
+            ["rationale" :string]]
 
-   "description" "Meta-FSM that triages user requests to appropriate FSMs"
+   ;; Fork existing FSM (not implemented)
+   "fork" [:map {:closed true}
+           ["id" [:= ["triage" "fork"]]]
+           ["fsm-id" :string]
+           ["fsm-version" :int]
+           ["modifications" :string]]
 
-   "type" "object"
+   ;; Generate new FSM (not implemented)
+   "generate" [:map {:closed true}
+               ["id" [:= ["triage" "generate"]]]
+               ["requirements" :string]]
 
-   "$defs"
-   {"entry"
-    {"description" "User's plain English problem description"
-     "type" "object"
-     "properties"
-     {"id" {"const" ["start" "triage"]}
-      "document" {"type" "string"}}
-     "additionalProperties" false
-     "required" ["id" "document"]}
+   ;; Result from delegated FSM
+   "result" [:map {:closed true}
+             ["id" [:enum ["reuse" "end"] ["fork" "end"] ["generate" "end"]]]
+             ["success" :boolean]
+             ["output" {:optional true} :any]]})
 
-    "reuse"
-    {"description" "Decision to reuse an existing FSM"
-     "type" "object"
-     "properties"
-     {"id" {"const" ["triage" "reuse"]}
-      "fsm-id" {"type" "string"}
-      "fsm-version" {"type" "integer"}
-      "rationale" {"type" "string"
-                   "description" "Why this FSM was chosen"}}
-     "additionalProperties" false
-     "required" ["id" "fsm-id" "fsm-version" "rationale"]}
-
-    "fork"
-    {"description" "Decision to fork an existing FSM (NOT IMPLEMENTED YET)"
-     "type" "object"
-     "properties"
-     {"id" {"const" ["triage" "fork"]}
-      "fsm-id" {"type" "string"}
-      "fsm-version" {"type" "integer"}
-      "modifications" {"type" "string"
-                       "description" "How to modify the FSM"}}
-     "additionalProperties" false
-     "required" ["id" "fsm-id" "fsm-version" "modifications"]}
-
-    "generate"
-    {"description" "Decision to generate a new FSM (NOT IMPLEMENTED YET)"
-     "type" "object"
-     "properties"
-     {"id" {"const" ["triage" "generate"]}
-      "requirements" {"type" "string"
-                      "description" "Requirements for the new FSM"}}
-     "additionalProperties" false
-     "required" ["id" "requirements"]}
-
-    "result"
-    {"description" "Result from delegated FSM execution"
-     "type" "object"
-     "properties"
-     {"id" {"enum" [["reuse" "end"]
-                    ["fork" "end"]
-                    ["generate" "end"]]}
-      "success" {"type" "boolean"}
-      "output" {"description" "Output from the delegated FSM"}}
-     "additionalProperties" false
-     "required" ["id" "success"]}}})
+(def triage-registry
+  "Malli registry for triage validation."
+  (mr/composite-registry
+   base-registry
+   triage-schemas))
 
 ;;------------------------------------------------------------------------------
 ;; Triage FSM Definition
@@ -83,8 +55,8 @@
 (def-fsm
   triage-fsm
 
-  {"schema" triage-schema
-   "id" "triage"
+  {"id" "triage"
+   "schemas" triage-schemas
    "prompts" ["You are a triage system that routes user requests to appropriate FSMs"]
 
    "states"
@@ -118,31 +90,31 @@
 
    "xitions"
    [{"id" ["start" "triage"]
-     "schema" {"$ref" "#/$defs/entry"}}
+     "schema" [:ref "entry"]}
 
     {"id" ["triage" "reuse"]
      "prompts" []
-     "schema" {"$ref" "#/$defs/reuse"}}
+     "schema" [:ref "reuse"]}
 
     {"id" ["triage" "fork"]
      "prompts" []
-     "schema" {"$ref" "#/$defs/fork"}}
+     "schema" [:ref "fork"]}
 
     {"id" ["triage" "generate"]
      "prompts" []
-     "schema" {"$ref" "#/$defs/generate"}}
+     "schema" [:ref "generate"]}
 
     {"id" ["reuse" "end"]
      "prompts" []
-     "schema" {"$ref" "#/$defs/result"}}
+     "schema" [:ref "result"]}
 
     {"id" ["fork" "end"]
      "prompts" []
-     "schema" {"$ref" "#/$defs/result"}}
+     "schema" [:ref "result"]}
 
     {"id" ["generate" "end"]
      "prompts" []
-     "schema" {"$ref" "#/$defs/result"}}]})
+     "schema" [:ref "result"]}]})
 
 ;;------------------------------------------------------------------------------
 ;; Public API

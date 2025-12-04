@@ -4,8 +4,9 @@
    [clojure.tools.logging :as log]
    [clojure.data.json :refer [write-str]]
    [clojure.core.async :refer [chan go-loop alts! >!! close!]]
-   [m3.uri :refer [parse-uri uri-base]]
-   [m3.validate :refer [validate make-context uri->continuation uri-base->dir]]
+   [malli.core :as m]
+   [malli.error :as me]
+   [malli.registry :as mr]
    [claij.util :refer [index-by ->key map-values make-retrier]]
    [claij.malli :refer [def-fsm fsm-registry]]
    [claij.llm.open-router :refer [open-router-async]]))
@@ -33,50 +34,44 @@
 ;; thoughts
 ;; - if the action is going to cause a request to kick off to an llvm then we need to pass in everything that it might need...
 ;; - fsm
-(def meta-schema-uri "https://json-schema.org/draft/2020-12/schema")
 
-;; if the last xition was a response from an llm then the next will be
-;; How can we work it so that the fsm has no concept of request/response but simply connects input channels to output channels -  put together a small demo that evaluates a piece of dsl
-;; we need to use async http calls ...
+;;------------------------------------------------------------------------------
+;; Malli Event Validation
 ;;------------------------------------------------------------------------------
 
-;; FSM structure validation now uses Malli - see claij.malli/def-fsm
-;; Event validation still uses JSON Schema (m3) for $ref support
-(def schema-draft :draft2020-12)
+(defn validate-event
+  "Validate an event against a Malli schema with registry support.
+   
+   Args:
+     registry - Malli registry (composite or map) for resolving refs
+     schema   - The schema to validate against (may contain [:ref \"key\"])
+     event    - The event data to validate
+   
+   Returns:
+     {:valid? true} or {:valid? false :errors [humanized-errors]}"
+  [registry schema event]
+  (let [opts (when registry {:registry registry})]
+    (try
+      (if (m/validate schema event opts)
+        {:valid? true}
+        {:valid? false
+         :errors (me/humanize (m/explain schema event opts))})
+      (catch Exception e
+        {:valid? false
+         :errors [(str "Schema validation error: " (.getMessage e))]}))))
 
+;;------------------------------------------------------------------------------
+;; Legacy JSON Schema Constants (for reference during migration)
+;;------------------------------------------------------------------------------
+;; FSM Schema Constants
 ;;------------------------------------------------------------------------------
 
 (def schema-base-uri "https://claij.org/schemas")
 
-;; TODO - fsm needs a unique id - 
-;; TODO: consider version...
-(defn xition-id->schema-uri [state-id]
-  (str schema-base-uri "/" "FSM-ID" "/" "FSM-VERSION" "/" state-id "/transitions"))
+(def meta-schema-uri "https://json-schema.org/draft/2020-12/schema")
 
 ;;------------------------------------------------------------------------------
-;; m3 hack city - m3 should make this easier !
-
-(def u->s
-  {{:type :url, :origin "http://jules.com", :path "/schemas/test"}
-   {"$schema" "https://json-schema.org/draft/2020-12/schema"
-    ;;"$id" "http://jules.com/schemas/test"
-    "$defs" {"foo" {"type" "string"}}}})
-
-;; add map (m) of base-uri->m2 to m3's remote schema resolution strategy...
-
-(defn uri->schema [m c p uri]
-  (if-let [m2 (m (uri-base uri))]
-    [(-> (make-context
-          (-> c
-              (select-keys [:uri->schema :trace? :draft :id-key])
-              (assoc :id-uri (uri-base uri)))
-          m2)
-         (assoc :id-uri (uri-base uri))
-         (update :uri->path assoc (uri-base uri) []))
-     []
-     m2]
-    ((uri->continuation uri-base->dir) c p uri)))
-
+;; Schema Utilities
 ;;------------------------------------------------------------------------------
 
 (defn expand-schema [id schema]
@@ -143,13 +138,15 @@
                (let [[{ox-schema-raw "schema" :as ox} c] (id->x-and-c ox-id)
                      _ (when (nil? ox) (log/error "no output xition:" (prn-str ox-id)))
                      ox-schema (resolve-schema new-context ox ox-schema-raw)
+                     ;; Build registry from FSM's schemas map
+                     fsm-schemas (get fsm "schemas")
+                     registry (when fsm-schemas
+                                (mr/composite-registry
+                                 (m/default-schemas)
+                                 fsm-schemas))
+                     ;; Use Malli validation with FSM's registry
                      {v? :valid? es :errors}
-                     (validate
-                      {:draft schema-draft
-                       :uri->schema (partial uri->schema {(uri-base (parse-uri fsm-schema-id)) fsm-schema})}
-                      ox-schema
-                      {}
-                      output-event)]
+                     (validate-event registry ox-schema output-event)]
                  (if v?
                      ;; SUCCESS - Put context, event, and trail on channel
                    (do

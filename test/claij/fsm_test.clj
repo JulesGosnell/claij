@@ -4,7 +4,7 @@
    [m3.uri :refer [parse-uri]]
    [m3.validate :refer [validate]]
    [claij.malli :refer [valid-fsm?]]
-   [claij.fsm :refer [state-schema xition-schema schema-base-uri uri->schema
+   [claij.fsm :refer [state-schema xition-schema schema-base-uri
                       resolve-schema start-fsm llm-action trail->prompts]]
    [claij.llm.open-router :refer [open-router-async]]))
 
@@ -96,19 +96,9 @@
     ;;       (is (not (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-B"] "document" 0}))))
     ;;       (is      (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-C"] "document" 0})))
     ;;       (is (not (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-C"] "document" "test"})))))))
-    (testing "$ref to remote schema"
-      (let [c2
-            {:draft :draft2020-12
-             :uri->schema
-             (partial
-              uri->schema
-              {(parse-uri (str schema-base-uri "/test-schema"))
-               {"$defs" {"a-string" {"type" "string"}
-                         "a-number" {"type" "number"}}}})}]
-        (is (:valid? (validate c2 {"$ref" (str schema-base-uri "/test-schema#/$defs/a-string")} {} "test")))
-        (is (not (:valid? (validate c2 {"$ref" (str schema-base-uri "/test-schema#/$defs/a-string")} {} 0))))
-        (is (:valid? (validate c2 {"$ref" (str schema-base-uri "/test-schema#/$defs/a-number")} {} 0)))
-        (is (not (:valid? (validate c2 {"$ref" (str schema-base-uri "/test-schema#/$defs/a-number")} {} "test"))))))))
+    ;; NOTE: $ref resolution test removed during Malli migration
+    ;; m3's uri->schema is no longer used - Malli uses registry-based refs
+    ))
 
 ;;------------------------------------------------------------------------------
 ;; Weather Schema Integration Test
@@ -163,26 +153,20 @@
                       ;; Verify final context has accumulated cache
                        (is (= {:tools ["bash" "read_file"]} (:cache context))))
           test-fsm {"id" "context-test"
-                    "schema" {"$schema" "https://json-schema.org/draft/2020-12/schema"
-                              "$$id" "https://claij.org/schemas/context-test"
-                              "$version" 0}
                     "states" [{"id" "state-a" "action" "action-a"}
                               {"id" "state-b" "action" "action-b"}
                               {"id" "end" "action" "end"}]
                     "xitions" [{"id" ["start" "state-a"]
-                                "schema" {"type" "object"
-                                          "properties" {"id" {"const" ["start" "state-a"]}
-                                                        "input" {"type" "string"}}
-                                          "required" ["id" "input"]}}
+                                "schema" [:map {:closed true}
+                                          ["id" [:= ["start" "state-a"]]]
+                                          ["input" :string]]}
                                {"id" ["state-a" "state-b"]
-                                "schema" {"type" "object"
-                                          "properties" {"id" {"const" ["state-a" "state-b"]}
-                                                        "data" {"type" "string"}}
-                                          "required" ["id" "data"]}}
+                                "schema" [:map {:closed true}
+                                          ["id" [:= ["state-a" "state-b"]]]
+                                          ["data" :string]]}
                                {"id" ["state-b" "end"]
-                                "schema" {"type" "object"
-                                          "properties" {"id" {"const" ["state-b" "end"]}}
-                                          "required" ["id"]}}]}
+                                "schema" [:map {:closed true}
+                                          ["id" [:= ["state-b" "end"]]]]}]}
           initial-context {:id->action {"action-a" state-a-action
                                         "action-b" state-b-action
                                         "end" end-action}}
