@@ -15,8 +15,7 @@
 ;; So [middle end] only appears in trail when it's the INPUT to a later step (end->final)
 
 (def omit-test-fsm
-  {"schema" {"$$id" "omit-test-fsm" "type" "object"}
-   "states"
+  {"states"
    [{"id" "start" "action" "start-action"}
     {"id" "middle" "action" "middle-action"}
     {"id" "end" "action" "end-action"}
@@ -24,20 +23,17 @@
    "xitions"
    [{"id" ["start" "middle"]
      "omit" true
-     "schema" {"type" "object"
-               "properties" {"id" {"const" ["start" "middle"]} "data" {"type" "string"}}
-               "required" ["id" "data"]
-               "additionalProperties" false}}
+     "schema" [:map {:closed true}
+               ["id" [:= ["start" "middle"]]]
+               ["data" :string]]}
     {"id" ["middle" "end"]
-     "schema" {"type" "object"
-               "properties" {"id" {"const" ["middle" "end"]} "result" {"type" "string"}}
-               "required" ["id" "result"]
-               "additionalProperties" false}}
+     "schema" [:map {:closed true}
+               ["id" [:= ["middle" "end"]]]
+               ["result" :string]]}
     {"id" ["end" "final"]
-     "schema" {"type" "object"
-               "properties" {"id" {"const" ["end" "final"]} "done" {"type" "boolean"}}
-               "required" ["id" "done"]
-               "additionalProperties" false}}]})
+     "schema" [:map {:closed true}
+               ["id" [:= ["end" "final"]]]
+               ["done" :boolean]]}]})
 
 (def captured-trail-at-middle (atom nil))
 (def captured-trail-at-end (atom nil))

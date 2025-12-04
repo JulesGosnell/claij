@@ -8,33 +8,42 @@
 ;;------------------------------------------------------------------------------
 ;; Code Review FSM Schema and Definition
 
-(def code-review-registry
-  "Malli registry for code review event schemas.
-   Uses string keys for refs compatibility."
-  {"code" [:map {:closed true}
+(def code-review-schemas
+  "Schema definitions for code review events.
+   Plain map for emit-for-llm analysis and inlining.
+   Use string keys for refs and map entries for LLM JSON compatibility."
+  {;; Code structure with language info
+   "code" [:map {:closed true}
            ["language" [:map {:closed true}
                         ["name" :string]
                         ["version" {:optional true} :string]]]
            ["text" :string]]
 
+   ;; General notes field
    "notes" :string
 
+   ;; List of specific issues
    "comments" [:vector :string]
 
+   ;; List of concerns to review
    "concerns" [:vector :string]
 
+   ;; LLM specification
    "llm" [:map {:closed true}
           ["provider" [:enum "anthropic" "google" "openai" "x-ai"]]
           ["model" [:enum "claude-sonnet-4" "gemini-2.5-flash" "gpt-4o" "grok-3-beta"]]]
 
+   ;; List of available LLMs (min 1)
    "llms" [:vector {:min 1} [:ref "llm"]]
 
+   ;; Entry event: start → mc
    "entry" [:map {:closed true}
             ["id" [:= ["start" "mc"]]]
             ["document" :string]
             ["llms" [:ref "llms"]]
             ["concerns" [:ref "concerns"]]]
 
+   ;; Request event: mc → reviewer
    "request" [:map {:closed true}
               ["id" [:= ["mc" "reviewer"]]]
               ["code" [:ref "code"]]
@@ -42,21 +51,29 @@
               ["concerns" [:vector {:max 3} :string]]
               ["llm" [:ref "llm"]]]
 
+   ;; Response event: reviewer → mc
    "response" [:map {:closed true}
                ["id" [:= ["reviewer" "mc"]]]
                ["code" [:ref "code"]]
                ["notes" {:optional true} [:ref "notes"]]
                ["comments" [:ref "comments"]]]
 
+   ;; Summary event: mc → end
    "summary" [:map {:closed true}
               ["id" [:= ["mc" "end"]]]
               ["code" [:ref "code"]]
               ["notes" [:ref "notes"]]]})
 
+(def code-review-registry
+  "Malli registry for validation. Composes base-registry with code-review-schemas."
+  (mr/composite-registry
+   base-registry
+   code-review-schemas))
+
 (def-fsm
   code-review-fsm
   {"id" "code-review"
-   "registry" code-review-registry
+   "schemas" code-review-schemas
    "prompts" ["You are involved in a code review workflow"]
    "states"
    [{"id" "mc"

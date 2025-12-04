@@ -1,48 +1,34 @@
 (ns claij.store
-  "FSM document store with versioning and audit trail support"
+  "FSM document store with versioning and audit trail support.
+   Stores EDN as TEXT for full Clojure data support (including Malli registries)."
   (:require
    [clojure.tools.logging :as log]
-   [clojure.data.json :as json]
+   [clojure.edn :as edn]
    [next.jdbc :as jdbc]
    [next.jdbc.sql :as sql]
    [next.jdbc.prepare :as prepare]
    [next.jdbc.result-set :as rs])
   (:import
-   [java.sql Timestamp PreparedStatement]
-   [org.postgresql.util PGobject]))
+   [java.sql Timestamp PreparedStatement]))
 
 ;;------------------------------------------------------------------------------
-;; PostgreSQL JSON support
+;; EDN Serialization for TEXT columns
 
-(defn ->pgobject
-  "Convert a Clojure value to a PostgreSQL JSONB object"
-  [value]
-  (doto (PGobject.)
-    (.setType "jsonb")
-    (.setValue (json/write-str value))))
+(defn parse-document
+  "Parse a document from database storage (TEXT column containing EDN)."
+  [doc]
+  (when doc
+    (edn/read-string doc)))
 
-(defn <-pgobject
-  "Convert a PostgreSQL JSONB object to a Clojure value"
-  [^PGobject pg-obj]
-  (when pg-obj
-    (json/read-str (.getValue pg-obj))))
-
-;; Extend protocols for automatic JSON conversion
+;; Extend protocols to serialize Clojure data as EDN strings
 (extend-protocol prepare/SettableParameter
   clojure.lang.IPersistentMap
   (set-parameter [m ^PreparedStatement ps ^long i]
-    (.setObject ps i (->pgobject m)))
+    (.setString ps i (pr-str m)))
 
   clojure.lang.IPersistentVector
   (set-parameter [v ^PreparedStatement ps ^long i]
-    (.setObject ps i (->pgobject v))))
-
-(extend-protocol rs/ReadableColumn
-  PGobject
-  (read-column-by-label [^PGobject v _]
-    (<-pgobject v))
-  (read-column-by-index [^PGobject v _2 _3]
-    (<-pgobject v)))
+    (.setString ps i (pr-str v))))
 
 ;;------------------------------------------------------------------------------
 ;; Connection
@@ -80,7 +66,7 @@
                 conn
                 ["SELECT document FROM fsm WHERE id = ? AND version = ?" id version]
                 {:builder-fn rs/as-unqualified-kebab-maps})]
-    (:document result)))
+    (parse-document (:document result))))
 
 (defn fsm-store!
   "Store an FSM document with its version"
@@ -133,10 +119,10 @@
     (log/info (str "Listed " (count fsms) " FSMs from store"))
     fsms))
 
-(defn make-json-bytes-loader
-  "Create a loader function that returns the given data"
+(defn make-edn-loader
+  "Create a loader function that returns the given data as EDN string"
   [data]
-  (fn [] (json/write-str data)))
+  (fn [] (pr-str data)))
 
 (defn fsm-refresh!
   "Load or refresh an FSM document, storing a new version if content changed"
@@ -145,7 +131,7 @@
         _ (log/info (str "refresh! " id " current-version: " current-version))
         current-doc (when current-version
                       (fsm-load-version conn id current-version))
-        new-data (json/read-str (loader))
+        new-data (edn/read-string (loader))
         new-version (inc (or current-version 0))
         new-doc (if (map? new-data)
                   (assoc new-data "$version" new-version)
@@ -179,17 +165,19 @@
 (defn fsm-load-audit-trail
   "Load the complete audit trail for an FSM id"
   [conn id]
-  (jdbc/execute! conn
-                 ["SELECT id, version, document, created_at FROM fsm WHERE id = ? ORDER BY version ASC" id]
-                 {:builder-fn rs/as-unqualified-kebab-maps}))
+  (->> (jdbc/execute! conn
+                      ["SELECT id, version, document, created_at FROM fsm WHERE id = ? ORDER BY version ASC" id]
+                      {:builder-fn rs/as-unqualified-kebab-maps})
+       (mapv #(update % :document parse-document))))
 
 (defn fsm-load-audit-trail-for-ids
   "Load audit trails for multiple FSM ids"
   [conn ids]
   (let [placeholders (clojure.string/join ", " (repeat (count ids) "?"))
         query (str "SELECT id, version, document, created_at FROM fsm WHERE id IN (" placeholders ") ORDER BY id, version ASC")]
-    (jdbc/execute! conn (into [query] ids)
-                   {:builder-fn rs/as-unqualified-kebab-maps})))
+    (->> (jdbc/execute! conn (into [query] ids)
+                        {:builder-fn rs/as-unqualified-kebab-maps})
+         (mapv #(update % :document parse-document)))))
 
 ;; Update and swizzle functions for compatibility
 (defn fsm-update!
