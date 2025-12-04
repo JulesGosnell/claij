@@ -6,18 +6,12 @@
    [clojure.core.async :refer [chan go-loop >! alts! <!! >!!]]
    [claij.util :refer [map-values]]
    [claij.malli :refer [def-fsm]]
-   [claij.mcp.schema :refer [def-json-schema]]
-   [clj-http.client :refer [get] :rename {get http-get}]
    [claij.fsm :refer [schema-base-uri start-fsm]]
    [claij.mcp.bridge :refer [start-mcp-bridge]]))
 
-(def-json-schema
-  mcp-schema
-  (assoc
-   ;; N.B. This is a BIG schema - 1598 lines
-   (read-str (:body (http-get "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/refs/heads/main/schema/2025-06-18/schema.json")))
-   "$$id"
-   (str schema-base-uri "/" "mcp.json")))
+;; Note: The MCP protocol schema is defined in TypeScript, not JSON Schema.
+;; The individual schemas below are hand-written Malli for the specific
+;; structures we need for LLM interactions.
 
 ;; can we generate this fsm directly from the schema url ? much less code to maintain...
 

@@ -10,7 +10,6 @@
                       list-tools-request
                       list-prompts-request
                       list-resources-request
-                      mcp-schema
                       list-changed?
                       initialize-mcp-cache
                       invalidate-mcp-cache-item

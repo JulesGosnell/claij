@@ -7,12 +7,10 @@
   - Tool/resource operations"
   (:require
    [clojure.tools.logging :as log]
-   [clojure.java.io :refer [resource]]
    [clojure.string :refer [starts-with?]]
    [clojure.data.json :refer [write-str read-str]]
    [clojure.core.async :refer [chan alt!! timeout <!! >!!]]
    [claij.malli :refer [def-fsm]]
-   [claij.mcp.schema :refer [def-json-schema]]
    [claij.fsm :refer [llm-action]]
    [claij.mcp.bridge :refer [start-mcp-bridge]]
    [claij.mcp :refer [initialise-request
@@ -23,17 +21,6 @@
                       refresh-mcp-cache-item
                       mcp-request-xition-schema-fn
                       mcp-response-xition-schema-fn]]))
-
-;;==============================================================================
-;; MCP Schema
-;;==============================================================================
-
-(def-json-schema
-  mcp-schema
-  (assoc
-   (read-str (slurp (resource "mcp/schema.json")))
-   "$$id"
-   (str claij.fsm/schema-base-uri "/" "mcp.json")))
 
 ;;==============================================================================
 ;; Helper Functions
@@ -243,7 +230,7 @@
 (def-fsm
   mcp-fsm
 
-  {"schema" mcp-schema
+  {;; No top-level schema - MCP uses dynamic schemas generated from cache
    "id" "mcp"
    "description" "Orchestrates MCP protocol interactions"
 
