@@ -7,6 +7,7 @@
    - Transitive closure analysis for LLM emission
    - Token-optimized schema emission for prompts
    - def-m2/def-m1 macros for schema/document validation
+   - Custom :json-schema type for embedding JSON Schema in Malli
    
    See doc/SELF-DESCRIPTIVE-SYSTEMS.md for architectural rationale."
   (:require
@@ -15,7 +16,8 @@
    [clojure.tools.logging :as log]
    [malli.core :as m]
    [malli.error :refer [humanize]]
-   [malli.registry :as mr]))
+   [malli.registry :as mr]
+   [m3.validate :as m3]))
 
 ;;==============================================================================
 ;; Schema Validation
@@ -68,11 +70,146 @@
     :type-properties {:error/message "must be a valid Malli schema"
                       :description "A valid Malli schema (e.g. :string, [:map [:x :int]])"}}))
 
+;; =============================================================================
+;; JSON Schema Embedding in Malli
+;; =============================================================================
+;;
+;; PROBLEM:
+;; --------
+;; MCP (Model Context Protocol) services define tools with inputSchema in
+;; JSON Schema format. We want all CLAIJ schemas to be Malli for:
+;;   - Single validation API
+;;   - Malli schemas ARE EDN, sent directly to LLMs in prompts
+;;   - Consistent error handling
+;;
+;; But we can't translate JSON Schema → Malli reliably:
+;;   - No official converter exists
+;;   - Conversions are lossy in both directions
+;;   - Full JSON Schema is more expressive than Malli in some areas
+;;
+;; SOLUTION:
+;; ---------
+;; Custom Malli schema type [:json-schema {:schema <json-schema-def>}] that
+;; delegates validation to m3 (our JSON Schema library).
+;;
+;; This gives us:
+;;   - Single Malli-based validation API at the surface
+;;   - JSON Schema validated by m3 under the hood where needed
+;;   - One validation pass, one error path
+;;   - No translation needed
+;;
+;; USAGE:
+;; ------
+;;   [:json-schema {:schema {"type" "object"
+;;                           "properties" {"name" {"type" "string"}}
+;;                           "required" ["name"]}}]
+;;
+;; Typically embedded in larger Malli schemas:
+;;
+;;   [:map {:closed true}
+;;    ["name" [:= "bash"]]
+;;    ["arguments" [:json-schema {:schema <inputSchema-from-MCP>}]]]
+;;
+;; REGISTRY CHAIN:
+;; ---------------
+;;   base-registry (in claij.malli)
+;;     └── includes :json-schema custom type
+;;     └── includes :malli/schema for meta-validation
+;;
+;;   mcp-registry (in claij.mcp)
+;;     └── composes base-registry
+;;     └── adds MCP-specific refs ("tool-response", "logging-set-level-request", etc.)
+;;
+;; Always use mcp-registry when validating MCP-related schemas.
+;;
+;; DEBUGGING VALIDATION FAILURES:
+;; ------------------------------
+;; When validation fails on a :json-schema type, Malli will report
+;; "unknown error" because it doesn't know how to humanize m3's errors.
+;;
+;; To debug:
+;;
+;;   1. Extract the JSON Schema and value from the failing validation:
+;;
+;;      (def json-schema {"type" "object" "properties" {...} "required" [...]})
+;;      (def bad-value {"name" "bash" "arguments" {"wrong" "stuff"}})
+;;
+;;   2. Validate directly with m3 to get detailed errors:
+;;
+;;      (require '[m3.validate :as m3])
+;;      (m3/validate {:draft :draft7} json-schema {} bad-value)
+;;      ;; => {:valid? false
+;;      ;;     :errors [{:path [...] :message "..." :schema ...}]}
+;;
+;;   3. The :errors vector contains detailed information about what failed:
+;;      - :path - JSON pointer to the failing location in the value
+;;      - :message - Human-readable error description
+;;      - :schema - The schema that failed
+;;      - :keyword - The JSON Schema keyword that failed (e.g. "required", "type")
+;;
+;; EXAMPLE DEBUG SESSION:
+;; ----------------------
+;;   ;; Schema expects {"command" <string>} with command required
+;;   (def schema {"type" "object"
+;;                "properties" {"command" {"type" "string"}}
+;;                "required" ["command"]})
+;;
+;;   ;; Value is missing command
+;;   (m3/validate {:draft :draft7} schema {} {})
+;;   ;; => {:valid? false
+;;   ;;     :errors [{:keyword "required"
+;;   ;;               :path []
+;;   ;;               :message "required property 'command' not found"
+;;   ;;               ...}]}
+;;
+;;   ;; Value has wrong type for command
+;;   (m3/validate {:draft :draft7} schema {} {"command" 123})
+;;   ;; => {:valid? false
+;;   ;;     :errors [{:keyword "type"
+;;   ;;               :path ["command"]
+;;   ;;               :message "expected string, got integer"
+;;   ;;               ...}]}
+;;
+;; =============================================================================
+
+(def JsonSchema
+  "Custom Malli schema type that validates using JSON Schema via m3.
+   
+   Enables embedding JSON Schema within Malli schemas for cases where
+   external systems (like MCP) provide schemas in JSON Schema format.
+   
+   Usage: [:json-schema {:schema {\"type\" \"object\" \"properties\" {...}}}]
+   
+   The JSON Schema is passed via the :schema property to m3 for validation
+   using draft-07. This allows a single Malli-based validation pass while
+   delegating to m3 for the embedded JSON Schema portions.
+   
+   See the comment block above for debugging tips when validation fails."
+  (m/-simple-schema
+   {:type :json-schema
+    :min 0 ;; no children required
+    :max 0
+    :compile (fn [props _children _opts]
+               (let [json-schema-def (:schema props)]
+                 (when-not json-schema-def
+                   (throw (ex-info "[:json-schema] requires :schema property"
+                                   {:properties props})))
+                 {:pred #(:valid? (m3/validate {:draft :draft7}
+                                               json-schema-def
+                                               {}
+                                               %))}))}))
+
 (def base-registry
-  "CLAIJ's base registry with custom schema types."
+  "CLAIJ's base registry with custom schema types.
+   
+   Includes:
+   - All default Malli schemas
+   - :malli/schema for meta-schema validation
+   - :json-schema for embedding JSON Schema in Malli"
   (mr/composite-registry
    (m/default-schemas)
-   {:malli/schema MalliSchema}))
+   {:malli/schema MalliSchema
+    :json-schema JsonSchema}))
 
 ;;==============================================================================
 ;; Schema Form Transformations: Vector ↔ Map

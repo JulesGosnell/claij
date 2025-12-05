@@ -67,7 +67,7 @@
 ;;------------------------------------------------------------------------------
 ;; Tests
 
-(deftest fsm-storage-test
+(deftest ^:integration fsm-storage-test
   (testing "Error handling"
     (testing "Loading with nil version throws exception"
       (is (thrown? IllegalArgumentException

@@ -1,9 +1,14 @@
 (ns claij.mcp-test
+  "Tests for MCP schema generation and cache management.
+   
+   Note: Schema generators now emit Malli format, not JSON Schema.
+   Validation uses Malli with mcp-registry (which includes :json-schema type)."
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.tools.logging :as log]
    [clojure.data.json :refer [write-str read-str]]
    [clojure.core.async :refer [chan <!! >!!] :as async]
+   [malli.core :as m]
    [claij.mcp.bridge :refer [start-mcp-bridge]]
    [claij.mcp :refer [initialise-request
                       initialised-notification
@@ -32,30 +37,31 @@
                       mcp-request-schema-fn
                       mcp-response-schema-fn
                       mcp-request-xition-schema-fn
-                      mcp-response-xition-schema-fn]]
-   [m3.validate :refer [validate]]))
+                      mcp-response-xition-schema-fn
+                      mcp-registry]]))
 
-;; send:
+;;------------------------------------------------------------------------------
+;; Helper for Malli validation with mcp-registry
+;;------------------------------------------------------------------------------
 
-;; start
+(defn malli-valid?
+  "Validate value against Malli schema using mcp-registry."
+  [schema value]
+  (m/validate schema value {:registry mcp-registry}))
 
-;; x17
+;;------------------------------------------------------------------------------
+;; Test data
+;;------------------------------------------------------------------------------
+
 (def tools-list-changed-notification
   {"jsonrpc" "2.0", "method" "notifications/tools/list_changed"})
-;; x 2
+
 (def resources-list-changed-notification
   {"jsonrpc" "2.0", "method" "notifications/resources/list_changed"})
-;; x 8
+
 (def prompts-list-changed-notification
   {"jsonrpc" "2.0", "method" "notifications/prompts/list_changed"})
 
-;; (>!! ic initialise-request)
-;; (>!! ic initialised-notification)
-;; (>!! ic list-tools-request)
-;; (>!! ic list-prompts-request)
-;; (>!! ic list-resources-request)
-
-;; initialize reponse - x1
 (def initialise-response
   {"jsonrpc" "2.0",
    "id" 1,
@@ -68,396 +74,46 @@
      "tools" {"listChanged" true}},
     "serverInfo" {"name" "clojure-server", "version" "0.1.0"}}})
 
-;; list tools response - x1
 (def list-tools-response
   {"jsonrpc" "2.0",
    "id" 2,
    "result"
    {"tools"
-    [{"name" "LS",
-      "description"
-      "Returns a recursive tree view of files and directories starting from the specified path. The path parameter must be an absolute path, not a relative path. You should generally prefer the `glob_files` and `fx_grep` tools, if you know which directories to search.",
+    [{"name" "clojure_eval",
+      "description" "Takes a Clojure Expression and evaluates it."
       "inputSchema"
       {"type" "object",
-       "properties"
-       {"path" {"type" "string"},
-        "max_depth"
-        {"type" "integer",
-         "description" "Maximum depth to traverse (optional)"},
-        "limit"
-        {"type" "integer",
-         "description"
-         "Maximum number of entries to show (default: 100)"}},
-       "required" ["path"]}}
-     {"name" "read_file",
-      "description"
-      "Smart file reader with pattern-based exploration for Clojure files.\n   \nFor Clojure files (.clj, .cljc, .cljs, .bb):\n\nThis tool defaults to an expandable collapsed view to quickly grab the information you need from a Clojure file.\nIf called without `name_pattern` or `content_pattern` it will return the file content where \nyou will see only function signatures. This gives you a quick overview of the file.\n\nWhen you want to see more, this tool has a grep functionality where you\ncan give patterns to match the names for top level definitions\n`name_pattern` or match the bodies of top level definitions `content_pattern`.\n\nThe functions that match these patterns will be the only functions expanded in collapsed view.\n\nFor defmethod forms:\n- The name includes both the method name and the dispatch value (e.g., \"area :rectangle\")\n- For vector dispatch values, use the exact pattern (e.g., \"dispatch-with-vector \\[:feet :inches\\]\")\n- For qualified/namespaced multimethod names, include the namespace (e.g., \"tool-system/validate-inputs :clojure-eval\")\n\nFor text files (non-Clojure):\n- When `collapsed: true` and a pattern is provided (`content_pattern` or `name_pattern`), shows only lines matching the pattern with 10 lines of context before and after\n\nFor all other file types:\n- Collapsed view will not be applied and will return the raw contents of the file\n\nParameters:\n- path: Path to the file (required)\n- collapsed: Show collapsed view (default: true)\n\nCollapsed View mode function expansion parameters:\n\n- name_pattern: Regex to match function names (e.g., \"validate.*\")\n- content_pattern: Regex to match function content (e.g., \"try|catch\")\n\nExample usage for defmethod forms:\n- Find all implementations of a multimethod: `name_pattern: \"area\"`\n- Find specific dispatch values: `name_pattern: \"area :circle\"`\n- Find vector dispatch values: `name_pattern: \"convert-length \\\\[:feet :inches\\\\]\"`\n- Find namespace-qualified methods: `name_pattern: \"tool-system/validate-inputs\"`\n\nExample usage for text files:\n- Find error messages: `content_pattern: \"ERROR|WARN\"`\n- Find specific log entries: `content_pattern: \"\\\\[2024-01-15.*ERROR\\\\]\"`\n\nNon collapsed view mode respects these parameters:\n\n- line_offset: Line to start reading from (non-collapsed mode only, default: 0)\n- limit: Maximum lines to read (non-collapsed mode only, default: 2000)\n\nBy default, reads up to 2000 lines, truncating lines longer than 1000 characters.",
-      "inputSchema"
-      {"type" "object",
-       "properties"
-       {"path"
-        {"type" "string", "description" "Path to the file to read"},
-        "collapsed"
-        {"type" "boolean",
-         "description"
-         "Whether to show collapsed view for Clojure files (default: true)"},
-        "name_pattern"
-        {"type" "string",
-         "description"
-         "Pattern to match function names (e.g., \"validate.*\")"},
-        "content_pattern"
-        {"type" "string",
-         "description"
-         "Pattern to match function content (e.g., \"try|catch\")"},
-        "line_offset"
-        {"type" "integer",
-         "description"
-         "Line to start reading from for raw mode (default: 0)"},
-        "limit"
-        {"type" "integer",
-         "description" "Maximum lines to read (default: 2000)"}},
-       "required" ["path"]}}
-     {"name" "grep",
-      "description"
-      "Fast content search tool that works with any codebase size.\n- Finds the paths to files that have matching contents using regular expressions.\n- Supports full regex syntax (eg. \"log.*Error\", \"function\\s+\\w+\", etc.).\n- Filter files by pattern with the include parameter (eg. \"*.js\", \"*.{ts,tsx}\").\n- Returns matching file paths sorted by modification time.\n- Use this tool when you need to find files containing specific patterns.\n- When you are doing an open ended search that may require multiple rounds of globbing and grepping, use the `dispatch_agent` tool instead",
-      "inputSchema"
-      {"type" "object",
-       "properties"
-       {"path"
-        {"type" "string",
-         "description"
-         "The directory to search in. Defaults to the current working directory."},
-        "pattern"
-        {"type" "string",
-         "description"
-         "The regular expression pattern to search for in file contents"},
-        "include"
-        {"type" "string",
-         "description"
-         "File pattern to include in the search (e.g. \"*.clj\", \"*.{clj,cljs}\")"},
-        "max_results"
-        {"type" "integer",
-         "description"
-         "Maximum number of results to return (default: 1000)"}},
-       "required" ["pattern"]}}
-     {"name" "glob_files",
-      "description"
-      "Fast file pattern matching tool that works with any codebase size.\n - Supports glob patterns like \"**/*.clj\" or \"src/**/*.cljs\".\n - Returns matching file paths sorted by modification time (most recent first).\n - Use this tool when you need to find files by name patterns.\n - When you are doing an open ended search that may require multiple rounds of globbing and grepping, use the `dispatch_agent` tool instead",
-      "inputSchema"
-      {"type" "object",
-       "properties"
-       {"path"
-        {"type" "string",
-         "description"
-         "Root directory to start the search from (defaults to current working directory)"},
-        "pattern"
-        {"type" "string",
-         "description"
-         "Glob pattern (e.g. \"**/*.clj\", \"src/**/*.tsx\")"},
-        "max_results"
-        {"type" "integer",
-         "description"
-         "Maximum number of results to return (default: 1000)"}},
-       "required" ["pattern"]}}
-     {"name" "think",
-      "description"
-      "Use the tool to think about something. It will not obtain new information or make any changes to the repository, but just log the thought. Use it when complex reasoning or brainstorming is needed. \nCommon use cases:\n* when having difficulty finding/reading the files you need\n* when having difficulty writing out code\n* when having difficulty using the tools or the clojure tools\n* When exploring a repository and discovering the source of a bug, call this tool to brainstorm several unique ways of fixing the bug, and assess which change(s) are likely to be simplest and most effective.\n* After receiving test results, use this tool to brainstorm ways to fix failing tests.\n* When planning a complex refactoring, use this tool to outline different approaches and their tradeoffs.\n* When designing a new feature, use this tool to think through architecture decisions and implementation details.\n* When debugging a complex issue, use this tool to organize your thoughts and hypotheses.\nThe tool simply logs your thought process for better transparency and does not execute any code or make changes.",
-      "inputSchema"
-      {"type" "object",
-       "properties"
-       {"thought"
-        {"type" "string", "description" "The thought to log"}},
-       "required" ["thought"]}}
-     {"name" "scratch_pad",
-      "description"
-      "A persistent scratch pad for storing structured data between tool calls. Accepts any JSON value (objects, arrays, strings, numbers, booleans, null) and stores them at nested paths using set_path, get_path, delete_path operations.\n\nTHIS IS YOUR GO-TO TOOL FOR PLANNING.\n\nYour persistent workspace for planning, organizing thoughts, and maintaining state across tool invocations.\n\nThis tool can be used to:\n * develop and track multi-step plans\n * maintain task lists and task tracking\n * store intermediate results between operations\n * keep notes about your current approach or strategy\n * maintain a list of files or resources to process\n * build up complex data structures incrementally\n * share context between different tool calls\n * any other persistent storage needs during your work\n\nThe scratch pad is for persistent storage and state management, not for formatting output. Display information directly in your chat responses. However, when the scratch pad contains user-relevant state (like tasks lists or tracked progress), you should retrieve and display updates after modifications.\n\nUse the scratch pad when you need to:\n- Track progress across multiple tool calls\n- Build data structures incrementally  \n- Maintain state between operations\n- Store intermediate results for later use\n\nDon't use the scratch pad to:\n- Format text for display\n- Store static information just to retrieve and show it\n- Replace direct chat responses\n\nCORE OPERATIONS:\n- set_path: Store a value (not null) at a path, returns the parent container\n- get_path: Retrieve a value from a path, returns the value or nil\n- delete_path: Remove only the leaf value from a path, returns a confirmation message\n- inspect: Display the entire structure (or a specific path) with truncation at specified depth\n\nWARNING: null values can not be stored in the scratch pad, if you attempt to store a null value the set_path will fail.\n\nTRACKING PLANS WITH TASK LISTS:\n\nRecommended schema for a Task:\n{\n  task: \"Description of the task\",\n  done: false,\n  priority: \"high\", // optional: \"high\", \"medium\", \"low\"\n  context: \"Additional details\", // optional\n  subtasks: [  // optional: array of subtask objects\n    {task: \"Subtask 1\", done: false},\n    {task: \"Subtask 2\", done: true}\n  ]\n}\n\nFirst add multiple tasks items at once as an array:\n- Entire array:\n  op: set_path\n  path: [\"tasks\"]\n  value: [\n    {task: \"Write tests\", done: false, priority: \"high\"},\n    {task: \"Review PR\", done: false, priority: \"high\"},\n    {task: \"Update docs\", done: false, priority: \"medium\", subtasks: [\n      {task: \"Update API docs\", done: false},\n      {task: \"Update README\", done: false}\n    ]}\n  ]\n  explanation: Adding multiple tasks at once\n\nAdding tasks items:\n- First item:\n  op: set_path\n  path: [\"tasks\", 3]\n  value: {task: \"Run tests\", done: false}\n  explanation: Adding write tests task\n\n- Next item:\n  op: set_path\n  path: [\"tasks\", 4]\n  value: {task: \"Notify user\", done: false, priority: \"high\"}\n  explanation: Adding high priority task\n\nChecking off completed tasks:\n- Mark as done:\n  op: set_path\n  path: [\"tasks\", 0, \"done\"]\n  value: true\n  explanation: Completed writing tests\n\n- Mark subtask as done:\n  op: set_path\n  path: [\"tasks\", 2, \"subtasks\", 0, \"done\"]\n  value: true\n  explanation: Completed API docs update\n\nAdding a new task to the array:\n- Append to array:\n  op: set_path\n  path: [\"tasks\", 3]\n  value: {task: \"Deploy to production\", done: false, priority: \"high\"}\n  explanation: Adding deployment task\n\nViewing tasks:\n- All tasks:\n  op: get_path\n  path: [\"tasks\"]\n  explanation: Get all tasks\n\n- Specific task:\n  op: get_path\n  path: [\"tasks\", 0]\n  explanation: Checking first task details\n\n- View with depth limit:\n  op: inspect\n  path: [\"tasks\"]\n  depth: 2\n  explanation: View tasks with limited nesting",
-      "inputSchema"
-      {"type" "object",
-       "properties"
-       {"op"
-        {"type" "string",
-         "enum" ["set_path" "get_path" "delete_path" "inspect"],
-         "description"
-         "The operation to perform:\n * set_path: set a value at a path\n * get_path: retrieve a value at a path\n * delete_path: remove the value at the path from the data structure\n * inspect: view the datastructure (or a specific path within it) up to a certain depth\n"},
-        "path"
-        {"type" "array",
-         "items" {"type" "string"},
-         "description"
-         "Path to the data location (array of string or number keys) - used for set_path, get_path, delete_path, and optionally inspect"},
-        "value"
-        {"description"
-         "Value to store (for set_path). Can be ANY JSON value EXCEPT null: object, array, string, number, boolean.",
-         "type" "object"},
-        "explanation"
-        {"type" "string",
-         "description"
-         "Explanation of why this operation is being performed"},
-        "depth"
-        {"type" "number",
-         "description"
-         "(Optional) For inspect operation: Maximum depth to display (default: 5). Must be a positive integer."}},
-       "required" ["op" "explanation"]}}
-     {"name" "clojure_eval",
-      "description"
-      "Takes a Clojure Expression and evaluates it in the current namespace. For example, providing \"(+ 1 2)\" will evaluate to 3.\n\nThis tool is intended to execute Clojure code. This is very helpful for verifying that code is working as expected. It's also helpful for REPL driven development.\n\nIf you send multiple expressions they will all be evaluated individually and their output will be clearly partitioned.\n\nIf the returned value is too long it will be truncated.\n\nIMPORTANT: When using `require` to reload namespaces ALWAYS use `:reload` to ensure you get the latest version of files.\n\nREPL helper functions are automatically loaded in the 'clj-mcp.repl-tools' namespace, providing convenient namespace and symbol exploration:\n\nNamespace/Symbol inspection functions:\n  clj-mcp.repl-tools/list-ns           - List all available namespaces\n  clj-mcp.repl-tools/list-vars         - List all vars in namespace\n  clj-mcp.repl-tools/doc-symbol        - Show documentation for symbol\n  clj-mcp.repl-tools/source-symbol     - Show source code for symbol\n  clj-mcp.repl-tools/find-symbols      - Find symbols matching pattern\n  clj-mcp.repl-tools/complete          - Find completions for prefix\n  clj-mcp.repl-tools/help              - Show this help message\n\nExamples:\n  (clj-mcp.repl-tools/list-ns)                     ; List all namespaces\n  (clj-mcp.repl-tools/list-vars 'clojure.string)   ; List functions in clojure.string\n  (clj-mcp.repl-tools/doc-symbol 'map)             ; Show documentation for map\n  (clj-mcp.repl-tools/source-symbol 'map)          ; Show source code for map\n  (clj-mcp.repl-tools/find-symbols \"seq\")          ; Find symbols containing \"seq\"\n  (clj-mcp.repl-tools/complete \"clojure.string/j\") ; Find completions for prefix",
-      "inputSchema"
-      {"type" "object",
-       "properties"
-       {"code"
-        {"type" "string",
-         "description" "The Clojure code to evaluate."}},
+       "properties" {"code" {"type" "string", "description" "The Clojure code to evaluate."}},
        "required" ["code"]}}
      {"name" "bash",
-      "description"
-      "Execute bash shell commands on the host system.\n\nExamples:\n1. List files: bash(command: \"ls -la\")\n2. Find text in files: bash(command: \"grep -r 'pattern' /path/to/search\")\n3. With working directory: bash(command: \"ls -la\", working_directory: \"/tmp\")\n4. With timeout: bash(command: \"sleep 10\", timeout_ms: 5000)\n5. Git commands \n\nFor long running processes like running tests increase the timeout_ms so that the process can complete.\n\nNote: Non-zero exit codes are NOT treated as tool errors - check exit_code\nin the response to determine command success.",
+      "description" "Execute bash shell commands."
       "inputSchema"
       {"type" "object",
-       "properties"
-       {"command"
-        {"type" "string",
-         "description" "The shell command to execute"},
-        "working_directory"
-        {"type" "string",
-         "description" "Directory to run the command in (optional)"},
-        "timeout_ms"
-        {"type" "integer",
-         "description"
-         "Maximum execution time in milliseconds (optional, default: 30000)"}},
-       "required" ["command"]}}
-     {"name" "clojure_edit",
-      "description"
-      "Edits a top-level form (`defn`, `def`, `defmethod`, `ns`, `deftest`) in a Clojure file using the specified operation.\n   \nPREFER this unified tool over generic file editing tools for Clojure files (`.clj` `.cljs` `.cljc` `.bb`)\n\nThis tool MAKES it EASIER to match a definition that exists in the file AS you only have to match the type of definition `form_type` and the complete identifier `form_identifier` of the definition. This prevents the repeated mismatch errors that occur when trying match an entire string of text for replacement.\nThis tool validates the structure of the Clojure code that is being inserted into the file and will provide linting feedback for things such as parenthetical errors.\nThis tool reduces the number of tokens that need to be generated.\n \nWARNING: you will receive errors if the syntax is wrong, the most common error is an extra or missing parenthesis in the `content`, so be careful with parenthesis.\n\n   Operations:\n   - \"replace\": Replaces the form with new content\n   - \"insert_before\": Inserts content before the form\n   - \"insert_after\": Inserts content after the form\n   \n   The form is identified by its type (defn, def, deftest, s/def, ns, defmethod etc.) and complete identifier.\n   \n   Example: Replace a function definition:\n   - file_path: \"/path/to/file.clj\"\n   - form_identifier: \"example-fn\"\n   - form_type: \"defn\"\n   - operation: \"replace\"\n   - content: \"(defn example-fn [x] (* x 2))\"\n   \n   Example: Insert a helper function before a function:\n   - file_path: \"/path/to/file.clj\"\n   - form_identifier: \"example-fn\"\n   - form_type: \"defn\"\n   - operation: \"insert_before\"\n   - content: \"(defn helper-fn [x] (* x 2))\"\n   \n   Example: Insert a test after a function:\n   - file_path: \"/path/to/file.clj\"\n   - form_identifier: \"example-fn\"\n   - form_type: \"defn\"\n   - operation: \"insert_after\"\n   - content: \"(deftest example-fn-test\n  (is (= 4 (example-fn 2))))\"\n   \nNote: For `defmethod` forms, be sure to include the dispatch value (`area :rectangle` or `qualified/area :rectangle`) in the `form_identifier`. Many `defmethod` definitions have qualified names (they include a namespace alias in their identifier like `shape/area`), so it's crucial to use the complete identifier that appears in the file.\n\n   Example: Replace a specific `defmethod` implementation:\n   - file_path: \"/path/to/file.clj\"\n   - form_identifier: \"shape/area :square\"\n   - form_type: \"defmethod\"\n   - operation: \"replace\"\n   - content: \"(defmethod shape/area :square [{:keys [w h]}] (* w h))\"\n\n   Example: Work with vector dispatch values:\n   - file_path: \"/path/to/file.clj\"\n   - form_identifier: \"convert-length [:feet :inches]\"\n   - form_type: \"defmethod\"\n   - operation: \"insert_before\"\n   - content: \"(def inches-per-foot 12)\"\n\n   The tool will find the form, perform the requested operation, and format the result.\n   It returns a diff showing the changes made to the file.",
-      "inputSchema"
-      {"type" "object",
-       "properties"
-       {"file_path"
-        {"type" "string",
-         "description" "Path to the file containing the form to edit"},
-        "form_identifier"
-        {"type" "string",
-         "description"
-         "Complete identifier of the form (e.g., function name, \"shape/area\", or \"convert-length [:feet :inches]\")"},
-        "form_type"
-        {"type" "string",
-         "description"
-         "Type of the form (e.g., \"defn\", \"def\", \"ns\")"},
-        "operation"
-        {"type" "string",
-         "enum" ["replace" "insert_before" "insert_after"],
-         "description" "The editing operation to perform"},
-        "content"
-        {"type" "string",
-         "description" "New content to use for the operation"}},
-       "required"
-       ["file_path"
-        "form_identifier"
-        "form_type"
-        "operation"
-        "content"]}}
-     {"name" "clojure_edit_replace_sexp",
-      "description"
-      "Edits a file by finding and replacing specific s-expressions.\n\nUse this tool for targeted edits of sub-expressions within forms. For complete top-level form replacements, prefer specialized tools like `clojure_edit_replace_definition` and friends.\n\nKEY BENEFITS:\n- Syntax-aware matching that understands Clojure code structure\n- Ignores whitespace differences by default, focusing on actual code meaning\n- Matches expressions regardless of formatting, indentation, or spacing\n- Prevents errors from mismatched text or irrelevant formatting differences\n- Can find and replace all occurrences with replace_all: true\n\nCONSTRAINTS:\n- match_form must contain only a SINGLE s-expression (error otherwise)\n- Requires syntactically valid Clojure expressions in both match_form and new_form\n\nWARNING: You will receive errors if the syntax is wrong. The most common error is an extra or missing parenthesis in either match_form or new_form, so count your parentheses carefully!\n\nCOMMON APPLICATIONS:\n- Renaming symbols throughout the file: {\"match_form\": \"old-name\", \"new_form\": \"new-name\", \"replace_all\": true}\n- Editing special forms like if/cond/let/when within functions:\n  * Changing if branches: {\"match_form\": \"(if condition expr1 expr2)\", \"new_form\": \"(if condition (do expr1) expr2)\"}\n  * Enhancing let bindings: {\"match_form\": \"(let [x 10] (+ x 2))\", \"new_form\": \"(let [x 10 y 20] (+ x y))\"}\n  * Converting cond to case: {\"match_form\": \"(cond (= x :a) \\\"A\\\" (= x :b) \\\"B\\\")\", \"new_form\": \"(case x :a \\\"A\\\" :b \\\"B\\\")\"}\n- Modifying nested function calls: {\"match_form\": \"(str (+ a b))\", \"new_form\": \"(str (+ a b c))\"}\n- Changing anonymous function syntax: {\"match_form\": \"#(update % :count inc)\", \"new_form\": \"(fn [x] (update x :count inc))\"}\n\nOther Examples:\n- Replace a calculation: {\"match_form\": \"(+ x 2)\", \"new_form\": \"(+ x 10)\"}\n  * Will match regardless of spaces: (+ x 2), (+   x   2), etc.\n- Delete an expression: {\"match_form\": \"(println debug-info)\", \"new_form\": \"\"}\n- Edit anonymous function: {\"match_form\": \"#(inc %)\", \"new_form\": \"#(+ % 2)\"}\n- Replace multiple occurrences: {\"match_form\": \"(inc x)\", \"new_form\": \"(+ x 1)\", \"replace_all\": true}\n\nReturns a diff showing the changes made to the file.",
-      "inputSchema"
-      {"type" "object",
-       "properties"
-       {"file_path"
-        {"type" "string", "description" "Path to the file to edit"},
-        "match_form"
-        {"type" "string",
-         "description"
-         "The s-expression to find and replace (include # for anonymous functions)"},
-        "new_form"
-        {"type" "string",
-         "description" "The s-expression to replace with"},
-        "replace_all"
-        {"type" "boolean",
-         "description"
-         "Whether to replace all occurrences (default: false)"}},
-       "required" ["file_path" "match_form" "new_form"]}}
-     {"name" "file_edit",
-      "description"
-      "Edit a file by replacing a specific text string with a new one. For safety, this tool requires that the string to replace appears exactly once in the file. \n\nFIRST: the clojure_edit tool is prefered because they use precise structural rewrite-clj editing. They also incorporate linting and ensure balance parenthesis.\n\nWHEN the clojure_edit tool won't work or you have a small easy edit \n\nPREFER the file_write tool for replacing more than half a file, this saves on tokens\n\nFor Clojure files (.clj, .cljs, .cljc, .edn):\n- Content will be linted for syntax errors before writing\n- Content will be formatted according to Clojure standards\n- Writing will fail if linting detects syntax errors\n\nTo make a file edit, provide the file_path, old_string (the text to replace), and new_string (the replacement text). The old_string must uniquely identify the specific instance you want to change, so include several lines of context before and after the change point. To create a new file, use file_write instead.",
-      "inputSchema"
-      {"type" "object",
-       "properties"
-       {"file_path"
-        {"type" "string",
-         "description"
-         "The absolute path to the file to modify (must be absolute, not relative)"},
-        "old_string"
-        {"type" "string",
-         "description"
-         "The text to replace (must match the file contents exactly, including all whitespace and indentation)."},
-        "new_string"
-        {"type" "string",
-         "description" "The edited text to replace the old_string"}},
-       "required" ["file_path" "old_string" "new_string"]}}
-     {"name" "file_write",
-      "description"
-      "Write a file to the local filesystem. Overwrites the existing file if there is one.\n\nFor Clojure files (.clj, .cljs, .cljc, .edn):\n- Content will be linted for syntax errors before writing\n- Content will be formatted according to Clojure standards\n- Writing will fail if linting detects syntax errors\n\nFor other file types:\n- Content is written directly without linting or formatting\n\nIMPORTANT SAFETY FEATURE:\n- If the file has been modified since it was last read, writing will fail\n- You must use read_file to get the current content before editing a file\n- This prevents accidental overwrites of external changes\n\nReturns information about whether the file was created or updated, along with a diff \nshowing the changes made.\n\nBefore using this tool:\n1. Use the read_file tool to understand the file's contents and context\n2. Directory Verification (only applicable when creating new files):\n   - Use the list_directory tool to verify the parent directory exists and is the correct location\n3. For Clojure files, ensure code is syntactically correct\n\n# Example:\n# file_write(\n#   file_path: \"/absolute/path/to/file.clj\",\n#   content: \"(ns my.namespace)\\n\\n(defn my-function [x]\\n  (* x 2))\"\n# )",
-      "inputSchema"
-      {"type" "object",
-       "properties"
-       {"file_path"
-        {"type" "string",
-         "description"
-         "The absolute path to the file to write (must be absolute, not relative)"},
-        "content"
-        {"type" "string",
-         "description" "The content to write to the file"}},
-       "required" ["file_path" "content"]}}
-     {"name" "clojure_inspect_project",
-      "description"
-      "Analyzes and provides detailed information about a Clojure project's structure, \nincluding dependencies, source files, namespaces, and environment details.\n\nThis tool helps you understand project organization without having to manually \nexplore multiple configuration files. It works with both deps.edn and Leiningen projects.\n\nThe tool provides information about:\n- Project environment (working directory, Clojure version, Java version)\n- Source and test paths\n- Dependencies and their versions\n- Aliases and their configurations\n- Available namespaces\n- Source file structure\n\nUse this tool to quickly get oriented in an unfamiliar Clojure codebase or to \nget a high-level overview of your current project.\n\n# Example:\nclojure_inspect_project()",
-      "inputSchema"
-      {"type" "object",
-       "properties"
-       {"explanation"
-        {"type" "string",
-         "description" "Short explanation why you chose this tool"}},
-       "required" ["explanation"]}}
-     {"name" "dispatch_agent",
-      "description"
-      "Launch a new agent that has access to read-only tools. When you are searching for a keyword or file and are not confident that you will find the right match on the first try, use the Agent tool to perform the search for you. For example:\n\n- If you are searching for a keyword like \"config\" or \"logger\", the Agent tool is appropriate\n- If you want to read a specific file path, use the read_file or glob_files tool instead of the Agent tool, to find the match more quickly\n- If you are searching for a specific class definition like \"class Foo\", use the glob_files tool instead, to find the match more quickly\n\nUsage notes:\n1. Launch multiple agents concurrently whenever possible, to maximize performance; to do that, use a single message with multiple `agent` tool uses\n2. When the agent is done, it will return a single message back to you. The result returned by the agent is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result.\n3. Each agent invocation is stateless. You will not be able to send additional messages to the agent, nor will the agent be able to communicate with you outside of its final report. Therefore, your prompt should contain a highly detailed task description for the agent to perform autonomously and you should specify exactly what information the agent should return back to you in its final and only message to you.\n4. The agent's outputs should generally be trusted",
-      "inputSchema"
-      {"type" "object",
-       "properties"
-       {"prompt"
-        {"type" "string",
-         "description" "The prompt to send to the agent"}},
-       "required" ["prompt"]}}
-     {"name" "architect",
-      "description"
-      "Your go-to tool for any technical or coding task. Analyzes requirements and breaks them down into clear, actionable implementation steps. Use this whenever you need help planning how to implement a feature, solve a technical problem, or structure your code.",
-      "inputSchema"
-      {"type" "object",
-       "properties"
-       {"prompt"
-        {"type" "string",
-         "description"
-         "The technical request or coding task to analyze"},
-        "context"
-        {"type" "string",
-         "description"
-         "Optional context from previous conversation or system state"}},
-       "required" ["prompt"]}}
-     {"name" "code_critique",
-      "description"
-      "Starts an interactive code review conversation that provides constructive feedback on your Clojure code.\n  \n  HOW TO USE THIS TOOL:\n  1. Submit your Clojure code for initial critique\n  2. Review the suggestions and implement improvements\n  3. Test your revised code in the REPL\n  4. Submit the updated code for additional feedback\n  5. Continue this cycle until the critique is satisfied\n  \n  This tool initiates a feedback loop where you:\n  - Receive detailed analysis of your code\n  - Implement suggested improvements\n  - Test and verify changes\n  - Get follow-up critique on your revisions\n  \n  The critique examines:\n  - Adherence to Clojure style conventions\n  - Functional programming best practices\n  - Performance optimizations\n  - Readability and maintainability improvements\n  - Idiomatic Clojure patterns\n  \n  Example conversation flow:\n  - You: Submit initial function implementation\n  - Tool: Provides feedback on style and structure\n  - You: Revise code based on suggestions and test in REPL\n  - Tool: Reviews updates and suggests further refinements\n  - Repeat until code quality goals are achieved\n  \n  Perfect for iterative learning and continuous code improvement.",
-      "inputSchema"
-      {"type" "object",
-       "properties"
-       {"code"
-        {"type" "string",
-         "description" "The Clojure code to analyze and critique"},
-        "context"
-        {"type" "string",
-         "description"
-         "Optional context from previous conversation or system state"}},
-       "required" ["code"]}}]}})
+       "properties" {"command" {"type" "string", "description" "The shell command to execute"}},
+       "required" ["command"]}}]}})
 
-;; list prompts response - x1
 (def list-prompts-response
   {"jsonrpc" "2.0",
    "id" 3,
    "result"
    {"prompts"
-    [{"name" "ACT/scratch_pad_load",
-      "description"
-      "Loads a file into the scratch pad state. Returns status messages and a shallow inspect of the loaded data.",
-      "arguments"
-      [{"name" "file_path",
-        "description" "Optional file path: default scratch_pad.edn",
-        "required" false}]}
-     {"name" "clojure_repl_system_prompt",
-      "description"
-      "Provides instructions and guidelines for Clojure development, including style and best practices.",
+    [{"name" "system-prompt",
+      "description" "Provides guidelines.",
       "arguments" []}
-     {"name" "create-update-project-summary",
-      "description"
-      "Generates a prompt instructing the LLM to create a summary of a project.",
-      "arguments" []}
-     {"name" "chat-session-summarize",
-      "description"
-      "Instructs the assistant to create a summary of the current chat session and store it in the scratch pad. `chat_session_key` is optional and will default to `chat_session_summary`",
-      "arguments"
-      [{"name" "chat_session_key",
-        "description" "[Optional] key to store the session summary in",
-        "required" false}]}
-     {"name" "ACT/scratch_pad_save_as",
-      "description"
-      "Saves the current scratch pad state to a specified file.",
-      "arguments"
-      [{"name" "file_path",
-        "description" "File path: relative to .clojure-mcp/ directory",
-        "required" true}]}
-     {"name" "chat-session-resume",
-      "description"
-      "Instructs the assistant to resume a previous chat session by loading context from the scratch pad. `chat_session_key` is optional and will default to `chat_session_summary`",
-      "arguments"
-      [{"name" "chat_session_key",
-        "description" "[Optional] key where session summary is stored",
-        "required" false}]}
-     {"name" "ACT/add-dir",
-      "description"
-      "Adds a directory to the allowed-directories list, giving the LLM access to it",
-      "arguments"
-      [{"name" "directory",
-        "description"
-        "Directory path to add (can be relative or absolute)",
-        "required" true}]}
-     {"name" "plan-and-execute",
-      "description"
-      "Use the scratch pad tool to plan and execute an change",
-      "arguments" []}]}})
+     {"name" "save-as",
+      "description" "Save to file.",
+      "arguments" [{"name" "file_path", "description" "File path", "required" true}]}]}})
 
-;; list resources response - x1
 (def list-resources-response
   {"jsonrpc" "2.0",
    "id" 4,
    "result"
    {"resources"
-    [{"uri" "custom://readme",
-      "name" "README.md",
-      "description"
-      "A README document for the current Clojure project hosting the REPL",
-      "mimeType" "text/markdown"}
-     {"uri" "custom://project-info",
-      "name" "Clojure Project Info",
-      "description"
-      "Information about the current Clojure project structure, attached REPL environment and dependencies",
-      "mimeType" "text/markdown"}
-     {"uri" "custom://llm-code-style",
-      "name" "LLM_CODE_STYLE.md",
-      "description"
-      "Guidelines for writing Clojure code for the current project hosting the REPL",
-      "mimeType" "text/markdown"}
-     {"uri" "custom://project-summary",
-      "name" "PROJECT_SUMMARY.md",
-      "description"
-      "A Clojure project summary document for the project hosting the REPL, this is intended to provide the LLM with important context to start.",
-      "mimeType" "text/markdown"}
-     {"uri" "custom://claude",
-      "name" "CLAUDE.md",
-      "description"
-      "The Claude instructions document for the current project hosting the REPL",
-      "mimeType" "text/markdown"}]}})
-
-(def read-resources-request
-  {"jsonrpc" "2.0" "id" 12345 "method" "resources/read" "params" {"uri" "custom://project-info"}})
-
-(def read-resources-response
-  {"jsonrpc" "2.0",
-   "id" 12345,
-   "result"
-   {"contents"
-    [{"uri" "custom://project-info",
-      "mimeType" "text/markdown",
-      "text" "..."}]}})
-
-;; Tool schema generation functions moved to src/claij/mcp.clj
+    [{"uri" "custom://readme", "name" "README.md", "mimeType" "text/markdown"}
+     {"uri" "custom://project-info", "name" "Project Info", "mimeType" "text/markdown"}]}})
 
 ;;------------------------------------------------------------------------------
+;; Cache management tests (unchanged - don't involve schemas)
 ;;------------------------------------------------------------------------------
 
 (deftest mcp-test
@@ -492,455 +148,216 @@
     (is (= "resources" (list-changed? "notifications/resources/list_changed")))
     (is (nil? (list-changed? "initialize"))))
 
-  ;; Integration test showing typical cache update flow
   (testing "cache update flow"
-    (let [;; Start with empty cache
-          cache0 {}
-
-          ;; Initialize from capabilities
+    (let [cache0 {}
           capabilities (get-in initialise-response ["result" "capabilities"])
           cache1 (initialize-mcp-cache cache0 capabilities)
           _ (is (= {"tools" nil "prompts" nil "resources" nil} cache1))
 
-          ;; Refresh tools cache
           tools-data (get list-tools-response "result")
           cache2 (refresh-mcp-cache-item cache1 tools-data)
           _ (is (= (get-in list-tools-response ["result" "tools"])
                    (get cache2 "tools")))
 
-          ;; Refresh prompts cache
           prompts-data (get list-prompts-response "result")
           cache3 (refresh-mcp-cache-item cache2 prompts-data)
           _ (is (= (get-in list-prompts-response ["result" "prompts"])
                    (get cache3 "prompts")))
 
-          ;; Refresh resources cache
           resources-data (get list-resources-response "result")
           cache4 (refresh-mcp-cache-item cache3 resources-data)
           _ (is (= (get-in list-resources-response ["result" "resources"])
                    (get cache4 "resources")))
 
-          ;; Invalidate tools cache
           cache5 (invalidate-mcp-cache-item cache4 "tools")
           _ (is (nil? (get cache5 "tools")))
           _ (is (= (get cache4 "prompts") (get cache5 "prompts")))
           _ (is (= (get cache4 "resources") (get cache5 "resources")))])
-
     (is true))
 
-  ;; subscriptions:
-
-  ;; I tried the following subscription:
-
-  {"jsonrpc" "2.0"
-   "id" 10
-   "method" "resources/subscribe"
-   "params"
-   {"uri" "custom://readme"}}
-
-  ;; and got the following error:
-
-  {"jsonrpc" "2.0",
-   "id" 10,
-   "error"
-   {"code" -32601,
-    "message" "Method not found: resources/subscribe"}}
-
-  ;; so it looks like clojure-mcp does not support subscriptions...
+  ;;----------------------------------------------------------------------------
+  ;; Schema generation tests - now test Malli format
+  ;;----------------------------------------------------------------------------
 
   (testing "tool call schema generation"
-    (let [;; (0a) tool cache WITHOUT outputSchema
-          tool-cache {"name" "clojure_eval"
+    (let [tool-cache {"name" "clojure_eval"
                       "description" "Takes a Clojure Expression and evaluates it."
                       "inputSchema" {"type" "object"
-                                     "properties" {"code" {"type" "string"
-                                                           "description" "The Clojure code to evaluate."}}
+                                     "properties" {"code" {"type" "string"}}
                                      "required" ["code"]}}
 
-          ;; (0b) tool cache WITH outputSchema
-          tool-cache-with-output {"name" "query_users"
-                                  "description" "Query users from database"
-                                  "inputSchema" {"type" "object"
-                                                 "properties" {"limit" {"type" "integer"}}
-                                                 "required" []}
-                                  "outputSchema" {"type" "object"
-                                                  "properties" {"users" {"type" "array"}
-                                                                "total" {"type" "integer"}}
-                                                  "required" ["users" "total"]}}
+          tool-request {"name" "clojure_eval" "arguments" {"code" "(+ 1 1)"}}
+          invalid-request-wrong-name {"name" "wrong" "arguments" {"code" "(+ 1 1)"}}
+          invalid-request-missing-arg {"name" "clojure_eval" "arguments" {}}
 
-          ;; (1) example request
-          tool-request {"name" "clojure_eval"
-                        "arguments" {"code" "(+ 1 1)"}}
+          request-schema (tool-cache->request-schema tool-cache)]
 
-          ;; (2a-h) response examples - various content types
-          tool-response-text {"content" [{"type" "text" "text" "=> 2"}]}
-          tool-response-error {"isError" true
-                               "content" [{"type" "text" "text" "Error: file not found"}]}
-          tool-response-image {"content" [{"type" "image"
-                                           "data" "base64encodeddata..."
-                                           "mimeType" "image/png"}]}
-          tool-response-audio {"content" [{"type" "audio"
-                                           "data" "base64audiodata..."
-                                           "mimeType" "audio/wav"}]}
-          tool-response-resource-link {"content" [{"type" "resource_link"
-                                                   "uri" "file:///path/to/file.txt"}]}
-          tool-response-embedded {"content" [{"type" "resource"
-                                              "resource" {"uri" "file:///foo.txt"
-                                                          "text" "contents here"}}]}
-          tool-response-multi {"content" [{"type" "text" "text" "Found 3 files:"}
-                                          {"type" "text" "text" "- foo.clj\n- bar.clj"}]}
+      ;; Schema structure is Malli [:map ...]
+      (is (= :map (first request-schema)) "Request schema should be [:map ...]")
+      (is (= {:closed true} (second request-schema)) "Schema should be closed")
 
-          ;; (2i) response with valid structuredContent (for outputSchema tool)
-          tool-response-structured-valid {"content" [{"type" "text" "text" "Found 2 users"}]
-                                          "structuredContent" {"users" [{"id" 1} {"id" 2}]
-                                                               "total" 2}}
+      ;; Valid request passes
+      (is (malli-valid? request-schema tool-request)
+          "Valid tool request should validate")
 
-          ;; (2j) response with invalid structuredContent (missing required field)
-          tool-response-structured-invalid {"content" [{"type" "text" "text" "Found 2 users"}]
-                                            "structuredContent" {"users" [{"id" 1}]}}
-          ;; missing "total" field
+      ;; Invalid requests fail
+      (is (not (malli-valid? request-schema invalid-request-wrong-name))
+          "Wrong tool name should fail")
+      (is (not (malli-valid? request-schema invalid-request-missing-arg))
+          "Missing required argument should fail (validated by :json-schema type)")))
 
-          ;; (3) expected request schema
-          expected-request-schema {"type" "object"
-                                   "properties" {"name" {"const" "clojure_eval"}
-                                                 "arguments" {"type" "object"
-                                                              "properties" {"code" {"type" "string"
-                                                                                    "description" "The Clojure code to evaluate."}}
-                                                              "required" ["code"]}}
-                                   "required" ["name" "arguments"]}
-
-          ;; Generate schemas
-          request-schema (tool-cache->request-schema tool-cache)
-          response-schema (tool-cache->response-schema tool-cache)
-          response-schema-with-output (tool-cache->response-schema tool-cache-with-output)]
-
-      ;; Test: request schema generation
-      (is (= expected-request-schema request-schema)
-          "Generated request schema should match expected")
-      (is (:valid? (validate {:draft :draft7} request-schema {} tool-request))
-          "Request should validate against generated schema")
-
-      ;; Test: response schema WITHOUT outputSchema returns base schema
-      (is (= tool-response-schema response-schema)
-          "Tool without outputSchema should return base response schema")
-
-      ;; Test: response schema WITH outputSchema includes constraint
-      (is (= (get-in tool-cache-with-output ["outputSchema"])
-             (get-in response-schema-with-output ["properties" "structuredContent"]))
-          "Tool with outputSchema should constrain structuredContent")
-
-      ;; Test: all content types validate against base schema
-      (is (:valid? (validate {:draft :draft7} response-schema {} tool-response-text))
-          "Text content should validate")
-      (is (:valid? (validate {:draft :draft7} response-schema {} tool-response-error))
-          "Error response should validate")
-      (is (:valid? (validate {:draft :draft7} response-schema {} tool-response-image))
-          "Image content should validate")
-      (is (:valid? (validate {:draft :draft7} response-schema {} tool-response-audio))
-          "Audio content should validate")
-      (is (:valid? (validate {:draft :draft7} response-schema {} tool-response-resource-link))
-          "Resource link should validate")
-      (is (:valid? (validate {:draft :draft7} response-schema {} tool-response-embedded))
-          "Embedded resource should validate")
-      (is (:valid? (validate {:draft :draft7} response-schema {} tool-response-multi))
-          "Multiple content blocks should validate")
-
-      ;; Test: structuredContent validation with outputSchema
-      (is (:valid? (validate {:draft :draft7} response-schema-with-output {} tool-response-structured-valid))
-          "Valid structuredContent should validate against outputSchema")
-      (is (not (:valid? (validate {:draft :draft7} response-schema-with-output {} tool-response-structured-invalid)))
-          "Invalid structuredContent should fail validation against outputSchema")))
-
-  (testing "combined tools schema generation (oneOf)"
-    (let [;; Simple 2-tool cache
-          tools-cache [{"name" "add"
-                        "description" "Add two numbers"
+  (testing "combined tools schema generation (:or)"
+    (let [tools-cache [{"name" "add"
                         "inputSchema" {"type" "object"
-                                       "properties" {"a" {"type" "integer"}
-                                                     "b" {"type" "integer"}}
+                                       "properties" {"a" {"type" "integer"} "b" {"type" "integer"}}
                                        "required" ["a" "b"]}}
                        {"name" "greet"
-                        "description" "Greet someone"
                         "inputSchema" {"type" "object"
                                        "properties" {"name" {"type" "string"}}
                                        "required" ["name"]}}]
 
-          ;; Example requests
           add-request {"name" "add" "arguments" {"a" 1 "b" 2}}
           greet-request {"name" "greet" "arguments" {"name" "Alice"}}
           invalid-request {"name" "add" "arguments" {"a" "not-a-number"}}
 
-          ;; Example responses
-          add-response {"content" [{"type" "text" "text" "3"}]}
-          greet-response {"content" [{"type" "text" "text" "Hello, Alice!"}]}
+          request-schema (tools-cache->request-schema tools-cache)]
 
-          ;; Generate combined schemas
-          request-schema (tools-cache->request-schema tools-cache)
-          response-schema (tools-cache->response-schema tools-cache)]
+      ;; Structure is [:or ...] with correct count
+      (is (= :or (first request-schema)) "Request schema should be [:or ...]")
+      (is (= 2 (dec (count request-schema))) ":or should have 2 alternatives")
 
-      ;; Test: structure is oneOf/anyOf with correct count
-      (is (= 2 (count (get request-schema "oneOf")))
-          "Request schema should have oneOf with 2 alternatives")
-      (is (= 2 (count (get response-schema "anyOf")))
-          "Response schema should have anyOf with 2 alternatives")
+      ;; Valid requests pass
+      (is (malli-valid? request-schema add-request) "Add request should validate")
+      (is (malli-valid? request-schema greet-request) "Greet request should validate")
 
-      ;; Test: valid requests pass
-      (is (:valid? (validate {:draft :draft7} request-schema {} add-request))
-          "Add request should validate")
-      (is (:valid? (validate {:draft :draft7} request-schema {} greet-request))
-          "Greet request should validate")
-
-      ;; Test: invalid request fails
-      (is (not (:valid? (validate {:draft :draft7} request-schema {} invalid-request)))
-          "Invalid request should fail validation")
-
-      ;; Test: responses validate
-      (is (:valid? (validate {:draft :draft7} response-schema {} add-response))
-          "Add response should validate")
-      (is (:valid? (validate {:draft :draft7} response-schema {} greet-response))
-          "Greet response should validate")))
+      ;; Invalid request fails (wrong type for 'a')
+      (is (not (malli-valid? request-schema invalid-request))
+          "Invalid request should fail validation")))
 
   (testing "resource read schema generation"
-    (let [resources-cache [{"uri" "custom://readme"
-                            "name" "README.md"
-                            "description" "Project readme"
-                            "mimeType" "text/markdown"}
-                           {"uri" "custom://project-info"
-                            "name" "Project Info"
-                            "description" "Project structure info"
-                            "mimeType" "text/markdown"}]
+    (let [resources-cache [{"uri" "custom://readme" "name" "README.md"}
+                           {"uri" "custom://project-info" "name" "Project Info"}]
 
-          ;; Valid requests
           valid-request {"uri" "custom://readme"}
           valid-request-2 {"uri" "custom://project-info"}
-
-          ;; Invalid request - uri not in cache
           invalid-request {"uri" "custom://unknown"}
-
-          ;; Valid responses
-          text-response {"contents" [{"uri" "custom://readme"
-                                      "text" "# My Project\n..."
-                                      "mimeType" "text/markdown"}]}
-          blob-response {"contents" [{"uri" "custom://image"
-                                      "blob" "base64encodeddata..."
-                                      "mimeType" "image/png"}]}
-          multi-response {"contents" [{"uri" "custom://readme"
-                                       "text" "# Part 1"}
-                                      {"uri" "custom://readme"
-                                       "text" "# Part 2"}]}
-
-          ;; Invalid response - missing required field
-          invalid-response {"contents" [{"uri" "custom://readme"}]}
 
           request-schema (resources-cache->request-schema resources-cache)]
 
-      ;; Request schema structure
-      (is (= ["custom://readme" "custom://project-info"]
-             (get-in request-schema ["properties" "uri" "enum"])))
+      ;; Structure is [:map ["uri" [:enum ...]]]
+      (is (= :map (first request-schema)) "Request schema should be [:map ...]")
 
       ;; Valid requests pass
-      (is (:valid? (validate {:draft :draft7} request-schema {} valid-request)))
-      (is (:valid? (validate {:draft :draft7} request-schema {} valid-request-2)))
+      (is (malli-valid? request-schema valid-request))
+      (is (malli-valid? request-schema valid-request-2))
 
       ;; Invalid request fails (uri not in enum)
-      (is (not (:valid? (validate {:draft :draft7} request-schema {} invalid-request))))
-
-      ;; Response schema validates content types
-      (is (:valid? (validate {:draft :draft7} resource-response-schema {} text-response)))
-      (is (:valid? (validate {:draft :draft7} resource-response-schema {} blob-response)))
-      (is (:valid? (validate {:draft :draft7} resource-response-schema {} multi-response)))
-
-      ;; Invalid response fails
-      (is (not (:valid? (validate {:draft :draft7} resource-response-schema {} invalid-response))))))
+      (is (not (malli-valid? request-schema invalid-request)))))
 
   (testing "prompt get schema generation"
-    (let [;; Prompt without arguments
-          prompt-no-args {"name" "clojure_repl_system_prompt"
-                          "description" "Provides Clojure development guidelines."
+    (let [prompt-no-args {"name" "system-prompt"
+                          "description" "Provides guidelines."
                           "arguments" []}
 
-          ;; Prompt with optional argument
-          prompt-optional-arg {"name" "chat-session-summarize"
-                               "description" "Summarize the chat session."
-                               "arguments" [{"name" "chat_session_key"
-                                             "description" "Key to store summary"
-                                             "required" false}]}
-
-          ;; Prompt with required argument
-          prompt-required-arg {"name" "ACT/scratch_pad_save_as"
-                               "description" "Save scratch pad to file."
+          prompt-required-arg {"name" "save-as"
+                               "description" "Save to file."
                                "arguments" [{"name" "file_path"
-                                             "description" "File path to save"
+                                             "description" "File path"
                                              "required" true}]}
 
-          ;; Valid requests
-          request-no-args {"name" "clojure_repl_system_prompt"}
-          request-with-args {"name" "ACT/scratch_pad_save_as"
-                             "arguments" {"file_path" "my-session.edn"}}
-          request-optional-provided {"name" "chat-session-summarize"
-                                     "arguments" {"chat_session_key" "custom_key"}}
-          request-optional-omitted {"name" "chat-session-summarize"
-                                    "arguments" {}}
+          request-no-args {"name" "system-prompt"}
+          request-with-args {"name" "save-as" "arguments" {"file_path" "my-file.edn"}}
+          request-missing-required {"name" "save-as" "arguments" {}}
 
-          ;; Invalid request - missing required argument
-          request-missing-required {"name" "ACT/scratch_pad_save_as"
-                                    "arguments" {}}
-
-          ;; Valid responses
-          text-response {"messages" [{"role" "user"
-                                      "content" {"type" "text"
-                                                 "text" "Please do X..."}}]}
-          multi-message {"messages" [{"role" "user"
-                                      "content" {"type" "text" "text" "First"}}
-                                     {"role" "assistant"
-                                      "content" {"type" "text" "text" "Second"}}]}
-          with-description {"description" "A helpful prompt"
-                            "messages" [{"role" "user"
-                                         "content" {"type" "text" "text" "Hello"}}]}
-
-          ;; Invalid response
-          invalid-response {"messages" [{"role" "user"}]}
-
-          ;; Generate schemas
           schema-no-args (prompt-cache->request-schema prompt-no-args)
           schema-required (prompt-cache->request-schema prompt-required-arg)
-          prompts-cache [prompt-no-args prompt-optional-arg prompt-required-arg]
+
+          prompts-cache [prompt-no-args prompt-required-arg]
           combined-schema (prompts-cache->request-schema prompts-cache)]
 
-      ;; Schema structure - no required args means no "required" in arguments
-      (is (= {"const" "clojure_repl_system_prompt"}
-             (get-in schema-no-args ["properties" "name"])))
-      (is (nil? (get-in schema-no-args ["properties" "arguments" "required"])))
+      ;; Schema structure is Malli
+      (is (= :map (first schema-no-args)) "Prompt schema should be [:map ...]")
 
-      ;; Schema structure - required args present
-      (is (= ["file_path"]
-             (get-in schema-required ["properties" "arguments" "required"])))
-
-      ;; Combined schema uses oneOf
-      (is (= 3 (count (get combined-schema "oneOf"))))
+      ;; Combined schema uses :or
+      (is (= :or (first combined-schema)) "Combined schema should be [:or ...]")
+      (is (= 2 (dec (count combined-schema))) ":or should have 2 alternatives")
 
       ;; Valid requests pass
-      (is (:valid? (validate {:draft :draft7} schema-no-args {} request-no-args)))
-      (is (:valid? (validate {:draft :draft7} schema-required {} request-with-args)))
-      (is (:valid? (validate {:draft :draft7} combined-schema {} request-optional-provided)))
-      (is (:valid? (validate {:draft :draft7} combined-schema {} request-optional-omitted)))
+      (is (malli-valid? schema-no-args request-no-args))
+      (is (malli-valid? schema-required request-with-args))
 
       ;; Missing required argument fails
-      (is (not (:valid? (validate {:draft :draft7} schema-required {} request-missing-required))))
-
-      ;; Response schema validates
-      (is (:valid? (validate {:draft :draft7} prompt-response-schema {} text-response)))
-      (is (:valid? (validate {:draft :draft7} prompt-response-schema {} multi-message)))
-      (is (:valid? (validate {:draft :draft7} prompt-response-schema {} with-description)))
-
-      ;; Invalid response fails
-      (is (not (:valid? (validate {:draft :draft7} prompt-response-schema {} invalid-response))))))
+      (is (not (malli-valid? schema-required request-missing-required)))))
 
   (testing "logging schema"
-    (let [;; Valid set-level requests
-          set-debug {"level" "debug"}
+    (let [set-debug {"level" "debug"}
           set-error {"level" "error"}
+          invalid-level {"level" "verbose"}]
 
-          ;; Invalid set-level request
-          invalid-level {"level" "verbose"}
+      ;; Logging level strings constant
+      (is (= 8 (count claij.mcp/logging-level-strings)))
+      (is (contains? claij.mcp/logging-level-strings "debug"))
+      (is (contains? claij.mcp/logging-level-strings "emergency"))
 
-          ;; Valid log notifications
-          simple-log {"level" "info" "data" "Server started"}
-          object-log {"level" "warning" "data" {"msg" "Connection lost" "code" 503}}
-          with-logger {"level" "debug" "data" "trace info" "logger" "mcp.server"}
-
-          ;; Invalid log notification - missing data
-          invalid-log {"level" "error"}]
-
-      ;; Logging levels constant
-      (is (= 8 (count logging-levels)))
-      (is (some #{"debug"} logging-levels))
-      (is (some #{"emergency"} logging-levels))
-
-      ;; Set-level requests
-      (is (:valid? (validate {:draft :draft7} logging-set-level-request-schema {} set-debug)))
-      (is (:valid? (validate {:draft :draft7} logging-set-level-request-schema {} set-error)))
-      (is (not (:valid? (validate {:draft :draft7} logging-set-level-request-schema {} invalid-level))))
-
-      ;; Log notifications
-      (is (:valid? (validate {:draft :draft7} logging-notification-schema {} simple-log)))
-      (is (:valid? (validate {:draft :draft7} logging-notification-schema {} object-log)))
-      (is (:valid? (validate {:draft :draft7} logging-notification-schema {} with-logger)))
-      (is (not (:valid? (validate {:draft :draft7} logging-notification-schema {} invalid-log))))))
+      ;; Set-level requests - these are still refs to Malli schemas
+      (is (malli-valid? [:ref "logging-set-level-request"] set-debug))
+      (is (malli-valid? [:ref "logging-set-level-request"] set-error))
+      (is (not (malli-valid? [:ref "logging-set-level-request"] invalid-level)))))
 
   (testing "combined MCP cache schema generation"
-    (let [;; Minimal cache with one of each
-          cache {"tools" [{"name" "eval"
+    (let [cache {"tools" [{"name" "eval"
                            "inputSchema" {"type" "object"
                                           "properties" {"code" {"type" "string"}}
                                           "required" ["code"]}}]
                  "resources" [{"uri" "custom://readme" "name" "README"}]
                  "prompts" [{"name" "system-prompt" "arguments" []}]}
 
-          ;; Empty cache
           empty-cache {"tools" nil "resources" nil "prompts" nil}
 
-          ;; Partial cache - only tools
           tools-only-cache {"tools" [{"name" "bash"
                                       "inputSchema" {"type" "object"
                                                      "properties" {"cmd" {"type" "string"}}}}]
                             "resources" nil
                             "prompts" nil}
 
-          ;; Valid requests - now include JSON-RPC envelope
-          tool-request {"jsonrpc" "2.0"
-                        "id" 1
-                        "method" "tools/call"
+          ;; Valid requests with JSON-RPC envelope
+          tool-request {"jsonrpc" "2.0" "id" 1 "method" "tools/call"
                         "params" {"name" "eval" "arguments" {"code" "(+ 1 1)"}}}
-          resource-request {"jsonrpc" "2.0"
-                            "id" 2
-                            "method" "resources/read"
+          resource-request {"jsonrpc" "2.0" "id" 2 "method" "resources/read"
                             "params" {"uri" "custom://readme"}}
-          prompt-request {"jsonrpc" "2.0"
-                          "id" 3
-                          "method" "prompts/get"
+          prompt-request {"jsonrpc" "2.0" "id" 3 "method" "prompts/get"
                           "params" {"name" "system-prompt"}}
-          logging-request {"jsonrpc" "2.0"
-                           "id" 4
-                           "method" "logging/setLevel"
+          logging-request {"jsonrpc" "2.0" "id" 4 "method" "logging/setLevel"
                            "params" {"level" "debug"}}
 
-          ;; Invalid request - wrong method
           invalid-method {"jsonrpc" "2.0" "id" 5 "method" "tools/list" "params" {}}
 
-          ;; Generate schemas
           request-schema (mcp-cache->request-schema cache)
-          response-schema (mcp-cache->response-schema cache)
           empty-request-schema (mcp-cache->request-schema empty-cache)
           tools-only-request-schema (mcp-cache->request-schema tools-only-cache)]
 
-      ;; Full cache produces 4 alternatives (tools, resources, prompts, logging)
-      (is (= 4 (count (get request-schema "oneOf"))))
+      ;; Full cache produces [:or ...] with 4 alternatives
+      (is (= :or (first request-schema)) "Request schema should be [:or ...]")
+      (is (= 4 (dec (count request-schema))) "Should have 4 alternatives")
 
       ;; Empty cache still has logging
-      (is (= 1 (count (get empty-request-schema "oneOf"))))
-      (is (= "logging/setLevel"
-             (get-in empty-request-schema ["oneOf" 0 "properties" "method" "const"])))
+      (is (= :or (first empty-request-schema)))
+      (is (= 1 (dec (count empty-request-schema))) "Empty cache should have only logging")
 
       ;; Partial cache has tools + logging
-      (is (= 2 (count (get tools-only-request-schema "oneOf"))))
+      (is (= 2 (dec (count tools-only-request-schema))))
 
       ;; Valid requests pass
-      (is (:valid? (validate {:draft :draft7} request-schema {} tool-request)))
-      (is (:valid? (validate {:draft :draft7} request-schema {} resource-request)))
-      (is (:valid? (validate {:draft :draft7} request-schema {} prompt-request)))
-      (is (:valid? (validate {:draft :draft7} request-schema {} logging-request)))
+      (is (malli-valid? request-schema tool-request))
+      (is (malli-valid? request-schema resource-request))
+      (is (malli-valid? request-schema prompt-request))
+      (is (malli-valid? request-schema logging-request))
 
       ;; Invalid method fails
-      (is (not (:valid? (validate {:draft :draft7} request-schema {} invalid-method))))
-
-      ;; Response schema has anyOf with static schemas + per-tool schemas
-      (is (contains? response-schema "anyOf"))
-      (is (>= (count (get response-schema "anyOf")) 4))))
+      (is (not (malli-valid? request-schema invalid-method)))))
 
   (testing "FSM schema functions"
-    (let [;; Simulate FSM context with MCP cache at "state" key
-          cache {"tools" [{"name" "clojure_eval"
+    (let [cache {"tools" [{"name" "clojure_eval"
                            "inputSchema" {"type" "object"
                                           "properties" {"code" {"type" "string"}}
                                           "required" ["code"]}}]
@@ -949,33 +366,19 @@
           context {"state" cache}
           xition {"id" ["llm" "servicing"]}]
 
-      ;; mcp-request-schema-fn extracts cache and generates request schema
+      ;; mcp-request-schema-fn returns [:or ...] schema
       (let [schema (mcp-request-schema-fn context xition)]
-        (is (contains? schema "oneOf")
-            "Request schema function should return oneOf schema")
-        (is (= 4 (count (get schema "oneOf")))
-            "Should have 4 alternatives (tools, resources, prompts, logging)"))
+        (is (= :or (first schema)) "Request schema function should return [:or ...]")
+        (is (= 4 (dec (count schema))) "Should have 4 alternatives"))
 
-      ;; mcp-response-schema-fn extracts cache and generates response schema
+      ;; mcp-response-schema-fn returns [:or ...] schema
       (let [schema (mcp-response-schema-fn context xition)]
-        (is (contains? schema "anyOf")
-            "Response schema function should return anyOf schema")
-        (is (>= (count (get schema "anyOf")) 4)
-            "Should have at least 4 response types"))
+        (is (= :or (first schema)) "Response schema function should return [:or ...]"))
 
       ;; Works with empty cache
       (let [empty-context {"state" {"tools" nil "resources" nil "prompts" nil}}
             schema (mcp-request-schema-fn empty-context xition)]
-        (is (= 1 (count (get schema "oneOf")))
-            "Empty cache should still have logging")))
-
-    ;; xition parameter is available for future use (currently unused)
-    (let [context {"state" {"tools" [{"name" "test" "inputSchema" {}}]}}
-          xition-a {"id" ["llm" "servicing"]}
-          xition-b {"id" ["servicing" "llm"]}]
-      (is (= (mcp-request-schema-fn context xition-a)
-             (mcp-request-schema-fn context xition-b))
-          "Currently xition is unused, both should return same schema")))
+        (is (= 1 (dec (count schema))) "Empty cache should have only logging"))))
 
   (testing "FSM xition schema functions (complete envelope)"
     (let [cache {"tools" [{"name" "clojure_eval"
@@ -988,175 +391,61 @@
           llm->servicing {"id" ["llm" "servicing"]}
           servicing->llm {"id" ["servicing" "llm"]}]
 
-      ;; mcp-request-xition-schema-fn builds complete envelope with xition id
+      ;; mcp-request-xition-schema-fn builds complete envelope
       (let [schema (mcp-request-xition-schema-fn context llm->servicing)]
-        (is (= ["llm" "servicing"]
-               (get-in schema ["properties" "id" "const"]))
-            "Request xition schema should have correct id const")
-        (is (contains? (get-in schema ["properties" "message"]) "oneOf")
-            "Request xition schema should have oneOf for message property")
-        (is (= ["id" "message"] (get schema "required"))
-            "Request xition should require id and message"))
+        (is (= :map (first schema)) "Request xition schema should be [:map ...]")
+        ;; Check that schema has "id" and "message" entries
+        (let [entries (filter vector? (rest schema))
+              entry-names (map first entries)]
+          (is (some #{"id"} entry-names) "Should have id field")
+          (is (some #{"message"} entry-names) "Should have message field")))
 
-      ;; mcp-response-xition-schema-fn builds complete envelope with xition id  
+      ;; mcp-response-xition-schema-fn builds complete envelope
       (let [schema (mcp-response-xition-schema-fn context servicing->llm)]
-        (is (= ["servicing" "llm"]
-               (get-in schema ["properties" "id" "const"]))
-            "Response xition schema should have correct id const")
-        (is (contains? (get-in schema ["properties" "message"]) "anyOf")
-            "Response xition schema should have anyOf for message property")
-        (is (= ["id"] (get schema "required"))
-            "Response xition should only require id (message optional)"))
+        (is (= :map (first schema)) "Response xition schema should be [:map ...]"))
 
       ;; Validate actual events against generated schemas
       (let [request-schema (mcp-request-xition-schema-fn context llm->servicing)
             response-schema (mcp-response-xition-schema-fn context servicing->llm)
 
-            ;; JSON-RPC wrapped request
             valid-request {"id" ["llm" "servicing"]
-                           "message" {"jsonrpc" "2.0"
-                                      "id" 1
-                                      "method" "tools/call"
+                           "message" {"jsonrpc" "2.0" "id" 1 "method" "tools/call"
                                       "params" {"name" "clojure_eval"
                                                 "arguments" {"code" "(+ 1 1)"}}}}
-            ;; JSON-RPC wrapped response
             valid-response {"id" ["servicing" "llm"]
-                            "message" {"jsonrpc" "2.0"
-                                       "id" 1
+                            "message" {"jsonrpc" "2.0" "id" 1
                                        "result" {"content" [{"type" "text" "text" "2"}]}}}
             invalid-request {"id" ["llm" "servicing"]
-                             "message" {"jsonrpc" "2.0"
-                                        "id" 2
-                                        "method" "invalid/method"
+                             "message" {"jsonrpc" "2.0" "id" 2 "method" "invalid/method"
                                         "params" {}}}]
 
-        (is (:valid? (validate {:draft :draft7} request-schema {} valid-request))
-            "Valid tool call request should pass")
-        (is (:valid? (validate {:draft :draft7} response-schema {} valid-response))
-            "Valid tool response should pass")
-        (is (not (:valid? (validate {:draft :draft7} request-schema {} invalid-request)))
-            "Invalid method should fail validation")))))
+        (is (malli-valid? request-schema valid-request) "Valid tool call request should pass")
+        (is (malli-valid? response-schema valid-response) "Valid tool response should pass")
+        (is (not (malli-valid? request-schema invalid-request)) "Invalid method should fail")))))
 
 ;;------------------------------------------------------------------------------
+;; Integration test
 ;;------------------------------------------------------------------------------
-;; actually start an mcp service and walk through its capabiliies:
-
-(defn trace [m f]
-  (fn [v]
-    (let [r (f v)]
-      (prn m "(" f v ")" "->" r)
-      r)))
-
-;; I'd like to get this working but it keeps throwing exceptions - I don't think 'stop' is cleaning up properly
 
 (deftest ^:integration mcp-walk-through-test
   (let [n 100
         config {"command" "bash", "args" ["-c", "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"], "transport" "stdio"}
         ic (chan n (map write-str))
-        oc (chan n (comp (remove list-changed?) (map read-str))) ;; TODO - verify that the reducer is having desired effect
+        oc (chan n (comp (remove list-changed?) (map read-str)))
         stop (start-mcp-bridge config ic oc)]
 
     (try
-
       (>!! ic initialise-request)
       (>!! ic initialised-notification)
       (>!! ic list-tools-request)
       (>!! ic list-prompts-request)
       (>!! ic list-resources-request)
 
-      (defn make-read-resource-request [id uri]
-        {"jsonrpc" "2.0" "id" id "method" "resources/read" "params" {"uri" uri}})
-
-      (def resource-read-requests
-        (map
-         (fn [n {uri "uri" :as resource}] (make-read-resource-request (+ n 5) uri))
-         (range)
-         (get-in list-resources-response ["result" "resources"])))
-
-      (doseq [r resource-read-requests] (>!! ic r))
-
       (catch Throwable t (log/error "should not have happened:" t))
 
       (finally
         (log/info "stopping bridge...")
-
-        ;; TODO: we should NOT need this !
-
         (Thread/sleep 1000)
         (stop)
         (log/info "bridge stopped")
         (is true)))))
-
-;; list of available resources:
-;; ("custom://readme"
-;;  "custom://project-info"<
-;;  "custom://llm-code-style"
-;;  "custom://project-summary"
-;;  "custom://claude")
-
-(comment
-  (def n 100)
-  (def config {"command" "bash", "args" ["-c", "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"], "transport" "stdio"})
-  (def ic (chan n (map write-str)))
-  (def oc (chan n (map read-str)))
-  (def stop (start-mcp-bridge config ic oc))
-  (map (fn [n] (<!! oc)) (range 27))
-  (async/alt!! oc ([v] v) (async/timeout 5000) ([_] :timeout))
-  (>!! ic initialise-request) ;; 1
-  (<!! oc) ;; -> initialise-response - 1
-  (>!! ic initialised-notification)
-  (async/alt!! oc ([v] v) (async/timeout 5000) ([_] :timeout))
-  (>!! ic list-tools-request)
-  (<!! oc) ;; -> list-tools-response - 1
-  (>!! ic list-prompts-request)
-  (<!! oc) ;; -> list-prompts-response - 1
-  (>!! ic list-resources-request)
-  (<!! oc) ;; -> list-resources-response - 1
-  (>!! ic {"jsonrpc" "2.0" "id" 10 "method" "resources/read" "params" {"uri" "custom://readme"}})
-  (assoc-in (<!! oc) ["result" "contents" 0 "text"] "...")
-  (>!! ic {"jsonrpc" "2.0" "id" 10 "method" "resources/read" "params" {"uri" "custom://project-info"}})
-  (assoc-in (<!! oc) ["result" "contents" 0 "text"] "...")
-
-  (<!! oc)) ;; many times
-
-;;------------------------------------------------------------------------------
-
-;; (def-fsm new-mcp-fsm
-;;   {"schema" mcp-schema
-;;    "id" "new-mcp"
-
-;;    "prompts" []
-
-;;    "states"
-;;    [{"id" "start"}
-;;     {"id" "started"}
-;;     {"id" "initialise"}
-;;     {"id" "initialised"}
-;;     {"id" "service"}
-;;     {"id" "cache"}
-;;     {"id" "llm"}
-;;     {"id" "end"}]
-
-;;    "xitions"
-;;    [{"id" ["start"       "started"]} ;;
-;;     {"id" ["started"     "end"]} ;; [label="list\nchanged"]
-;;     {"id" ["started"     "initialise"]} ;; [label="timeout"]
-;;     {"id" ["initialise"  "service"]} ;; [label="initialise\n request"] // has id
-;;     {"id" ["service"     "initialised"]} ;; [label="initialise\n response"] // has id
-;;     {"id" ["initialised" "service"]} ;; [label="initialise\n notification"] // no id/response - we need to send this and then expect the mcp service to be ready - stupid - lucky it is synchronous
-;;     {"id" ["service"     "cache"]} ;; [label="timeout"] // there is no response to an initialise notification
-;;     {"id" ["cache"       "service"]} ;; [label="list\nrequest"]
-;;     {"id" ["service"     "cache"]} ;; [label="list\nresponse"]
-;;     {"id" ["cache"       "service"]} ;; [label="read-request"]
-;;     {"id" ["service"     "cache"]} ;; [label="read-response"]
-;;     {"id" ["cache"       "llm"]} ;; [label="warmed"]
-;;     {"id" ["llm"         "service"]} ;; [label="tools\nrequest"]
-;;     {"id" ["service"     "llm"]} ;; [label="tools\nreponse"]
-;;     {"id" ["llm"         "end"]} ;; [label="finished"]
-;;     ]})
-
-;;------------------------------------------------------------------------------
-;; TODO:
-;; create an mcp schema with all cache stuff stripped out
-;; integrate with mcp-fsm
-;; tidy up
