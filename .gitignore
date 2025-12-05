@@ -42,5 +42,3 @@ docs/
 
 # Runtime files
 *.pid
-whisper-start.sh
-NOTES.txt
