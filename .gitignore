@@ -40,9 +40,6 @@ pom.xml.asc
 # Documentation drafts
 docs/
 
-# Business plans (private)
-BUSINESS.md
-
 # Runtime files
 *.pid
 whisper-start.sh
