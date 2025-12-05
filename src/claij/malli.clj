@@ -384,6 +384,38 @@
        x))
    form))
 
+(defn expand-refs-for-llm
+  "Recursively expand ALL [:ref k] forms using the registry.
+   
+   Unlike inline-refs which selectively inlines, this expands every ref.
+   Use this to prepare schemas for LLM prompts where the LLM cannot
+   resolve Malli refs.
+   
+   Args:
+     form     - A Malli schema form (may contain [:ref k] forms)
+     registry - A map or Malli registry for resolving refs
+   
+   Returns the schema with all refs expanded inline.
+   
+   Note: For token efficiency with multi-use schemas, consider using
+   emit-for-llm instead, which keeps multi-use schemas in a registry."
+  [form registry]
+  (let [;; Handle both map registries and Malli composite registries
+        lookup (if (fn? registry)
+                 registry
+                 (fn [k] (get registry k)))]
+    (postwalk
+     (fn [x]
+       (if (and (vector? x)
+                (= :ref (first x)))
+         (let [ref-key (second x)
+               resolved (lookup ref-key)]
+           (if resolved
+             (expand-refs-for-llm resolved registry)
+             x)) ;; Leave unresolved refs as-is
+         x))
+     form)))
+
 (defn emit-for-llm
   "Prepare schema for LLM prompt. Returns:
    {:registry {only-multi-use-defs}  ;; nil if empty

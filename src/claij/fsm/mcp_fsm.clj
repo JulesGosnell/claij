@@ -10,7 +10,8 @@
    [clojure.string :refer [starts-with?]]
    [clojure.data.json :refer [write-str read-str]]
    [clojure.core.async :refer [chan alt!! timeout <!! >!!]]
-   [claij.malli :refer [def-fsm]]
+   [malli.registry :as mr]
+   [claij.malli :refer [def-fsm base-registry]]
    [claij.fsm :refer [llm-action]]
    [claij.mcp.bridge :refer [start-mcp-bridge]]
    [claij.mcp :refer [initialise-request
@@ -65,6 +66,12 @@
         ic (chan n (map write-str))
         oc (chan n (map read-str))
         stop (start-mcp-bridge config ic oc)
+        ;; Build composite registry: base + FSM schemas + MCP schemas
+        ;; Preserve existing registry from context (built by start-fsm)
+        existing-registry (get context :malli/registry)
+        mcp-registry (mr/composite-registry
+                      (or existing-registry base-registry)
+                      mcp-schemas)
         ;; Store MCP bridge in context instead of global atom
         ;; Register schema functions for dynamic schema resolution
         ;; Store document in context so it's available throughout the FSM
@@ -72,7 +79,7 @@
                                :mcp/bridge {:input ic :output oc :stop stop}
                                :mcp/request-id 0
                                :mcp/document d
-                               :malli/registry mcp-schemas
+                               :malli/registry mcp-registry
                                :id->schema {"mcp-request-xition" mcp-request-xition-schema-fn
                                             "mcp-response-xition" mcp-response-xition-schema-fn})
         init-request (assoc initialise-request "id" 0)]

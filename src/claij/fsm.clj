@@ -8,7 +8,7 @@
    [malli.error :as me]
    [malli.registry :as mr]
    [claij.util :refer [index-by ->key map-values make-retrier]]
-   [claij.malli :refer [def-fsm fsm-registry base-registry]]
+   [claij.malli :refer [def-fsm fsm-registry base-registry expand-refs-for-llm]]
    [claij.llm.open-router :refer [open-router-async]]))
 
 ;; the plan
@@ -36,6 +36,35 @@
 ;; - fsm
 
 ;;------------------------------------------------------------------------------
+;; FSM Registry Building
+;;------------------------------------------------------------------------------
+
+(defn build-fsm-registry
+  "Build a composite Malli registry for an FSM.
+   
+   Combines (in priority order, later overrides earlier):
+   1. base-registry - Default Malli schemas + CLAIJ base types
+   2. FSM schemas - Types defined in fsm[\"schemas\"]
+   3. Context registry - Domain-specific schemas from context[:malli/registry]
+   
+   This should be called once at FSM start and stored in context.
+   
+   Args:
+     fsm - The FSM definition (may have \"schemas\" field)
+     context - Optional context with :malli/registry for additional schemas
+   
+   Returns:
+     A composite Malli registry for schema resolution"
+  ([fsm] (build-fsm-registry fsm {}))
+  ([fsm context]
+   (let [fsm-schemas (get fsm "schemas")
+         context-registry (get context :malli/registry)]
+     (mr/composite-registry
+      base-registry
+      (or fsm-schemas {})
+      (or context-registry {})))))
+
+;;------------------------------------------------------------------------------
 ;; Malli Event Validation
 ;;------------------------------------------------------------------------------
 
@@ -58,7 +87,7 @@
          :errors (me/humanize (m/explain schema event opts))})
       (catch Exception e
         {:valid? false
-         :errors [(str "Schema validation error: " (.getMessage e))]}))))
+         :errors [(str "Schema validation error: " schema event (.getMessage e))]}))))
 
 ;;------------------------------------------------------------------------------
 ;; Legacy JSON Schema Constants (for reference during migration)
@@ -110,10 +139,7 @@
                 (resolve-schema context xition s))
               xs)))
 
-;; rename "action" "transform"
-;; TODO: if we inline cform, we may be able to more work outside and less inside it...
-;; $$id is a hack because $id breaks $ref resolution - investigate
-(defn xform [context {{fsm-schema-id "$$id" :as fsm-schema} "schema" :as fsm} {[from to] "id" ix-schema "schema" ix-omit? "omit" :as ix} {a "action" :as state} ox-and-cs event trail]
+(defn xform [context {fsm-schema "schema" :as fsm} {[from to] "id" ix-schema "schema" ix-omit? "omit" :as ix} {a "action" :as state} ox-and-cs event trail]
   (try
     (log/info (str "=> [" from " -> " to "]"))
 
@@ -132,14 +158,8 @@
                (let [[{ox-schema-raw "schema" :as ox} c] (id->x-and-c ox-id)
                      _ (when (nil? ox) (log/error "no output xition:" (prn-str ox-id)))
                      ox-schema (resolve-schema new-context ox ox-schema-raw)
-                     ;; Build registry: check context first, then FSM schemas, always include base-registry
-                     ;; Context can provide :malli/registry for domain-specific schemas (e.g., MCP)
-                     context-registry (get new-context :malli/registry)
-                     fsm-schemas (get fsm "schemas")
-                     registry (mr/composite-registry
-                               base-registry
-                               (or context-registry {})
-                               (or fsm-schemas {}))
+                     ;; Use pre-built registry from context (built in start-fsm)
+                     registry (get new-context :malli/registry)
                      ;; Use Malli validation with combined registry
                      {v? :valid? es :errors}
                      (validate-event registry ox-schema output-event)]
@@ -260,9 +280,14 @@
    
    NOTE: Currently assumes exactly one transition from 'start'. See TODO above."
   [context {ss "states" xs "xitions" :as fsm}]
-  (let [;; Create completion promise (internal to start-fsm)
+  (let [;; Build FSM registry once at startup - includes base + FSM schemas + any context registry
+        fsm-registry (build-fsm-registry fsm context)
+
+        ;; Create completion promise (internal to start-fsm)
         completion-promise (promise)
-        context (assoc context :fsm/completion-promise completion-promise)
+        context (-> context
+                    (assoc :fsm/completion-promise completion-promise)
+                    (assoc :malli/registry fsm-registry))
 
         ;; Create channels and mappings
         id->x (index-by (->key "id") xs)
@@ -405,31 +430,38 @@
    - Otherwise → user (request to LLM)
    
    Parameters:
-   - context: FSM context (for schema resolution)
+   - context: FSM context (for schema resolution, includes :malli/registry)
    - fsm: The FSM definition (for schema lookups and state actions)
    - trail: The audit trail (vector, oldest-first)
    
-   Returns: Sequence of prompt messages."
+   Returns: Sequence of prompt messages with refs expanded for LLM consumption."
   [context {xs "xitions" ss "states" :as fsm} trail]
-  (let [;; Index for lookups
+  (let [;; Get registry from context (built in start-fsm), or build from FSM for backwards compat
+        registry (or (get context :malli/registry)
+                     (build-fsm-registry fsm context))
+        ;; Index for lookups
         id->x (index-by (->key "id") xs)
         id->s (index-by (->key "id") ss)
         ;; Get output transitions from a state
         state-output-xitions (fn [state-id]
-                               (filter (fn [{[from _to] "id"}] (= from state-id)) xs))]
+                               (filter (fn [{[from _to] "id"}] (= from state-id)) xs))
+        ;; Helper to expand refs for LLM (refs are Clojure constructs, LLM can't resolve them)
+        expand (fn [schema] (expand-refs-for-llm schema registry))]
     (mapcat
      (fn [{:keys [from to event error]}]
        (let [;; Look up source state to determine role
              source-state (id->s from)
              from-is-llm? (= "llm" (get source-state "action"))
              role (if from-is-llm? "assistant" "user")
-             ;; Get the transition and resolve its schema
+             ;; Get the transition and resolve its schema (handles string lookups)
              ix (id->x [from to])
-             ix-schema (resolve-schema context ix (get ix "schema"))
+             ix-schema-raw (resolve-schema context ix (get ix "schema"))
+             ix-schema (expand ix-schema-raw)
              ;; Compute output schema (Malli :or from destination state's outgoing transitions)
-             ;; Resolve each schema to expand dynamic schema references
+             ;; Resolve each schema then expand refs
              output-xitions (state-output-xitions to)
-             s-schema (into [:or] (mapv #(resolve-schema context % (get % "schema")) output-xitions))]
+             s-schema-raw (into [:or] (mapv #(resolve-schema context % (get % "schema")) output-xitions))
+             s-schema (expand s-schema-raw)]
          (cond
            ;; Error entry - always user message with error feedback
            error
