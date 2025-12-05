@@ -17,12 +17,12 @@
 
 (defn stub-llm-action
   "Stub LLM action that immediately transitions to end state.
-   Returns a simple success response without making API calls."
+   Returns a valid MCP content format response without making API calls."
   [context _fsm _ix _state _event _trail handler]
-  (log/info "stub-llm-action: returning canned end transition" (prn-str [context _fsm _ix _state _event _trail handler]))
+  (log/info "stub-llm-action: returning canned end transition")
   (handler context {"id" ["llm" "end"]
-                    "result" {"stub" true
-                              "message" "Stub LLM response - FSM flow completed"}}))
+                    "result" {"content" [{"type" "text"
+                                          "text" "Stub LLM response - FSM flow completed"}]}}))
 
 (defn get-test-actions
   "Returns mcp-actions with either real or stub LLM based on *use-real-llm*"

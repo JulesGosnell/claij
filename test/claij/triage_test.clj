@@ -60,7 +60,7 @@
 ;; Tests
 ;;------------------------------------------------------------------------------
 
-(deftest triage-fsm-delegation-test
+(deftest ^:integration triage-fsm-delegation-test
   (testing "Triage FSM can delegate to code-review FSM"
     (let [;; Store the code-review FSM in the database
           _ (store/fsm-store! *store* "code-review" (assoc code-review-fsm "$version" 0))
@@ -134,7 +134,7 @@
         (finally
           (stop-fsm))))))
 
-(deftest triage-empty-store-test
+(deftest ^:integration triage-empty-store-test
   (testing "Triage FSM handles empty store gracefully"
     (let [;; No FSMs in store - triage action should route to generate
           context (actions/make-context

@@ -52,8 +52,9 @@
 
   :test {:extra-paths ["test"]
          :extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}
-                      org.testcontainers/testcontainers {:mvn/version "1.20.4"}
-                      org.testcontainers/postgresql {:mvn/version "1.20.4"}}
+                      org.testcontainers/testcontainers {:mvn/version "1.21.0"}
+                      org.testcontainers/postgresql {:mvn/version "1.21.0"}}
+         :jvm-opts ["-Dapi.version=1.44"]
          :main-opts ["-m" "kaocha.runner"]}
 
   :coverage {:extra-paths ["test"]

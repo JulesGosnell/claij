@@ -4,9 +4,11 @@
    [clojure.string :refer [starts-with?]]
    [clojure.data.json :refer [write-str read-str]]
    [clojure.core.async :refer [chan go-loop >! alts! <!! >!!]]
+   [malli.core :as m]
+   [malli.registry :as mr]
    [claij.util :refer [map-values]]
-   [claij.malli :refer [def-fsm]]
-   [claij.fsm :refer [schema-base-uri start-fsm]]
+   [claij.malli :refer [def-fsm base-registry]]
+   [claij.fsm :refer [start-fsm]]
    [claij.mcp.bridge :refer [start-mcp-bridge]]))
 
 ;; Note: The MCP protocol schema is defined in TypeScript, not JSON Schema.
@@ -259,142 +261,160 @@
     capability))
 
 ;; ============================================================
+;; MCP Schema Definitions (Malli)
+;; ============================================================
+
+(def mcp-schemas
+  "Schema definitions for MCP protocol messages.
+   Plain map for emit-for-llm analysis and inlining.
+   Use string keys for refs and map entries for LLM JSON compatibility."
+  {;; Logging level enum (RFC-5424 syslog severities)
+   "logging-level" [:enum "debug" "info" "notice" "warning" "error" "critical" "alert" "emergency"]
+
+   ;; Content types for tool responses and prompts
+   "text-content" [:map {:closed true}
+                   ["type" [:= "text"]]
+                   ["text" :string]]
+
+   "image-content" [:map {:closed true}
+                    ["type" [:= "image"]]
+                    ["data" :string]
+                    ["mimeType" :string]]
+
+   "audio-content" [:map {:closed true}
+                    ["type" [:= "audio"]]
+                    ["data" :string]
+                    ["mimeType" :string]]
+
+   "resource-link-content" [:map {:closed true}
+                            ["type" [:= "resource_link"]]
+                            ["uri" :string]]
+
+   "embedded-resource-content" [:map {:closed true}
+                                ["type" [:= "resource"]]
+                                ["resource" :map]] ;; opaque resource object
+
+   ;; Union of all content types
+   "content-item" [:or
+                   [:ref "text-content"]
+                   [:ref "image-content"]
+                   [:ref "audio-content"]
+                   [:ref "resource-link-content"]
+                   [:ref "embedded-resource-content"]]
+
+   ;; Tool response (CallToolResult)
+   "tool-response" [:map
+                    ["content" [:vector [:ref "content-item"]]]
+                    ["isError" {:optional true} :boolean]
+                    ["structuredContent" {:optional true} :map]]
+
+   ;; Resource contents (text or blob variants)
+   "text-resource" [:map {:closed true}
+                    ["uri" :string]
+                    ["text" :string]
+                    ["mimeType" {:optional true} :string]]
+
+   "blob-resource" [:map {:closed true}
+                    ["uri" :string]
+                    ["blob" :string]
+                    ["mimeType" {:optional true} :string]]
+
+   "resource-content" [:or
+                       [:ref "text-resource"]
+                       [:ref "blob-resource"]]
+
+   ;; Resource response (ReadResourceResult)
+   "resource-response" [:map {:closed true}
+                        ["contents" [:vector [:ref "resource-content"]]]]
+
+   ;; Prompt message
+   "prompt-message" [:map {:closed true}
+                     ["role" [:enum "user" "assistant"]]
+                     ["content" [:ref "content-item"]]]
+
+   ;; Prompt response (GetPromptResult)
+   "prompt-response" [:map
+                      ["description" {:optional true} :string]
+                      ["messages" [:vector [:ref "prompt-message"]]]]
+
+   ;; Logging schemas
+   "logging-set-level-request" [:map {:closed true}
+                                ["level" [:ref "logging-level"]]]
+
+   "logging-notification" [:map {:closed true}
+                           ["level" [:ref "logging-level"]]
+                           ["data" :any]
+                           ["logger" {:optional true} :string]]})
+
+(def mcp-registry
+  "Malli registry for MCP schema validation.
+   Composes base-registry with mcp-schemas."
+  (mr/composite-registry
+   base-registry
+   mcp-schemas))
+
+;; ============================================================
 ;; Tool schema generation
 ;; ============================================================
 
 (def tool-response-schema
-  "Minimal schema for MCP tool call responses (CallToolResult).
-   Covers: TextContent, ImageContent, AudioContent, ResourceLink, EmbeddedResource"
-  {"type" "object"
-   "properties"
-   {"content"
-    {"type" "array"
-     "items"
-     {"anyOf"
-      [{"type" "object"
-        "properties" {"type" {"const" "text"}
-                      "text" {"type" "string"}}
-        "required" ["type" "text"]}
-       {"type" "object"
-        "properties" {"type" {"const" "image"}
-                      "data" {"type" "string"}
-                      "mimeType" {"type" "string"}}
-        "required" ["type" "data" "mimeType"]}
-       {"type" "object"
-        "properties" {"type" {"const" "audio"}
-                      "data" {"type" "string"}
-                      "mimeType" {"type" "string"}}
-        "required" ["type" "data" "mimeType"]}
-       {"type" "object"
-        "properties" {"type" {"const" "resource_link"}
-                      "uri" {"type" "string"}}
-        "required" ["type" "uri"]}
-       {"type" "object"
-        "properties" {"type" {"const" "resource"}
-                      "resource" {"type" "object"}}
-        "required" ["type" "resource"]}]}}
-    "isError" {"type" "boolean"}
-    "structuredContent" {"type" "object"}}
-   "required" ["content"]})
+  "Malli schema for MCP tool call responses (CallToolResult).
+   References mcp-schemas definitions."
+  [:ref "tool-response"])
 
 (defn tool-cache->request-schema
-  "Generate a JSON Schema for a tool call request from cached tool info.
-   Preserves descriptions to guide LLM output generation."
+  "Generate a Malli schema for a tool call request from cached tool info.
+   
+   The inputSchema from MCP is JSON Schema, which we embed using our custom
+   :json-schema Malli type. This delegates validation to m3 while keeping
+   a unified Malli-based validation API."
   [tool-cache]
   (let [tool-name (get tool-cache "name")
         input-schema (get tool-cache "inputSchema")]
-    {"type" "object"
-     "properties" {"name" {"const" tool-name}
-                   "arguments" input-schema}
-     "required" ["name" "arguments"]}))
+    [:map {:closed true}
+     ["name" [:= tool-name]]
+     ["arguments" (if input-schema
+                    [:json-schema {:schema input-schema}]
+                    :any)]]))
 
 (defn tool-cache->response-schema
   "Generate response schema for a tool.
-   If tool has outputSchema, constrains structuredContent to match it."
-  [tool-cache]
-  (if-let [output-schema (get tool-cache "outputSchema")]
-    (assoc-in tool-response-schema
-              ["properties" "structuredContent"]
-              output-schema)
-    tool-response-schema))
+   Note: outputSchema from MCP is JSON Schema - ignored for now.
+   TODO: Convert outputSchema to Malli to constrain structuredContent."
+  [_tool-cache]
+  ;; For now, return the base tool-response schema
+  ;; outputSchema would need JSON Schema -> Malli conversion
+  [:ref "tool-response"])
 
 (defn tools-cache->request-schema
-  "Generate a oneOf schema for all tools in cache."
+  "Generate an :or schema for all tools in cache."
   [tools-cache]
-  {"oneOf" (mapv tool-cache->request-schema tools-cache)})
+  (into [:or] (mapv tool-cache->request-schema tools-cache)))
 
 (defn tools-cache->response-schema
-  "Generate an anyOf schema for all tool responses in cache."
-  [tools-cache]
-  {"anyOf" (mapv tool-cache->response-schema tools-cache)})
+  "Generate response schema for all tools.
+   Currently all tools share the same response schema."
+  [_tools-cache]
+  ;; Since all tools return the same response schema for now,
+  ;; no need for :or - just return the base schema
+  [:ref "tool-response"])
 
 (def resource-response-schema
-  "Schema for MCP resource read responses (ReadResourceResult).
-   Contents can be text or blob (base64 binary)."
-  {"type" "object"
-   "properties"
-   {"contents"
-    {"type" "array"
-     "items"
-     {"anyOf"
-      [{"type" "object"
-        "properties" {"uri" {"type" "string"}
-                      "text" {"type" "string"}
-                      "mimeType" {"type" "string"}}
-        "required" ["uri" "text"]}
-       {"type" "object"
-        "properties" {"uri" {"type" "string"}
-                      "blob" {"type" "string"}
-                      "mimeType" {"type" "string"}}
-        "required" ["uri" "blob"]}]}}}
-   "required" ["contents"]})
+  "Malli schema for MCP resource read responses (ReadResourceResult).
+   References mcp-schemas definitions."
+  [:ref "resource-response"])
 
 (defn resources-cache->request-schema
   "Generate request schema constraining uri to known resources."
   [resources-cache]
-  {"type" "object"
-   "properties" {"uri" {"type" "string"
-                        "enum" (mapv #(get % "uri") resources-cache)}}
-   "required" ["uri"]})
+  (let [uris (mapv #(get % "uri") resources-cache)]
+    [:map {:closed true}
+     ["uri" (into [:enum] uris)]]))
 
 (def prompt-response-schema
-  "Schema for MCP prompt get responses (GetPromptResult).
-   Returns messages with role and content blocks."
-  {"type" "object"
-   "properties"
-   {"description" {"type" "string"}
-    "messages"
-    {"type" "array"
-     "items"
-     {"type" "object"
-      "properties"
-      {"role" {"type" "string" "enum" ["user" "assistant"]}
-       "content"
-       {"anyOf"
-        [{"type" "object"
-          "properties" {"type" {"const" "text"}
-                        "text" {"type" "string"}}
-          "required" ["type" "text"]}
-         {"type" "object"
-          "properties" {"type" {"const" "image"}
-                        "data" {"type" "string"}
-                        "mimeType" {"type" "string"}}
-          "required" ["type" "data" "mimeType"]}
-         {"type" "object"
-          "properties" {"type" {"const" "audio"}
-                        "data" {"type" "string"}
-                        "mimeType" {"type" "string"}}
-          "required" ["type" "data" "mimeType"]}
-         {"type" "object"
-          "properties" {"type" {"const" "resource_link"}
-                        "uri" {"type" "string"}}
-          "required" ["type" "uri"]}
-         {"type" "object"
-          "properties" {"type" {"const" "resource"}
-                        "resource" {"type" "object"}}
-          "required" ["type" "resource"]}]}}
-      "required" ["role" "content"]}}}
-   "required" ["messages"]})
+  "Malli schema for MCP prompt get responses (GetPromptResult).
+   References mcp-schemas definitions."
+  [:ref "prompt-response"])
 
 (defn prompt-cache->request-schema
   "Generate request schema for a single prompt from cache entry.
@@ -402,47 +422,44 @@
   [prompt-cache]
   (let [prompt-name (get prompt-cache "name")
         arguments (get prompt-cache "arguments" [])
-        arg-properties (into {}
-                             (map (fn [{n "name" d "description"}]
-                                    [n (cond-> {"type" "string"}
-                                         d (assoc "description" d))]))
-                             arguments)
-        required-args (vec (keep (fn [{n "name" r "required"}]
-                                   (when r n))
-                                 arguments))]
-    {"type" "object"
-     "properties" {"name" {"const" prompt-name}
-                   "arguments" (cond-> {"type" "object"
-                                        "properties" arg-properties}
-                                 (seq required-args) (assoc "required" required-args))}
-     "required" ["name"]}))
+        has-required-args? (some #(get % "required") arguments)
+        ;; Build Malli map entries for arguments
+        arg-entries (mapv (fn [{n "name" r "required"}]
+                            (if r
+                              [n :string]
+                              [n {:optional true} :string]))
+                          arguments)]
+    [:map {:closed true}
+     ["name" [:= prompt-name]]
+     ;; Make arguments optional if there are no required arguments
+     (if has-required-args?
+       ["arguments" (into [:map {:closed true}] arg-entries)]
+       ["arguments" {:optional true} (if (seq arg-entries)
+                                       (into [:map {:closed true}] arg-entries)
+                                       [:map])])]))
 
 (defn prompts-cache->request-schema
-  "Generate a oneOf schema for all prompts in cache."
+  "Generate an :or schema for all prompts in cache."
   [prompts-cache]
-  {"oneOf" (mapv prompt-cache->request-schema prompts-cache)})
+  (into [:or] (mapv prompt-cache->request-schema prompts-cache)))
+
+(def logging-level-strings
+  "The actual logging level string values (RFC-5424 syslog severities)."
+  #{"debug" "info" "notice" "warning" "error" "critical" "alert" "emergency"})
 
 (def logging-levels
-  "MCP logging levels (RFC-5424 syslog severities)."
-  ["debug" "info" "notice" "warning" "error" "critical" "alert" "emergency"])
+  "MCP logging levels as a Malli schema reference."
+  [:ref "logging-level"])
 
 (def logging-set-level-request-schema
-  "Schema for MCP logging/setLevel request.
-   Client tells server what log level to send."
-  {"type" "object"
-   "properties" {"level" {"type" "string"
-                          "enum" logging-levels}}
-   "required" ["level"]})
+  "Malli schema for MCP logging/setLevel request.
+   References mcp-schemas definitions."
+  [:ref "logging-set-level-request"])
 
 (def logging-notification-schema
-  "Schema for MCP notifications/message (log message from server).
-   Data can be any JSON value."
-  {"type" "object"
-   "properties" {"level" {"type" "string"
-                          "enum" logging-levels}
-                 "data" {}
-                 "logger" {"type" "string"}}
-   "required" ["level" "data"]})
+  "Malli schema for MCP notifications/message (log message from server).
+   References mcp-schemas definitions."
+  [:ref "logging-notification"])
 
 ;;-----------------------------------------------------------------------------
 ;; Level 1: Combined MCP request/response schemas
@@ -453,7 +470,7 @@
 
 (defn mcp-cache->request-schema
   "Generate combined request schema from MCP cache.
-   Returns a oneOf schema covering all available operations:
+   Returns an :or schema covering all available operations:
    tools/call, resources/read, prompts/get, logging/setLevel.
    
    Each alternative is a complete JSON-RPC request with:
@@ -464,15 +481,13 @@
    
    Cache shape: {\"tools\" [...] \"resources\" [...] \"prompts\" [...]}"
   [{tools "tools" resources "resources" prompts "prompts"}]
-  (let [;; Helper to wrap method+params in JSON-RPC envelope
+  (let [;; Helper to wrap method+params in JSON-RPC envelope (Malli)
         wrap-jsonrpc (fn [method params-schema]
-                       {"type" "object"
-                        "properties" {"jsonrpc" {"const" "2.0"}
-                                      "id" {"type" "integer"}
-                                      "method" {"const" method}
-                                      "params" params-schema}
-                        "required" ["jsonrpc" "id" "method" "params"]
-                        "additionalProperties" false})
+                       [:map {:closed true}
+                        ["jsonrpc" [:= "2.0"]]
+                        ["id" :int]
+                        ["method" [:= method]]
+                        ["params" params-schema]])
 
         schemas (cond-> []
                   (seq tools)
@@ -487,11 +502,11 @@
                   ;; logging/setLevel is always available (not cache-dependent)
                   true
                   (conj (wrap-jsonrpc "logging/setLevel" logging-set-level-request-schema)))]
-    {"oneOf" schemas}))
+    (into [:or] schemas)))
 
 (defn mcp-cache->response-schema
   "Generate combined response schema from MCP cache.
-   Returns an anyOf schema covering all possible JSON-RPC responses.
+   Returns an :or schema covering all possible JSON-RPC responses.
    
    JSON-RPC responses have: jsonrpc, id, result
    JSON-RPC notifications have: jsonrpc, method, params (no id)
@@ -499,38 +514,32 @@
    Note: Response schemas are mostly static (not per-tool/resource/prompt)
    except for tools with outputSchema which constrain structuredContent."
   [{tools "tools" :as _cache}]
-  (let [;; Helper to wrap result content in JSON-RPC response envelope
+  (let [;; Helper to wrap result content in JSON-RPC response envelope (Malli)
         wrap-response (fn [result-schema]
-                        {"type" "object"
-                         "properties" {"jsonrpc" {"const" "2.0"}
-                                       "id" {"type" "integer"}
-                                       "result" result-schema}
-                         "required" ["jsonrpc" "id" "result"]
-                         "additionalProperties" false})
+                        [:map {:closed true}
+                         ["jsonrpc" [:= "2.0"]]
+                         ["id" :int]
+                         ["result" result-schema]])
 
-        ;; Helper to wrap notification in JSON-RPC notification envelope
+        ;; Helper to wrap notification in JSON-RPC notification envelope (Malli)
         wrap-notification (fn [method params-schema]
-                            {"type" "object"
-                             "properties" {"jsonrpc" {"const" "2.0"}
-                                           "method" {"const" method}
-                                           "params" params-schema}
-                             "required" ["jsonrpc" "method" "params"]
-                             "additionalProperties" false})
+                            [:map {:closed true}
+                             ["jsonrpc" [:= "2.0"]]
+                             ["method" [:= method]]
+                             ["params" params-schema]])
 
-        ;; Tool responses - each tool may have different outputSchema
-        tool-responses (when (seq tools)
-                         (map (fn [tool]
-                                (wrap-response (tool-cache->response-schema tool)))
-                              tools))
+        ;; Tool responses - simplified since all share same schema for now
+        tool-response (when (seq tools)
+                        (wrap-response (tools-cache->response-schema tools)))
 
         schemas (cond-> [;; Static response types
                          (wrap-response resource-response-schema)
                          (wrap-response prompt-response-schema)
                          ;; Logging is a notification, not a response
                          (wrap-notification "notifications/message" logging-notification-schema)]
-                  tool-responses
-                  (into tool-responses))]
-    {"anyOf" schemas}))
+                  tool-response
+                  (conj tool-response))]
+    (into [:or] schemas)))
 
 ;;-----------------------------------------------------------------------------
 ;; FSM Schema Functions
@@ -562,12 +571,9 @@
    
    Used as `:id->schema \"mcp-request-xition\"` in FSM context."
   [context {xid "id" :as _xition}]
-  {"type" "object"
-   "properties"
-   {"id" {"const" xid}
-    "message" (mcp-cache->request-schema (get context "state"))}
-   "additionalProperties" false
-   "required" ["id" "message"]})
+  [:map {:closed true}
+   ["id" [:= xid]]
+   ["message" (mcp-cache->request-schema (get context "state"))]])
 
 (defn mcp-response-xition-schema-fn
   "Schema function for servicing->llm transition.
@@ -575,13 +581,10 @@
    
    Used as `:id->schema \"mcp-response-xition\"` in FSM context."
   [context {xid "id" :as _xition}]
-  {"type" "object"
-   "properties"
-   {"id" {"const" xid}
-    "document" {"type" "string"}
-    "message" (mcp-cache->response-schema (get context "state"))}
-   "additionalProperties" false
-   "required" ["id"]})
+  [:map {:closed true}
+   ["id" [:= xid]]
+   ["document" {:optional true} :string]
+   ["message" {:optional true} (mcp-cache->response-schema (get context "state"))]])
 
 ;; TODO: Additional MCP capabilities not yet implemented
 ;;

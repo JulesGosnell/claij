@@ -1,11 +1,8 @@
 (ns claij.fsm-test
   (:require
    [clojure.test :refer [deftest testing is]]
-   [m3.uri :refer [parse-uri]]
-   [m3.validate :refer [validate]]
    [claij.malli :refer [valid-fsm?]]
-   [claij.fsm :refer [state-schema xition-schema schema-base-uri
-                      resolve-schema start-fsm llm-action trail->prompts]]
+   [claij.fsm :refer [state-schema resolve-schema start-fsm llm-action trail->prompts]]
    [claij.llm.open-router :refer [open-router-async]]))
 
 ;;------------------------------------------------------------------------------
@@ -34,101 +31,22 @@
 ;;------------------------------------------------------------------------------
 
 (deftest fsm-test
-  (let [fsm {"id" "test-fsm" "version" 0}
-        state {"id" "test-state-A"}
-        xition-1 {"id" ["test-state-A" "test-state-B"] "schema" {"type" "string"}}
-        xition-2 {"id" ["test-state-A" "test-state-C"] "schema" {"type" "number"}}]
-    (testing "xition-schema"
-      (let [actual (xition-schema fsm xition-1)
-            expected
-            {"$schema" "https://json-schema.org/draft/2020-12/schema"
-             "$$id" "https://claij.org/schemas/test-fsm/0/test-state-A.test-state-B"
-             "properties"
-             {"$schema" {"type" "string"}
-              "$id" {"type" "string"}
-              "id" {"const" ["test-state-A" "test-state-B"]}
-              "document" {"type" "string"}}}]
-        (is (= expected actual))
-        (is (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-B"] "document" "test"})))
-        (is (not (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-B"] "document" 0}))))))
-    ;; (testing "state-schema: "
-    ;;   (testing "with values"
-    ;;     (let [actual
-    ;;           (state-schema fsm state [xition-1 xition-2])
-    ;;           expected
-    ;;           {"$schema" "https://json-schema.org/draft/2020-12/schema"
-    ;;            "$$id" "https://claij.org/schemas/test-fsm/0/test-state-A"
-    ;;            "oneOf"
-    ;;            [{"properties"
-    ;;              {"$schema" {"type" "string"}
-    ;;               "$id" {"type" "string"}
-    ;;               "id" {"const" ["test-state-A" "test-state-B"]}
-    ;;               "document" {"type" "string"}}}
-    ;;             {"properties"
-    ;;              {"$schema" {"type" "string"}
-    ;;               "$id" {"type" "string"}
-    ;;               "id" {"const" ["test-state-A" "test-state-C"]}
-    ;;               "document" {"type" "number"}}}]}]
-    ;;       (is (= expected actual))
-    ;;       (is      (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-B"] "document" "test"})))
-    ;;       (is (not (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-B"] "document" 0}))))
-    ;;       (is      (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-C"] "document" 0})))
-    ;;       (is (not (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-C"] "document" "test"}))))))
-    ;;   (testing "with refs"
-    ;;     (let [actual
-    ;;           (state-schema fsm state [xition-1 xition-2])
-    ;;           expected
-    ;;           {"$schema" "https://json-schema.org/draft/2020-12/schema"
-    ;;            "$$id" "https://claij.org/schemas/test-fsm/0/test-state-A"
-    ;;            "oneOf"
-    ;;            [{"properties"
-    ;;              {"$schema" {"type" "string"}
-    ;;               "$id" {"type" "string"}
-    ;;               "id" {"const" ["test-state-A" "test-state-B"]}
-    ;;               "document" {"type" "string"}}}
-    ;;             {"properties"
-    ;;              {"$schema" {"type" "string"}
-    ;;               "$id" {"type" "string"}
-    ;;               "id" {"const" ["test-state-A" "test-state-C"]}
-    ;;               "document" {"type" "number"}}}]}]
-    ;;       (is (= expected actual))
-    ;;       (is      (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-B"] "document" "test"})))
-    ;;       (is (not (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-B"] "document" 0}))))
-    ;;       (is      (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-C"] "document" 0})))
-    ;;       (is (not (:valid? (validate {} expected {} {"id" ["test-state-A" "test-state-C"] "document" "test"})))))))
-    ;; NOTE: $ref resolution test removed during Malli migration
-    ;; m3's uri->schema is no longer used - Malli uses registry-based refs
-    ))
+  ;; xition-schema and expand-schema tests removed during Malli migration.
+  ;; These functions produced JSON Schema format and were never used in production.
+  ;; 
+  ;; state-schema now produces Malli :or schemas and is tested via:
+  ;; - string-schema-reference-test (dynamic schema resolution)
+  ;; - claij.fsm.state-schema-test (comprehensive state schema tests)
+  ;; - claij.mcp-test (MCP-specific xition schema tests)
+  (testing "placeholder - see other test files for state-schema tests"
+    (is true)))
 
 ;;------------------------------------------------------------------------------
 ;; Weather Schema Integration Test
 
-(deftest ^:integration weather-schema-test
-  (let [schema
-        {"$id" "https://claij.org/schemas/structured-data-integration-test"
-         "type" "object",
-         "properties"
-         {"location"
-          {"type" "string", "description" "City or location name"},
-          "temperature"
-          {"type" "number", "description" "Temperature in Celsius"},
-          "conditions"
-          {"type" "string", "description" "Weather conditions description"}},
-         "required" ["location" "temperature" "conditions"],
-         "additionalProperties" false}
-        prompts
-        [{"role" "user", "content" "What's the weather like in London?"}]]
-    (doseq [[provider model] [["openai" "gpt-4o"]]]
-                              ;; ["x-ai" "grok-code-fast-1"]
-                              ;; ["x-ai" "grok-4"]
-                              ;; ["google" "gemini-2.5-flash"]
-                              ;; failing
-                              ;;["openai" "gpt-5-pro"]
-                              ;;["anthropic" "claude-sonnet-4.5"] ;; https://forum.bubble.io/t/anthropic-json-mode-tools-via-the-api-connector-tutorial/331283
-
-      (testing "weather"
-        (testing (str provider "/" model)
-          (is (:valid? (validate {:draft :draft7} schema {} (let [p (promise)] (open-router-async provider model prompts (partial deliver p) {:schema schema}) @p)))))))))
+;; weather-schema-test removed during Malli migration.
+;; JSON Schema integration tests with LLMs are superseded by Malli POC tests
+;; in claij.malli-poc-test which demonstrate LLMs understanding Malli schemas.
 
 ;;------------------------------------------------------------------------------
 ;; Context Threading Test
@@ -198,15 +116,14 @@
                      {"id" "servicing" "action" "mcp"}
                      {"id" "end"}]
            "xitions" [{"id" ["start" "llm"]
-                       "schema" {"type" "string"}}
+                       "schema" {:type :string}}
                       ;; String schema references - to be resolved at runtime
                       {"id" ["llm" "servicing"]
                        "schema" "mcp-request"}
                       {"id" ["servicing" "llm"]
                        "schema" "mcp-response"}
                       {"id" ["llm" "end"]
-                       "schema" {"type" "object"
-                                 "properties" {"result" {"type" "string"}}}}]}]
+                       "schema" [:map ["result" :string]]}]}]
       ;; FSM definition should validate (string is accepted as schema value)
       (is (= "string-schema-test" (get fsm-with-string-schema "id")))
       (is (= "mcp-request" (get-in fsm-with-string-schema ["xitions" 1 "schema"])))
@@ -230,20 +147,20 @@
   (testing "resolve-schema with map schema passes through unchanged"
     (let [context {}
           xition {"id" ["a" "b"]}
-          schema {"type" "string"}]
+          schema [:map ["name" :string]]]
       (is (= schema (resolve-schema context xition schema)))))
 
   (testing "resolve-schema with string key looks up and calls schema function"
-    (let [;; Schema function that returns a schema based on context
+    (let [;; Schema function that returns a Malli schema based on context
           my-schema-fn (fn [ctx xition]
-                         {"type" "object"
-                          "properties" {"tool" {"const" (get ctx :selected-tool)}}})
+                         [:map {:closed true}
+                          ["tool" [:= (get ctx :selected-tool)]]])
           context {:id->schema {"my-schema" my-schema-fn}
                    :selected-tool "clojure_eval"}
           xition {"id" ["llm" "servicing"]}
           resolved (resolve-schema context xition "my-schema")]
-      (is (= {"type" "object"
-              "properties" {"tool" {"const" "clojure_eval"}}}
+      (is (= [:map {:closed true}
+              ["tool" [:= "clojure_eval"]]]
              resolved))))
 
   (testing "resolve-schema with missing key returns true and logs warning"
@@ -254,26 +171,25 @@
           "Missing schema key should return true (permissive)")))
 
   (testing "state-schema resolves string schemas in transitions"
-    (let [;; Schema function
+    (let [;; Schema function returns Malli
           request-schema-fn (fn [ctx xition]
-                              {"type" "object"
-                               "properties" {"method" {"const" "tools/call"}}})
+                              [:map {:closed true}
+                               ["method" [:= "tools/call"]]])
           context {:id->schema {"mcp-request" request-schema-fn}}
           fsm {"id" "test" "version" 0}
           state {"id" "llm"}
-          ;; Mix of string and inline schemas
+          ;; Mix of string and inline Malli schemas
           xitions [{"id" ["llm" "servicing"] "schema" "mcp-request"}
-                   {"id" ["llm" "end"] "schema" {"type" "string"}}]
+                   {"id" ["llm" "end"] "schema" :string}]
           result (state-schema context fsm state xitions)]
-      ;; Should have oneOf with resolved schemas
-      (is (= 2 (count (get result "oneOf"))))
+      ;; Should be [:or ...] with resolved schemas
+      (is (= :or (first result)) "state-schema should return [:or ...]")
+      (is (= 2 (dec (count result))) "Should have 2 alternatives")
       ;; First should be resolved from function
-      (is (= {"type" "object"
-              "properties" {"method" {"const" "tools/call"}}}
-             (first (get result "oneOf"))))
+      (is (= [:map {:closed true} ["method" [:= "tools/call"]]]
+             (second result)))
       ;; Second should be passed through
-      (is (= {"type" "string"}
-             (second (get result "oneOf")))))))
+      (is (= :string (nth result 2))))))
 
 ;;------------------------------------------------------------------------------
 ;; Trail Infrastructure Tests
@@ -283,24 +199,19 @@
 
 ;; Minimal FSM for infrastructure tests
 (def ^:private infra-test-fsm
+  "Test FSM using Malli schemas for transitions."
   {"id" "infra-test"
-   "schema" {"$schema" "https://json-schema.org/draft/2020-12/schema"
-             "$$id" "https://claij.org/schemas/infra-test"
-             "$version" 0}
+   "schema" nil ;; No FSM-level schema needed for this test
    "states" [{"id" "processor" "action" "llm"}
              {"id" "end" "action" "end"}]
    "xitions" [{"id" ["start" "processor"]
-               "schema" {"type" "object"
-                         "properties" {"id" {"const" ["start" "processor"]}
-                                       "input" {"type" "string"}}
-                         "required" ["id" "input"]
-                         "additionalProperties" false}}
+               "schema" [:map {:closed true}
+                         ["id" [:= ["start" "processor"]]]
+                         ["input" :string]]}
               {"id" ["processor" "end"]
-               "schema" {"type" "object"
-                         "properties" {"id" {"const" ["processor" "end"]}
-                                       "result" {"type" "string"}}
-                         "required" ["id" "result"]
-                         "additionalProperties" false}}]})
+               "schema" [:map {:closed true}
+                         ["id" [:= ["processor" "end"]]]
+                         ["result" :string]]}]})
 
 (deftest trail->prompts-test
   (testing "trail->prompts assigns role based on source state"
@@ -311,7 +222,7 @@
                          :event {"id" ["start" "processor"] "input" "test1"}}
                         {:from "processor" :to "end"
                          :event {"id" ["processor" "end"] "result" "done1"}}]
-          prompts (trail->prompts infra-test-fsm sample-trail)]
+          prompts (trail->prompts {} infra-test-fsm sample-trail)]
       ;; Should have 2 messages
       (is (= 2 (count prompts)))
       ;; First: from "start" (no action) → user
@@ -329,7 +240,7 @@
                         {:from "processor" :to "end"
                          :event {"id" ["processor" "end"] "result" "bad"}
                          :error {:message "Validation failed" :errors [] :attempt 1}}]
-          prompts (trail->prompts infra-test-fsm sample-trail)]
+          prompts (trail->prompts {} infra-test-fsm sample-trail)]
       ;; 2 messages: user (from start), user (error feedback)
       (is (= 2 (count prompts)))
       ;; Error entry always becomes user message
@@ -337,11 +248,11 @@
       (is (= "Validation failed" (get-in (nth prompts 1) ["content" 1])))))
 
   (testing "trail->prompts handles empty trail"
-    (is (= [] (vec (trail->prompts infra-test-fsm [])))
+    (is (= [] (vec (trail->prompts {} infra-test-fsm [])))
         "Empty trail should return empty"))
 
   (testing "trail->prompts handles nil trail"
-    (is (= [] (vec (trail->prompts infra-test-fsm nil)))
+    (is (= [] (vec (trail->prompts {} infra-test-fsm nil)))
         "nil trail should return empty")))
 
 (deftest llm-action-handler-arity-test

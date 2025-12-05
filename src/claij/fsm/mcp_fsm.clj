@@ -20,7 +20,8 @@
                       invalidate-mcp-cache-item
                       refresh-mcp-cache-item
                       mcp-request-xition-schema-fn
-                      mcp-response-xition-schema-fn]]))
+                      mcp-response-xition-schema-fn
+                      mcp-schemas]]))
 
 ;;==============================================================================
 ;; Helper Functions
@@ -71,6 +72,7 @@
                                :mcp/bridge {:input ic :output oc :stop stop}
                                :mcp/request-id 0
                                :mcp/document d
+                               :malli/registry mcp-schemas
                                :id->schema {"mcp-request-xition" mcp-request-xition-schema-fn
                                             "mcp-response-xition" mcp-response-xition-schema-fn})
         init-request (assoc initialise-request "id" 0)]
@@ -252,84 +254,63 @@
      "label" "document"
      "omit" true
      "schema"
-     {"type" "object"
-      "properties"
-      {"id" {"const" ["start" "starting"]}
-       "document" {"type" "string"}}
-      "additionalProperties" false
-      "required" ["id" "document"]}}
+     [:map {:closed true}
+      ["id" [:= ["start" "starting"]]]
+      ["document" :string]]}
 
     {"id" ["starting" "shedding"]
      "description" "Shed unwanted list-changed messages."
      "label" "initialise\nrequest\n(timeout)"
      "omit" true
      "schema"
-     {"type" "object"
-      "properties"
-      {"id" {"const" ["starting" "shedding"]}
-       "document" {"type" "string"}
-       "message" true}
-      "additionalProperties" false
-      "required" ["id" "document" "message"]}}
+     [:map {:closed true}
+      ["id" [:= ["starting" "shedding"]]]
+      ["document" :string]
+      ["message" :any]]}
 
     {"id" ["starting" "initing"]
      "description" "Direct path when initialize response received"
      "label" "initialise\nresponse"
      "omit" true
      "schema"
-     {"type" "object"
-      "properties"
-      {"id" {"const" ["starting" "initing"]}
-       "document" {"type" "string"}
-       "message" true}
-      "additionalProperties" false
-      "required" ["id" "document" "message"]}}
+     [:map {:closed true}
+      ["id" [:= ["starting" "initing"]]]
+      ["document" :string]
+      ["message" :any]]}
 
     {"id" ["shedding" "initing"]
      "label" "initialise\nresponse"
      "omit" true
      "schema"
-     {"type" "object"
-      "properties"
-      {"id" {"const" ["shedding" "initing"]}
-       "document" {"type" "string"}
-       "message" true}
-      "additionalProperties" false
-      "required" ["id" "document" "message"]}}
+     [:map {:closed true}
+      ["id" [:= ["shedding" "initing"]]]
+      ["document" :string]
+      ["message" :any]]}
 
     {"id" ["initing" "servicing"]
      "label" "initialise\nnotification"
      "omit" true
      "schema"
-     {"type" "object"
-      "properties"
-      {"id" {"const" ["initing" "servicing"]}
-       "document" {"type" "string"}
-       "message" true}
-      "additionalProperties" false
-      "required" ["id" "document" "message"]}}
+     [:map {:closed true}
+      ["id" [:= ["initing" "servicing"]]]
+      ["document" :string]
+      ["message" :any]]}
 
     {"id" ["servicing" "caching"]
      "label" "list_changed,\nlist_response,\nread_response"
      "omit" true
      "schema"
-     {"type" "object"
-      "properties"
-      {"id" {"const" ["servicing" "caching"]}
-       "message" true}
-      "additionalProperties" false
-      "required" ["id" "message"]}}
+     [:map {:closed true}
+      ["id" [:= ["servicing" "caching"]]]
+      ["message" :any]]}
 
     {"id" ["caching" "servicing"]
      "label" "list_request,\nread_request"
      "omit" true
      "schema"
-     {"type" "object"
-      "properties"
-      {"id" {"const" ["caching" "servicing"]}
-       "message" true}
-      "additionalProperties" false
-      "required" ["id" "message"]}}
+     [:map {:closed true}
+      ["id" [:= ["caching" "servicing"]]]
+      ["message" :any]]}
 
     {"id" ["servicing" "llm"]
      "label" "tool\nresponse"
@@ -340,12 +321,9 @@
      "label" "cache\nready"
      "description" "Cache is ready, LLM can start work"
      "schema"
-     {"type" "object"
-      "properties"
-      {"id" {"const" ["caching" "llm"]}
-       "document" {"type" "string"}}
-      "additionalProperties" false
-      "required" ["id" "document"]}}
+     [:map {:closed true}
+      ["id" [:= ["caching" "llm"]]]
+      ["document" :string]]}
 
     {"id" ["llm" "servicing"]
      "label" "tool\ncall"
@@ -356,21 +334,11 @@
      "label" "output"
      "description" "LLM completes work - result must use MCP content format"
      "schema"
-     {"type" "object"
-      "properties"
-      {"id" {"const" ["llm" "end"]}
-       "result" {"type" "object"
-                 "properties"
-                 {"content" {"type" "array"
-                             "items" {"type" "object"
-                                      "properties"
-                                      {"type" {"type" "string"
-                                               "enum" ["text" "image" "resource"]}
-                                       "text" {"type" "string"}}
-                                      "required" ["type" "text"]
-                                      "additionalProperties" false}}
-                  "isError" {"type" "boolean"}}
-                 "required" ["content"]
-                 "additionalProperties" false}}
-      "additionalProperties" false
-      "required" ["id" "result"]}}]})
+     [:map {:closed true}
+      ["id" [:= ["llm" "end"]]]
+      ["result" [:map
+                 ["content" [:vector
+                             [:map {:closed true}
+                              ["type" [:enum "text" "image" "resource"]]
+                              ["text" :string]]]]
+                 ["isError" {:optional true} :boolean]]]]}]})
