@@ -13,56 +13,69 @@
    Plain map for emit-for-llm analysis and inlining.
    Use string keys for refs and map entries for LLM JSON compatibility."
   {;; Code structure with language info
-   "code" [:map {:closed true}
-           ["language" [:map {:closed true}
-                        ["name" :string]
-                        ["version" {:optional true} :string]]]
-           ["text" :string]]
+   "code" [:map {:closed true
+                 :description "Source code with programming language metadata"}
+           ["language" {:description "Programming language information"}
+            [:map {:closed true}
+             ["name" {:description "Language name (e.g. 'clojure', 'python', 'javascript')"} :string]
+             ["version" {:optional true :description "Language version (e.g. '1.11', '3.12')"} :string]]]
+           ["text" {:description "The actual source code"} :string]]
 
    ;; General notes field
-   "notes" :string
+   "notes" [:string {:description "General notes or observations about the code"}]
 
    ;; List of specific issues
-   "comments" [:vector :string]
+   "comments" [:vector {:description "List of specific issues or suggestions"}
+               [:string {:description "A specific comment about an issue found"}]]
 
    ;; List of concerns to review
-   "concerns" [:vector :string]
+   "concerns" [:vector {:description "List of code quality concerns to focus on"}
+               [:string {:description "A specific concern to evaluate"}]]
 
    ;; LLM specification
-   "llm" [:map {:closed true}
-          ["provider" [:enum "anthropic" "google" "openai" "x-ai"]]
-          ["model" [:enum "claude-sonnet-4" "gemini-2.5-flash" "gpt-4o" "grok-3-beta"]]]
+   "llm" [:map {:closed true
+                :description "LLM provider and model specification"}
+          ["provider" {:description "The LLM provider"}
+           [:enum "anthropic" "google" "openai" "x-ai"]]
+          ["model" {:description "The specific model to use"}
+           [:enum "claude-sonnet-4" "gemini-2.5-flash" "gpt-4o" "grok-3-beta"]]]
 
    ;; List of available LLMs (min 1)
-   "llms" [:vector {:min 1} [:ref "llm"]]
+   "llms" [:vector {:min 1 :description "List of available LLMs to choose from"}
+           [:ref "llm"]]
 
    ;; Entry event: start → mc
-   "entry" [:map {:closed true}
+   "entry" [:map {:closed true
+                  :description "Initial request to start a code review"}
             ["id" [:= ["start" "mc"]]]
-            ["document" :string]
-            ["llms" [:ref "llms"]]
-            ["concerns" [:ref "concerns"]]]
+            ["document" {:description "The code or document to review"} :string]
+            ["llms" {:description "Available LLMs for the review"} [:ref "llms"]]
+            ["concerns" {:description "Quality concerns to evaluate"} [:ref "concerns"]]]
 
    ;; Request event: mc → reviewer
-   "request" [:map {:closed true}
+   "request" [:map {:closed true
+                    :description "MC's request to a reviewer for code analysis"}
               ["id" [:= ["mc" "reviewer"]]]
-              ["code" [:ref "code"]]
-              ["notes" [:ref "notes"]]
-              ["concerns" [:vector {:max 3} :string]]
-              ["llm" [:ref "llm"]]]
+              ["code" {:description "The code to review"} [:ref "code"]]
+              ["notes" {:description "Context or instructions for the reviewer"} [:ref "notes"]]
+              ["concerns" {:description "Specific concerns for this review (max 3)"}
+               [:vector {:max 3} :string]]
+              ["llm" {:description "Which LLM should perform this review"} [:ref "llm"]]]
 
    ;; Response event: reviewer → mc
-   "response" [:map {:closed true}
+   "response" [:map {:closed true
+                     :description "Reviewer's analysis and feedback"}
                ["id" [:= ["reviewer" "mc"]]]
-               ["code" [:ref "code"]]
-               ["notes" {:optional true} [:ref "notes"]]
-               ["comments" [:ref "comments"]]]
+               ["code" {:description "The code (possibly modified with improvements)"} [:ref "code"]]
+               ["notes" {:optional true :description "General observations about the review"} [:ref "notes"]]
+               ["comments" {:description "Specific issues or suggestions found"} [:ref "comments"]]]
 
    ;; Summary event: mc → end
-   "summary" [:map {:closed true}
+   "summary" [:map {:closed true
+                    :description "Final summary after all reviews complete"}
               ["id" [:= ["mc" "end"]]]
-              ["code" [:ref "code"]]
-              ["notes" [:ref "notes"]]]})
+              ["code" {:description "The final reviewed code"} [:ref "code"]]
+              ["notes" {:description "Summary of the review process and findings"} [:ref "notes"]]]})
 
 (def code-review-registry
   "Malli registry for validation. Composes base-registry with code-review-schemas."

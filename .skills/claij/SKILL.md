@@ -57,6 +57,35 @@ Or check event content when same transition serves multiple purposes.
 Actions receive context, return updated context to handler
 Context accumulates state (caches, counters, etc)
 
+## Schema Refs for Token Efficiency
+
+**Problem:** FSM schema appears once, xition schemas appear many times (each traversal).
+
+**Solution:** Define types in FSM-level `"schemas"`, reference via `[:ref :key]` in xitions.
+
+```clojure
+;; FSM definition
+{"id" "code-review"
+ "schemas" {:review/comment [:map [:line :int] [:text :string]]
+            :review/approval [:map [:approved :boolean]
+                              [:comments [:vector [:ref :review/comment]]]]}
+ "xitions" [{"id" ["reviewing" "done"]
+             "schema" [:ref :review/approval]}]}  ;; Small ref, not full schema
+
+;; At runtime, build composite registry
+(mr/composite-registry (m/default-schemas) (get fsm "schemas"))
+
+;; Validate with registry
+(m/validate xition-schema event {:registry runtime-registry})
+```
+
+**Xition schema types:**
+1. **Inline Malli** - Full schema (avoid for large schemas)
+2. **Ref** - `[:ref :type-key]` resolved against FSM registry (preferred)
+3. **String** - Lookup in `context[:id->schema]` for dynamic generation
+
+**Token savings:** Refs ~22 chars vs inline ~115+ chars (5x smaller per traversal).
+
 ## MCP Schema Generation (Issue 6 - In Progress)
 
 **Layered schema architecture:**

@@ -84,134 +84,6 @@
 (defn notification? [{m "method"}]
   (and m (starts-with? m "notifications/")))
 
-;; these should be initialised LAZILY !
-
-;; (def mcp-services
-;;   (atom
-;;    (map-values
-;;     (fn [_ config]
-;;       (let [n 100
-;;             ic (chan n (map write-str))
-;;             oc (chan n (comp (map read-str) (filter (complement notification?))))
-;;             stop (start-mcp-bridge config ic oc)
-;;             _ (>!! ic initialise-request)
-;;             r (<!! oc)]
-;;         [r ic oc stop]))
-;;     (mcp-config "mcpServers"))))
-
-;; ;; how do we hook this up ?
-
-;; (defn dispatcher [ic oc]
-;;   ;; connect fsm -> mcp
-;;   ;; (go-loop []
-;;   ;;   (when-some [{id "id" r "request"} (<! ic)]
-;;   ;;     (let [[i] (@mcp-services id)]
-;;   ;;       (>! i (write-str r))))
-;;   ;;   (recur))
-;;   ;; connect mcp -> fsm
-;;   (go-loop []
-;;     (let [id->s @mcp-services
-;;           oc->id (reduce-kv (fn [acc id [_ic oc _stop]] (assoc acc oc id)) {} id->s) ;wasteful...
-;;           [event c] (alts! (map second (vals id->s)))]
-;;       (>! oc {"id" (oc->id c) "response" (read-str event)}))
-;;     (recur)))
-
-;; ;; TODO: add descriptions
-
-;; (def-fsm mcp-fsm
-;;   {"schema" mcp-schema
-;;    "id" "mcp"
-
-;;    "prompts" ["Coordinate MCP interactions."]
-
-;;    "states"
-;;    [;; entry point
-;;     {"id" "start"}
-
-;;     ;; calls llm with text from start and list of extant mcp services asking fr an mcp request
-;;     {"id" "info"
-;;      "prompts" ["This is a map of [id : initialisation-response] of the available mcp services:"
-;;                 (write-str (map-values (fn [_k [ir]] ir) @mcp-services))
-;;                 "If you would like to make an MCP request please build one conformnt to your output schema and return it"]
-;;      "action" "llm"}
-
-;;     ;; receives an mcp request, dispatches onto service, returns an mcp response
-;;     {"id" "mcp"
-;;      "action" "mcp"
-;;      "prompts" ["Process an MCP non-Initialize request."]}
-
-;;     ;; exit point
-;;     {"id" "end"}]
-
-;;    "xitions"
-;;    [{"id" ["start" "info"]
-;;      "schema" {"type" "string"}}
-
-;;     {"id" ["info" "mcp"]
-;;      "schema" {"properties"
-;;                {"id"
-;;                 {"description" "The id of the mcp sevice that you want to talk to."
-;;                  "type" "string"}
-;;                 "request"
-;;                 {"description" "The MCP request that you want to send"
-;;                  "type"
-;;                  {"$ref" "#/definitions/JSONRPCRequest"}}}}}
-
-;;     {"id" ["mcp" "info"]
-;;      "schema" {"properties"
-;;                {"id"
-;;                 {"description" "The id of the mcp sevice that you talked to."
-;;                  "type" "string"}
-;;                 "response"
-;;                 {"description" "The MCP response that you received"
-;;                  "type"
-;;                  {"$ref" "#/definitions/JSONRPCResponse"}}}}}
-
-;;     {"id" ["info" "end"]
-;;      "schema" true}
-
-;;     ;; TODO: looks like we might need to plumb start and end types of sub-fsms into super-fsms and not assume that they are just (type string}
-;;     ]})
-
-;; ;; TODO: instead of piping everything backwards and forwards with
-;; ;; go-loops, we should be able to plumb all this together with async
-;; ;; constructs or even just plug channels directly in instead of doing
-;; ;; a->b->c
-
-;; (defn mcp-action [context fsm ix state [[_is {id "id" r "request"} _os]] handler]
-;;   (let [[_ir ic _oc _stop] (mcp-services id)]
-;;     (>!! ic r)))
-
-;; ;; TODO:
-;; ;; connect dispatcher
-;; ;; logging would be helpful
-;; ;; complete integration of llm-action
-;; ;; get this working !
-
-;; ;; long-term
-;; ;; mcp-services may be restarted - the fsm needs to refresh them each time we go into init state - prompts may need to understand dereffables
-;; ;; shrink (shake-out) schema ? - not sure we can do that now all requests go through same state...
-;; ;; keep an eye on billing to see if mcp too expensive
-
-;; ;; tidy up
-;; ;; test
-;; ;; worry about parallel invocations
-;; ;; shrink schema use with DSL
-
-;; (def mcp-actions
-;;   {
-;;    ;; "llm" llm-action ;; TODO - needs parameters in state - check this
-;;    "mcp" mcp-action})
-
-(comment
-
-  (start-fsm
-   {:id->action mcp-actions})
-
-;; double check that the fsm schema is only included once in our state - on entry to the fsm
-
-  ;; hmmm... how will LLM know which schema we are $ref-ing if we keep switcing schemas - we may have to qualify refs... (i.e. use external ones)
-  )
 ;;------------------------------------------------------------------------------
 
 (comment
@@ -269,33 +141,34 @@
    Plain map for emit-for-llm analysis and inlining.
    Use string keys for refs and map entries for LLM JSON compatibility."
   {;; Logging level enum (RFC-5424 syslog severities)
-   "logging-level" [:enum "debug" "info" "notice" "warning" "error" "critical" "alert" "emergency"]
+   "logging-level" [:enum {:description "Log severity level (RFC-5424)"}
+                    "debug" "info" "notice" "warning" "error" "critical" "alert" "emergency"]
 
    ;; Content types for tool responses and prompts
-   "text-content" [:map {:closed true}
+   "text-content" [:map {:closed true :description "Plain text content"}
                    ["type" [:= "text"]]
-                   ["text" :string]]
+                   ["text" {:description "The text content"} :string]]
 
-   "image-content" [:map {:closed true}
+   "image-content" [:map {:closed true :description "Base64-encoded image"}
                     ["type" [:= "image"]]
-                    ["data" :string]
-                    ["mimeType" :string]]
+                    ["data" {:description "Base64-encoded image data"} :string]
+                    ["mimeType" {:description "Image MIME type (e.g. 'image/png')"} :string]]
 
-   "audio-content" [:map {:closed true}
+   "audio-content" [:map {:closed true :description "Base64-encoded audio"}
                     ["type" [:= "audio"]]
-                    ["data" :string]
-                    ["mimeType" :string]]
+                    ["data" {:description "Base64-encoded audio data"} :string]
+                    ["mimeType" {:description "Audio MIME type"} :string]]
 
-   "resource-link-content" [:map {:closed true}
+   "resource-link-content" [:map {:closed true :description "Link to an MCP resource"}
                             ["type" [:= "resource_link"]]
-                            ["uri" :string]]
+                            ["uri" {:description "Resource URI"} :string]]
 
-   "embedded-resource-content" [:map {:closed true}
+   "embedded-resource-content" [:map {:closed true :description "Embedded resource object"}
                                 ["type" [:= "resource"]]
-                                ["resource" :map]] ;; opaque resource object
+                                ["resource" {:description "The embedded resource"} :map]]
 
    ;; Union of all content types
-   "content-item" [:or
+   "content-item" [:or {:description "Any content type"}
                    [:ref "text-content"]
                    [:ref "image-content"]
                    [:ref "audio-content"]
@@ -303,48 +176,48 @@
                    [:ref "embedded-resource-content"]]
 
    ;; Tool response (CallToolResult)
-   "tool-response" [:map
-                    ["content" [:vector [:ref "content-item"]]]
-                    ["isError" {:optional true} :boolean]
-                    ["structuredContent" {:optional true} :map]]
+   "tool-response" [:map {:description "Result from calling an MCP tool"}
+                    ["content" {:description "Response content items"} [:vector [:ref "content-item"]]]
+                    ["isError" {:optional true :description "True if tool call failed"} :boolean]
+                    ["structuredContent" {:optional true :description "Structured data response"} :map]]
 
    ;; Resource contents (text or blob variants)
-   "text-resource" [:map {:closed true}
-                    ["uri" :string]
-                    ["text" :string]
-                    ["mimeType" {:optional true} :string]]
+   "text-resource" [:map {:closed true :description "Text-based resource content"}
+                    ["uri" {:description "Resource URI"} :string]
+                    ["text" {:description "Text content"} :string]
+                    ["mimeType" {:optional true :description "Content MIME type"} :string]]
 
-   "blob-resource" [:map {:closed true}
-                    ["uri" :string]
-                    ["blob" :string]
-                    ["mimeType" {:optional true} :string]]
+   "blob-resource" [:map {:closed true :description "Binary resource content"}
+                    ["uri" {:description "Resource URI"} :string]
+                    ["blob" {:description "Base64-encoded binary data"} :string]
+                    ["mimeType" {:optional true :description "Content MIME type"} :string]]
 
-   "resource-content" [:or
+   "resource-content" [:or {:description "Resource content (text or binary)"}
                        [:ref "text-resource"]
                        [:ref "blob-resource"]]
 
    ;; Resource response (ReadResourceResult)
-   "resource-response" [:map {:closed true}
-                        ["contents" [:vector [:ref "resource-content"]]]]
+   "resource-response" [:map {:closed true :description "Response from reading a resource"}
+                        ["contents" {:description "Resource contents"} [:vector [:ref "resource-content"]]]]
 
    ;; Prompt message
-   "prompt-message" [:map {:closed true}
-                     ["role" [:enum "user" "assistant"]]
-                     ["content" [:ref "content-item"]]]
+   "prompt-message" [:map {:closed true :description "A message in a prompt conversation"}
+                     ["role" {:description "Message author role"} [:enum "user" "assistant"]]
+                     ["content" {:description "Message content"} [:ref "content-item"]]]
 
    ;; Prompt response (GetPromptResult)
-   "prompt-response" [:map
-                      ["description" {:optional true} :string]
-                      ["messages" [:vector [:ref "prompt-message"]]]]
+   "prompt-response" [:map {:description "Response from getting a prompt"}
+                      ["description" {:optional true :description "Prompt description"} :string]
+                      ["messages" {:description "Prompt messages"} [:vector [:ref "prompt-message"]]]]
 
    ;; Logging schemas
-   "logging-set-level-request" [:map {:closed true}
-                                ["level" [:ref "logging-level"]]]
+   "logging-set-level-request" [:map {:closed true :description "Request to set logging level"}
+                                ["level" {:description "New log level"} [:ref "logging-level"]]]
 
-   "logging-notification" [:map {:closed true}
-                           ["level" [:ref "logging-level"]]
-                           ["data" :any]
-                           ["logger" {:optional true} :string]]})
+   "logging-notification" [:map {:closed true :description "Log message notification"}
+                           ["level" {:description "Log level"} [:ref "logging-level"]]
+                           ["data" {:description "Log data"} :any]
+                           ["logger" {:optional true :description "Logger name"} :string]]})
 
 (def mcp-registry
   "Malli registry for MCP schema validation.
