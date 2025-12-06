@@ -22,6 +22,8 @@ CLAIJ is built on this foundation. The system is data. The data describes itself
 
 📖 **[Read the full philosophical foundation →](doc/SELF-DESCRIPTIVE-SYSTEMS.md)**
 
+📐 **[Read the technical architecture →](doc/ARCHITECTURE.md)**
+
 ---
 
 ## The Three Pillars
@@ -123,9 +125,9 @@ At any point in execution, an LLM can enter the FSM-FSM to improve the *current*
 
 This is the vision: **an elastic collection of LLMs coordinating on a self-improving process.**
 
-### Malli Migration
+### Malli Migration ✅
 
-Moving from JSON Schema to Malli for native Clojure schemas—more token-efficient, better error messages, and enabling the reflexive m1→m2→m3→m3 hierarchy that grounds the entire architecture.
+Completed migration from JSON Schema to Malli for native Clojure schemas—more token-efficient, better error messages, and enabling the reflexive m1→m2→m3→m3 hierarchy that grounds the entire architecture.
 
 ---
 
