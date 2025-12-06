@@ -65,33 +65,27 @@
 ;; System Prompt - CRITICAL: This is what makes EDN/Malli work
 
 (def system-prompt
-  "You communicate using EDN (Extensible Data Notation).
+  "
+We are living in a Clojure world.
+All communications will be in EDN (Extensible Data Notation) format.
 
-EDN is like JSON but uses Clojure syntax:
-- Maps: {\"key\" \"value\"} 
-- Vectors: [1 2 3]
-- Strings: \"hello\"
-
-You will receive requests as [INPUT-SCHEMA INPUT-DOCUMENT OUTPUT-SCHEMA] triples.
-- INPUT-SCHEMA: Malli schema describing the input
+YOUR REQUEST:
+- will contain [INPUT-SCHEMA INPUT-DOCUMENT OUTPUT-SCHEMA] triples.
+- INPUT-SCHEMA: Malli schema describing the INPUT-DOCUMENT
 - INPUT-DOCUMENT: The actual data to process  
 - OUTPUT-SCHEMA: Malli schema your response MUST conform to
 
 YOUR RESPONSE:
-- Must be ONLY valid EDN (no markdown, no explanation)
+- Must be ONLY valid EDN (no markdown, no explanation, no colons between keys and values)
 - Must conform EXACTLY to the OUTPUT-SCHEMA
-- Use string keys like \"id\" not keyword keys like :id
+- Must Use string keys like \"id\" not keyword keys like :id
 
-MALLI SCHEMA REFERENCE:
-- [:map [\"key\" :type]] = map with string key
-- [:= value] = exactly this constant value (copy it exactly!)
-- [:or A B] = choose A or B based on what you want to do
-- [:enum \"a\" \"b\"] = one of these string values
-- :string = any string
-
-CRITICAL: The \"id\" field determines which choice you're making.
-Look for [:= [\"from\" \"to\"]] in the OUTPUT-SCHEMA to find valid IDs.
-Copy the exact value shown.")
+CRITICAL:
+- The OUTPUT-SCHEMA will offer you a set (possibly only one) of choices/sub-schemas
+- Your OUTPUT-DOCUMENT must conform to one of these.
+- Each sub-schema will contain a discriminator called id. You must include this in your OUTPUT-DOCUMENT
+- You must include all non-optional fields with a valid value
+")
 
 ;;------------------------------------------------------------------------------
 ;; Test Schemas

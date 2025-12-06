@@ -400,10 +400,11 @@
    Note: For token efficiency with multi-use schemas, consider using
    emit-for-llm instead, which keeps multi-use schemas in a registry."
   [form registry]
-  (let [;; Handle both map registries and Malli composite registries
-        lookup (if (fn? registry)
-                 registry
-                 (fn [k] (get registry k)))]
+  (let [;; Handle maps, functions, and Malli composite registries
+        lookup (cond
+                 (fn? registry) registry
+                 (map? registry) (fn [k] (get registry k))
+                 :else (fn [k] (mr/-schema registry k)))]
     (postwalk
      (fn [x]
        (if (and (vector? x)
