@@ -2,7 +2,6 @@
   (:require
    [clojure.string :refer [join]]
    [clojure.tools.logging :as log]
-   [clojure.data.json :refer [write-str]]
    [clojure.core.async :refer [chan go-loop alts! >!! close!]]
    [malli.core :as m]
    [malli.error :as me]
@@ -477,7 +476,7 @@
    Optionally accepts provider/model for LLM-specific prompts."
   ([fsm ix state trail]
    (make-prompts fsm ix state trail nil nil))
-  ([{fsm-schema "schema" fsm-prompts "prompts" :as _fsm}
+  ([{fsm-schemas "schemas" fsm-prompts "prompts" :as _fsm}
     {ix-prompts "prompts" :as _ix}
     {state-prompts "prompts"}
     trail
@@ -497,55 +496,15 @@
         "content" (join
                    "\n"
                    (concat
-                    ["You are an AI assistant operating within a Finite State Machine (FSM)."
-                     "You communicate using structured JSON that conforms to Malli schemas."
+                    ["All your requests and responses will be in E[xtensible]D[ata]N[otation] described by Malli schemas."
+                     "You are being given the following reference schema. Later schemas may refer to parts of this:" (pr-str fsm-schemas) "."
+                     "Requests will arrive as [INPUT-SCHEMA, INPUT-DOCUMENT, OUTPUT-SCHEMA] triples."
+                     "The INPUT-SCHEMA describes the structure of the INPUT-DOCUMENT."
+                     "You must respond to the contents of the INPUT-DOCUMENT."
+                     "Your response (The OUTPUT-DOCUMENT) must be whooly and solely a single EDN document that is STRICTLY CONFORMANT to the OUTPUT-SCHEMA."
                      ""
-                     "MESSAGE FORMAT - CRITICAL:"
-                     "Each user message is a 3-element array: [INPUT-SCHEMA, INPUT-DOCUMENT, OUTPUT-SCHEMA]"
-                     ""
-                     "  Element 1 (INPUT-SCHEMA): Malli schema describing the input you received"
-                     "  Element 2 (INPUT-DOCUMENT): The actual data/request to process"
-                     "  Element 3 (OUTPUT-SCHEMA): Malli schema your response MUST conform to"
-                     ""
-                     "YOUR RESPONSE:"
-                     "- Must be ONLY valid JSON (no markdown, no explanation, no preamble)"
-                     "- Must start with { and end with }"
-                     "- Must conform EXACTLY to the OUTPUT-SCHEMA (element 3)"
-                     "- OMIT optional fields unless you have a meaningful value"
-                     ""
-                     "MALLI SCHEMA REFERENCE:"
-                     "  [:map ...] = JSON object with specified keys"
-                     "  [:vector X] = array of X"
-                     "  [:or A B] = must match schema A OR schema B (you choose which)"
-                     "  [:enum \"a\" \"b\"] = one of the literal string values"
-                     "  [:= X] = exactly the value X (constant - copy it exactly)"
-                     "  :string = any string value"
-                     "  :int = integer value"
-                     "  :any = any JSON value"
-                     "  {:optional true} = field may be omitted"
-                     "  {:closed true} = no extra keys allowed"
-                     ""
-                     "SPECIAL SCHEMA TYPE - [:json-schema {:schema ...}]:"
-                     "This wraps a standard JSON Schema definition."
-                     "The {:schema ...} contains a JSON Schema object with \"type\", \"properties\", \"required\", etc."
-                     "Your value must conform to that embedded JSON Schema."
-                     "Example: [:json-schema {:schema {\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}}}}]"
-                     "         means your value should be an object like {\"x\": \"hello\"}"
-                     ""
-                     "THE \"id\" FIELD IS CRITICAL:"
-                     "Your response MUST include an \"id\" field containing a 2-element array."
-                     "This array specifies which FSM transition you're taking."
-                     "Look for [:= [\"state1\", \"state2\"]] patterns in the OUTPUT-SCHEMA to find valid IDs."
-                     "Copy the exact array value shown after [:=]."
-                     ""
-                     "WHEN OUTPUT-SCHEMA IS [:or ...] (multiple options):"
-                     "The schema offers you a CHOICE between different response types."
-                     "Each option has a different \"id\" value - pick the one that matches your intent."
-                     "EXAMINE the [:=] patterns in each [:or] option to find valid transition IDs."
-                     "Choose the option whose semantics match what you want to do next."]
-                    (when fsm-schema
-                      [""
-                       (str "Reference schema: " (write-str fsm-schema))])
+                     "CRITICAL:"
+                     "The \"id\" field is a UNIQUE DISCRIMINATOR that determines routing - you must copy in the const value from the relevant sub-schema"]
                     fsm-prompts
                     ix-prompts
                     state-prompts
@@ -557,7 +516,7 @@
           "content" (join "\n" llm-user-prompts)}])
 
       ;; Add conversation trail
-      (map (fn [m] (update m "content" write-str)) trail)))))
+      (map (fn [m] (update m "content" pr-str)) trail)))))
 
 (defn llm-action
   "FSM action: call LLM with prompts built from FSM config and trail.

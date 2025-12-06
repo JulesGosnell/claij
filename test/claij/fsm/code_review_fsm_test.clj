@@ -3,9 +3,10 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.tools.logging :as log]
    [malli.core :as m]
+   [malli.error :as me]
    [claij.util :refer [index-by ->key]]
    [claij.llm.open-router :refer [open-router-async]]
-   [claij.fsm :refer [start-fsm make-prompts]]
+   [claij.fsm :as fsm :refer [start-fsm make-prompts llm-action]]
    [claij.fsm.code-review-fsm :refer [code-review-registry
                                       code-review-fsm]]))
 
@@ -136,7 +137,7 @@
           (is (not= result :timeout) "FSM should complete within timeout")
           (when (not= result :timeout)
             (let [[final-context trail] result
-                  final-event (claij.fsm/last-event trail)]
+                  final-event (fsm/last-event trail)]
               (is (= summary-data final-event) "FSM should complete with summary"))))
 
         (catch Throwable t
@@ -144,3 +145,77 @@
 
         (finally
           (stop-fsm))))))
+
+;;------------------------------------------------------------------------------
+;; Code Review FSM Integration Tests
+;; 
+;; These tests call REAL LLMs and verify the FSM works end-to-end.
+;; They are slow and cost money - run with: clj -X:test :includes [:integration]
+
+(deftest ^:integration code-review-fsm-integration-test
+  (testing "code-review FSM with real LLM - simple fibonacci"
+    (let [;; Simple fibonacci code to review
+          code "(defn fib [n] (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))"
+
+          ;; Use just one LLM for faster test
+          llms [{"provider" "anthropic" "model" "claude-sonnet-4"}]
+
+          ;; Minimal concerns for focused review
+          concerns ["Performance: Consider algorithmic efficiency"
+                    "Simplicity: Can this be simpler?"]
+
+          ;; End action that delivers [context trail] to completion promise
+          end-action (fn [context _fsm _ix _state event trail _handler]
+                       (when-let [p (:fsm/completion-promise context)]
+                         (deliver p [context (conj trail event)])))
+
+          ;; Use real llm-action from fsm namespace
+          code-review-actions {"llm" llm-action "end" end-action}
+
+          context {:id->action code-review-actions}
+
+          entry-msg {"id" ["start" "mc"]
+                     "document" (str "Please review this Clojure code: " code)
+                     "llms" llms
+                     "concerns" concerns}
+
+          ;; Run the FSM
+          result (fsm/run-sync code-review-fsm context entry-msg (* 3 60 1000))] ; 3 min timeout
+
+      (is (not= result :timeout) "FSM should complete within timeout")
+
+      (when (not= result :timeout)
+        (let [[final-context trail] result
+              final-event (fsm/last-event trail)]
+
+          (testing "FSM reached end state"
+            (is (map? final-event) "Final event should be a map")
+            (is (= ["mc" "end"] (get final-event "id"))
+                "FSM should end with mc→end transition"))
+
+          (testing "Final event is valid summary"
+            (is (m/validate [:ref "summary"] final-event {:registry code-review-registry})
+                (str "Final event should be valid summary schema. Got: "
+                     (pr-str final-event)
+                     "\nErrors: "
+                     (pr-str (me/humanize (m/explain [:ref "summary"] final-event
+                                                     {:registry code-review-registry}))))))
+
+          (testing "Trail contains expected transitions"
+            ;; Trail should have at least: entry → request → response → summary
+            (is (>= (count trail) 4) "Trail should have at least 4 events")
+            (let [ids (map #(get % "id") trail)]
+              (is (some #{["start" "mc"]} ids) "Should have entry transition")
+              (is (some #{["mc" "reviewer"]} ids) "Should have request transition")
+              (is (some #{["reviewer" "mc"]} ids) "Should have response transition")
+              (is (some #{["mc" "end"]} ids) "Should have summary transition")))
+
+          (testing "Summary has required fields"
+            (is (contains? final-event "code") "Summary should have code")
+            (is (contains? final-event "notes") "Summary should have notes")
+            (let [code-data (get final-event "code")]
+              (is (contains? code-data "language") "Code should have language")
+              (is (contains? code-data "text") "Code should have text")))
+
+          (log/info "Code review completed successfully")
+          (log/info "Final notes:" (get final-event "notes")))))))

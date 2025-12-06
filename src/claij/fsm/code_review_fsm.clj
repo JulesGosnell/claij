@@ -185,29 +185,34 @@
 
 (defmacro review
   "Convenience macro to review code directly.
-   Starts a code review FSM session with the provided code."
+   Starts a code review FSM session with the provided code.
+   
+   Returns [context trail] tuple on success, or :timeout if timeout reached.
+   
+   Options:
+     :timeout-ms - Timeout in milliseconds (default: 5 minutes)
+     :llms - Vector of LLM configs to use (default: all available)
+     :concerns - Vector of concerns to evaluate (default: example-code-review-concerns)"
   [& body]
   (let [code-str (pr-str (cons 'do body))]
-    `(let [end-action# (fn [context# _fsm# _ix# _state# [{[_input-schema# input-data# _output-schema#] "content"} & _tail#] _handler#]
+    `(let [end-action# (fn [context# _fsm# _ix# _state# event# trail# _handler#]
                          (when-let [p# (:fsm/completion-promise context#)]
-                           (deliver p# input-data#)))
+                           (deliver p# [context# (conj trail# event#)])))
            code-review-actions# {"llm" llm-action "end" end-action#}
            context# {:id->action code-review-actions#}
            [submit# await# stop-fsm#] (claij.fsm/start-fsm context# code-review-fsm)
-           ;; Define available LLMs
-           ;; TODO - extract this map to somewhere from whence it can be shared
-           llms# [{"provider" "openai" "model" "gpt-5-codex"}
-                  {"provider" "x-ai" "model" "grok-code-fast-1"}
-                  {"provider" "anthropic" "model" "claude-sonnet-4.5"}
-                  {"provider" "google" "model" "gemini-2.5-flash"}]
+           ;; Available LLMs - must match schema enum exactly
+           llms# [{"provider" "anthropic" "model" "claude-sonnet-4"}
+                  {"provider" "google" "model" "gemini-2.5-flash"}
+                  {"provider" "openai" "model" "gpt-4o"}
+                  {"provider" "x-ai" "model" "grok-3-beta"}]
            ;; Construct entry message with document and llms
            entry-msg# {"id" ["start" "mc"]
                        "document" (str "Please review this code: " ~code-str)
                        "llms" llms#
                        "concerns" example-code-review-concerns}]
-       (submit# entry-msg#)
-       (let [result# (await# (* 5 60 1000))]
-         (if (= result# :timeout)
-           (println "Code review timed out")
-           (clojure.pprint/pprint result#)))
-       (stop-fsm#))))
+       (try
+         (submit# entry-msg#)
+         (await# (* 5 60 1000))
+         (finally
+           (stop-fsm#))))))
