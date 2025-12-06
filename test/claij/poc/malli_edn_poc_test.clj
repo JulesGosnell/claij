@@ -10,13 +10,7 @@
    4. Response validates against chosen schema branch
    5. The 'id' field (a const tuple-2) determines which branch was chosen
    
-   Test results (2024-12-06):
-   - google/gemini-2.5-flash: 10/10 (100%)
-   - anthropic/claude-sonnet-4: 10/10 (100%)  
-   - openai/gpt-4o: 10/10 (100%)
-   - x-ai/grok-3-beta: 10/10 (100%)
-   - meta-llama/llama-3.3-70b-instruct: 7/10 (70%) - flaky with keyword keys
-   - OVERALL: 47/50 (94%)"
+   Run (test-all-llms 5) to verify reliability across all providers."
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.edn :as edn]
@@ -34,14 +28,14 @@
 
 ;; LLMs ordered by reliability
 (def reliable-llms
-  [{:provider "google" :model "gemini-2.5-flash"}
-   {:provider "anthropic" :model "claude-sonnet-4"}
-   {:provider "openai" :model "gpt-4o"}
-   {:provider "x-ai" :model "grok-3-beta"}])
+  [{:provider "google" :model "gemini-3-pro-preview"}
+   {:provider "anthropic" :model "claude-sonnet-4.5"}
+   {:provider "openai" :model "gpt-5.1-codex"}
+   {:provider "x-ai" :model "grok-code-fast-1"}])
 
 (def all-llms
   (conj reliable-llms
-        {:provider "meta-llama" :model "llama-3.3-70b-instruct"}))
+        {:provider "meta-llama" :model "llama-4-maverick"}))
 
 ;;------------------------------------------------------------------------------
 ;; EDN Parsing
@@ -178,23 +172,23 @@ Copy the exact value shown.")
 
 (defn test-gemini 
   ([] (test-gemini 1))
-  ([n] (test-llm-n-times {:provider "google" :model "gemini-2.5-flash"} n)))
+  ([n] (test-llm-n-times {:provider "google" :model "gemini-3-pro-preview"} n)))
 
 (defn test-claude 
   ([] (test-claude 1))
-  ([n] (test-llm-n-times {:provider "anthropic" :model "claude-sonnet-4"} n)))
+  ([n] (test-llm-n-times {:provider "anthropic" :model "claude-sonnet-4.5"} n)))
 
 (defn test-gpt 
   ([] (test-gpt 1))
-  ([n] (test-llm-n-times {:provider "openai" :model "gpt-4o"} n)))
+  ([n] (test-llm-n-times {:provider "openai" :model "gpt-5.1-codex"} n)))
 
 (defn test-grok 
   ([] (test-grok 1))
-  ([n] (test-llm-n-times {:provider "x-ai" :model "grok-3-beta"} n)))
+  ([n] (test-llm-n-times {:provider "x-ai" :model "grok-code-fast-1"} n)))
 
 (defn test-llama 
   ([] (test-llama 1))
-  ([n] (test-llm-n-times {:provider "meta-llama" :model "llama-3.3-70b-instruct"} n)))
+  ([n] (test-llm-n-times {:provider "meta-llama" :model "llama-4-maverick"} n)))
 
 (defn test-all-llms
   "Test all LLMs n times each. Returns summary."
@@ -216,7 +210,7 @@ Copy the exact value shown.")
 (deftest ^:integration malli-edn-poc-single-test
   (testing "Single LLM (Gemini) can respond with valid EDN matching Malli schema"
     (let [{:keys [success response error]} (test-single {:provider "google" 
-                                                          :model "gemini-2.5-flash"})]
+                                                          :model "gemini-3-pro-preview"})]
       (is success (str "Should succeed. Error: " error))
       (when success
         (is (= ["user" "agree"] (get response "id")) 
