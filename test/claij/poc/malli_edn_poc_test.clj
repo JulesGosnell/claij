@@ -40,19 +40,10 @@
 ;;------------------------------------------------------------------------------
 ;; EDN Parsing
 
-(defn strip-code-block
-  "Remove markdown code blocks (```edn, ```clojure, ```json, etc.)"
-  [s]
-  (let [s (str/trim s)
-        pattern #"(?s)^\s*```\w*\s*\n?(.*?)\n?\s*```\s*$"]
-    (if-let [[_ content] (re-matches pattern s)]
-      (str/trim content)
-      s)))
-
 (defn parse-edn
-  "Parse EDN string, stripping any markdown code blocks first"
+  "Parse EDN string."
   [s]
-  (-> s strip-code-block edn/read-string))
+  (edn/read-string (str/trim s)))
 
 ;;------------------------------------------------------------------------------
 ;; LLM Call
@@ -126,15 +117,13 @@ Copy the exact value shown.")
 ;; Test Implementation
 
 (defn test-single
-  "Test a single LLM call. Returns {:success bool :response map :error string}
-   
-   This demonstrates ALL requirements:
-   - Input validates against input-schema (req 5)
-   - Output validates against output-schema (req 6)
-   - Output contains const id tuple-2 (req 7)"
+  "Test a single LLM call. Returns map with:
+   - :success bool
+   - :response map (the parsed EDN)
+   - :time-ms response time in milliseconds
+   - :error string (on failure)"
   [{:keys [provider model]}]
   (let [input-doc {"question" "Is 2 + 2 = 4?"}
-        ;; Requirement 5: Input MUST validate against input-schema
         _ (when-not (m/validate input-schema input-doc)
             (throw (ex-info "Input validation failed" 
                            {:input input-doc 
@@ -144,27 +133,33 @@ Copy the exact value shown.")
         messages [{"role" "system" "content" system-prompt}
                   {"role" "user" "content" (pr-str tuple-3)}]]
     (try
-      (let [raw (call-llm provider model messages)
+      (let [start (System/currentTimeMillis)
+            raw (call-llm provider model messages)
+            end (System/currentTimeMillis)
+            time-ms (- end start)
             parsed (parse-edn raw)
-            ;; Requirement 6: Output MUST validate against output-schema
             valid? (m/validate output-schema parsed)]
         (if valid?
-          {:success true :response parsed}
+          {:success true :response parsed :time-ms time-ms}
           {:success false 
            :response parsed 
+           :time-ms time-ms
            :error (str "Schema validation failed: " 
                       (m/explain output-schema parsed))}))
       (catch Exception e
         {:success false :error (.getMessage e)}))))
 
 (defn test-llm-n-times
-  "Test an LLM n times. Returns {:passed int :total int :results vec}"
+  "Test an LLM n times. Returns aggregated stats including timing."
   [{:keys [provider model] :as llm} n]
   (let [results (doall (repeatedly n #(test-single llm)))
-        passed (count (filter :success results))]
+        passed (count (filter :success results))
+        times (keep :time-ms results)
+        avg-time-ms (when (seq times) (/ (reduce + times) (count times)))]
     {:llm (str provider "/" model)
      :passed passed 
      :total n 
+     :avg-time-ms (when avg-time-ms (Math/round (double avg-time-ms)))
      :results results}))
 
 ;;------------------------------------------------------------------------------
@@ -191,18 +186,28 @@ Copy the exact value shown.")
   ([n] (test-llm-n-times {:provider "meta-llama" :model "llama-4-maverick"} n)))
 
 (defn test-all-llms
-  "Test all LLMs n times each. Returns summary."
+  "Test all LLMs n times each. Returns summary with reliability ranking."
   [n]
   (let [results (mapv #(test-llm-n-times % n) all-llms)
         total-passed (reduce + (map :passed results))
-        total-tests (* n (count all-llms))]
-    (println "\n=== RESULTS ===")
-    (doseq [{:keys [llm passed total]} results]
-      (println (str "  " llm ": " passed "/" total 
-                    " (" (int (* 100 (/ passed total))) "%)")))
-    (println (str "\n  TOTAL: " total-passed "/" total-tests
-                  " (" (int (* 100 (/ total-passed total-tests))) "%)"))
-    {:results results :total-passed total-passed :total-tests total-tests}))
+        total-tests (* n (count all-llms))
+        ;; Sort by pass rate descending, then by avg time ascending
+        ranked (sort-by (fn [{:keys [passed total avg-time-ms]}]
+                          [(- (/ passed total)) (or avg-time-ms 999999)])
+                        results)]
+    (println "\n=== RELIABILITY REPORT ===")
+    (println (format "%-35s %8s %10s" "LLM" "Score" "Avg (ms)"))
+    (println (apply str (repeat 55 "-")))
+    (doseq [{:keys [llm passed total avg-time-ms]} ranked]
+      (println (format "%-35s %3d/%-3d %8s" 
+                       llm 
+                       passed total
+                       (if avg-time-ms (str avg-time-ms) "n/a"))))
+    (println (apply str (repeat 55 "-")))
+    (println (format "TOTAL: %d/%d (%.0f%%)" 
+                     total-passed total-tests 
+                     (* 100.0 (/ total-passed total-tests))))
+    {:results ranked :total-passed total-passed :total-tests total-tests}))
 
 ;;------------------------------------------------------------------------------
 ;; Integration Tests
