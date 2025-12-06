@@ -38,7 +38,7 @@ pom.xml.asc
 *.log
 
 # Documentation drafts
-docs/
+private/
 
 # Runtime files
 *.pid
