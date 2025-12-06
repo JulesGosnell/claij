@@ -180,7 +180,7 @@
            (reset! llm-response-capture {:raw d :status :received :timestamp (java.time.Instant/now)})
            (try
              (let [j (read-str d)]
-               (log/info "      [OK] LLM Response: Valid JSON received")
+               (log/info "      [OK] LLM Response: Valid EDN received")
                (swap! llm-response-capture assoc :parsed j :status :success)
                (handler j))
              (catch Exception e
@@ -189,13 +189,13 @@
                   retry-count
                    ;; Retry operation: send error feedback and try again
                   (fn []
-                    (let [error-msg (str "We could not unmarshal your JSON - it must be badly formed.\n\n"
-                                         "Here is the exception from clojure.data.json/read-str:\n"
+                    (let [error-msg (str "We could not unmarshal your EDN - it must be badly formed.\n\n"
+                                         "Here is the exception:\n"
                                          (.getMessage e) "\n\n"
                                          "Here is your malformed response:\n" d "\n\n"
-                                         "Please try again. Your response should only contain the relevant JSON document.")
+                                         "Please try again. Your response should only contain the relevant EDN document.")
                           retry-prompts (conj (vec prompts) {"role" "user" "content" error-msg})]
-                      (log/warn (str "      [X] JSON Parse Error: " (.getMessage e)))
+                      (log/warn (str "      [X] EDN Parse Error: " (.getMessage e)))
                       (log/info (str "      [>>] Sending error feedback to LLM"))
                       (open-router-async provider model retry-prompts handler
                                          {:error error
