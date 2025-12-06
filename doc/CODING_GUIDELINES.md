@@ -997,6 +997,60 @@ When choosing between lazy initialization approaches:
 - Log failures for debugging
 - Tag integration tests clearly
 
+## Persistent Planning for Complex Tasks
+
+**For any significant work, use persistent ratcheted execution:**
+
+When working on complex features that span multiple steps or sessions, maintain state in a scratchpad or similar persistent structure. This prevents:
+- Losing progress when conversations stall or get interrupted
+- Having to rebuild context from scratch each session
+- Repeating work that was already completed
+- Forgetting important requirements or edge cases
+
+**Structure for complex tasks:**
+
+```clojure
+{:goal "Clear description of what we're building"
+ :requirements [{:id 1 :task "First requirement" :done false}
+                {:id 2 :task "Second requirement" :done true}
+                ...]
+ :current-status "Where we are right now"
+ :learnings ["Things we discovered along the way"]
+ :blockers ["Issues preventing progress"]}
+```
+
+**Ratcheted execution means:**
+1. Break work into discrete, checkpointable steps
+2. Mark each step complete when verified (not just attempted)
+3. Record learnings and discoveries as you go
+4. Never lose ground - if interrupted, resume from last checkpoint
+5. Update status frequently so context is always current
+
+**When to use persistent planning:**
+- Multi-step implementations
+- Integration with external systems (LLMs, APIs)
+- Debugging complex issues
+- Any work that might span multiple sessions
+- Exploratory work where discoveries change the approach
+
+**Example workflow:**
+```
+1. Create task list with all requirements
+2. For each task:
+   a. Attempt implementation
+   b. Verify it works (tests, REPL validation)
+   c. Mark as done ONLY when verified
+   d. Record any learnings
+3. If interrupted, resume from last completed task
+4. Keep notes on what's still pending
+```
+
+**This discipline is especially important for LLM-assisted development** where:
+- Context windows have limits
+- Conversations may be compacted or interrupted
+- The same issue might be worked on across multiple sessions
+- Multiple approaches may need to be tried
+
 ## When In Doubt
 
 1. **Ask: "Can this be simpler?"**
