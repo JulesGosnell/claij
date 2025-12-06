@@ -441,22 +441,215 @@ When evaluating solutions, prefer in this order:
   (m3/validate json base-schema))
 ```
 
-## Testing
+## Testing - CRITICAL
 
-**Test behavior, not implementation:**
-- Focus on what the code does, not how it does it
-- Use property-based testing where appropriate
-- Integration tests only when necessary (and mark them clearly)
+**Testing is not an afterthought. Tests define what "working" means.**
 
-**Keep tests simple:**
+### The TDD Discipline
+
+**Write the test FIRST, then write the code to make it pass:**
+
+1. Write a failing test that describes the behavior you want
+2. Run it - it should fail (if it passes, your test is wrong)
+3. Write the minimum code to make it pass
+4. Refactor if needed
+5. Repeat
+
+**Why TDD matters:**
+- Tests become the specification
+- Forces you to think about API before implementation
+- Ensures code is testable by design
+- Prevents the "tests that pass but don't test anything" trap
+
+```clojure
+;; WRONG - write code first, then write test to match
+(defn add [x y] (+ x y))
+
+(deftest add-test
+  (is (= 3 (add 1 2))))  ; This test was written to pass, not to specify
+
+;; RIGHT - write test first
+(deftest add-test
+  ;; Specification: add should sum two numbers
+  (is (= 3 (add 1 2)))
+  (is (= 0 (add -1 1)))
+  (is (= -5 (add -2 -3))))
+
+;; THEN write the code
+(defn add [x y] (+ x y))
+```
+
+### Unit Tests Test Units
+
+**A unit test tests ONE function with controlled inputs:**
+
+- Test the actual production code, not a mock of it
+- If you need to mock dependencies, inject them
+- Each function should be testable in isolation
+
+```clojure
+;; BAD - "unit test" that mocks away the thing being tested
+(deftest process-with-llm-test
+  (let [mock-llm (fn [_] {:result "canned"})]
+    (with-redefs [call-llm mock-llm]
+      (is (= {:result "canned"} (process-with-llm "input"))))))
+;; This tests NOTHING - you're testing your mock, not your code
+
+;; GOOD - unit test of a pure function
+(deftest parse-response-test
+  (testing "extracts id from valid response"
+    (is (= ["mc" "reviewer"] 
+           (parse-response {"id" ["mc" "reviewer"] "data" "..."}))))
+  (testing "returns nil for missing id"
+    (is (nil? (parse-response {"data" "..."}))))
+  (testing "handles malformed input"
+    (is (thrown? Exception (parse-response "not a map")))))
+```
+
+### Integration Tests Test Integration
+
+**If your system involves external services (LLMs, databases, APIs), you MUST have integration tests with real external services:**
+
+- Mark integration tests clearly with `^:integration`
+- Integration tests can be slow - that's okay
+- Run them before declaring something "works"
+- A mock test is NOT a substitute for an integration test
+
+```clojure
+;; This is a UNIT test - tests FSM machinery with mock actions
+(deftest fsm-machinery-test
+  (let [mock-action (fn [ctx _ _ _ event _ handler]
+                      (handler ctx (process event)))]
+    ...))
+
+;; This is an INTEGRATION test - tests actual LLM behavior
+(deftest ^:integration llm-response-format-test
+  (testing "LLM produces valid JSON matching schema"
+    (let [response (call-real-llm "test prompt" output-schema)]
+      (is (valid? response output-schema))
+      (is (contains? response "id")))))
+```
+
+### The Mocking Trap
+
+**Mocks are useful for isolating units. Mocks are DANGEROUS when they replace integration testing.**
+
+Ask yourself:
+- "If I mock this, what am I actually testing?"
+- "Could this code be broken in production while tests pass?"
+- "Am I testing my mock or my code?"
+
+```clojure
+;; DANGEROUS - full system test with everything mocked
+(deftest code-review-fsm-test
+  (let [mock-llm-action (fn [_ _ _ _ event _ handler]
+                          (handler ctx (canned-responses event)))]
+    ;; This tests that canned responses flow through FSM
+    ;; It does NOT test that LLMs produce valid responses
+    ;; It does NOT test that prompts work
+    ;; It does NOT test schema comprehension
+    ;; THE FSM COULD BE COMPLETELY BROKEN IN PRODUCTION
+    ...))
+
+;; CORRECT - separate unit and integration tests
+(deftest fsm-machinery-unit-test
+  ;; Tests FSM state transitions with controlled inputs
+  ...)
+
+(deftest ^:integration llm-schema-comprehension-test
+  ;; Tests that real LLMs understand and follow schemas
+  ...)
+
+(deftest ^:integration code-review-e2e-test
+  ;; Tests the full flow with real LLMs
+  ...)
+```
+
+### Production Code Exists for Production
+
+**Code is written to work in production with diverse real-world inputs, not to make tests pass.**
+
+- Tests verify production behavior, they don't define the happy path
+- Consider edge cases, error conditions, malformed inputs
+- If tests only cover the happy path, production will surprise you
+
+```clojure
+;; INSUFFICIENT - only tests the happy path
+(deftest validate-schema-test
+  (is (valid? (validate good-input))))
+
+;; BETTER - tests real-world scenarios
+(deftest validate-schema-test
+  (testing "valid input passes"
+    (is (valid? (validate good-input))))
+  (testing "missing required field fails"
+    (is (not (valid? (validate (dissoc good-input "required-field"))))))
+  (testing "wrong type fails"  
+    (is (not (valid? (validate (assoc good-input "count" "not-a-number"))))))
+  (testing "extra fields in closed schema fails"
+    (is (not (valid? (validate (assoc good-input "extra" "field"))))))
+  (testing "nil input fails gracefully"
+    (is (not (valid? (validate nil))))))
+```
+
+### Test Organization
+
+**One `x_test.clj` file per `x.clj`:**
+- Tests live next to the code they test
+- Same namespace structure with `-test` suffix
+- One `deftest` per function (or logical group)
+
+```clojure
+;; src/claij/fsm.clj contains:
+;; - validate-event
+;; - state-schema  
+;; - start-fsm
+
+;; test/claij/fsm_test.clj contains:
+(deftest validate-event-test ...)
+(deftest state-schema-test ...)
+(deftest start-fsm-test ...)
+```
+
+### Test Tiers
+
+| Tier | Speed | External Services | When to Run |
+|------|-------|-------------------|-------------|
+| Unit | Fast (<1s) | None | Every save, CI |
+| Integration | Slow (seconds) | Yes (LLMs, DBs) | Before commit, CI |
+| E2E | Very slow (minutes) | Full system | Before release |
+
+```bash
+# Run unit tests frequently
+clj -X:test
+
+# Run integration tests before committing
+clj -X:test :includes [:integration]
+
+# Run everything before release
+clj -X:test :includes [:integration :e2e]
+```
+
+### The Checklist Before Declaring "It Works"
+
+1. ✅ Unit tests pass
+2. ✅ Integration tests pass (with REAL external services)
+3. ✅ Manual smoke test of actual use case
+4. ✅ Tests cover error cases, not just happy path
+5. ✅ No mocks hiding broken integration points
+
+**If you skip integration testing, you haven't tested your code.**
+
+### Keep Tests Simple
+
 ```clojure
 ;; Good - clear and simple
-(deftest test-validate-schema
+(deftest validate-schema-test
   (is (valid? (validate simple-schema)))
   (is (not (valid? (validate broken-schema)))))
 
 ;; Avoid - overly elaborate
-(deftest test-validate-schema
+(deftest validate-schema-test
   (let [validator (make-validator)
         context (make-context)
         result (with-context context
@@ -817,24 +1010,4 @@ If the answer concerns you, refactor.
 
 **Remember:** These are guidelines, not laws. Use judgment. The goal is maintainable, understandable, robust code that solves real problems.
 
-**Last updated:** 2025-10-25
-
-
-
-run the testsuite before deciding that whatever you have done works
-
-don't waste code stating the obvious
-validate at the edges not all over the middle
-
-
-rules for writing tests
------------------------
-
-one x_test.clj file per x.clj
-require uses :refers instead of :as
-one deftest x-test (same name as module)
-in same order as in x, one testing per function in x
-may have sub-testings for specific use-cases for given fn
-;; keep tests as simple as possible
-son't state the obvious
-if test is too complicated consider going back to the production code and splitting it into smaller units
+**Last updated:** 2025-12-06
