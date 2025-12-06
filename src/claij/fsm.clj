@@ -540,9 +540,9 @@
                      ""
                      "WHEN OUTPUT-SCHEMA IS [:or ...] (multiple options):"
                      "The schema offers you a CHOICE between different response types."
-                     "Each option has a different \"id\" value - pick the one that matches your intent:"
-                     "- To make a tool call: use the option with \"id\": [\"llm\", \"servicing\"]"
-                     "- To finish and return a result: use the option with \"id\": [\"llm\", \"end\"]"]
+                     "Each option has a different \"id\" value - pick the one that matches your intent."
+                     "EXAMINE the [:=] patterns in each [:or] option to find valid transition IDs."
+                     "Choose the option whose semantics match what you want to do next."]
                     (when fsm-schema
                       [""
                        (str "Reference schema: " (write-str fsm-schema))])
