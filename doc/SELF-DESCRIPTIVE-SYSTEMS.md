@@ -1,6 +1,14 @@
 # Recursively Self-Descriptive Systems
 
-> *"The God Problem"* — Nick Caine, Nomura, late 1990s
+> ## "The God Problem"
+>
+> *— Nick Caine, Nomura, late 1990s*
+
+### Further Reading
+
+- [Gödel, Escher, Bach: An Eternal Golden Braid](https://grokipedia.com/page/G%C3%B6del%2C_Escher%2C_Bach) — Douglas Hofstadter (1979)
+- [The Art of the Metaobject Protocol](https://en.wikipedia.org/wiki/The_Art_of_the_Metaobject_Protocol) — Kiczales, des Rivières & Bobrow (1991)
+- [The Society of Mind](https://en.wikipedia.org/wiki/Society_of_Mind) — Marvin Minsky (1986)
 
 ## The Necessity of Reflexive Self-Description
 

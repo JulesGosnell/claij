@@ -22,7 +22,7 @@
 
 > *"The factory is the product."* — Elon Musk
 >
-> *"...we envision a mind (or brain) as composed of many partially autonomous 'agents'—a 'Society' of smaller minds..."* — Marvin Minsky, The Society of Mind
+> *"...we envision a mind (or brain) as composed of many partially autonomous 'agents'—a 'Society' of smaller minds..."* — Marvin Minsky, [The Society of Mind](https://en.wikipedia.org/wiki/Society_of_Mind)
 >
 > *"Anything you can do, I can do Meta."* — Julian Gosnell - Marsh - 2007
 
