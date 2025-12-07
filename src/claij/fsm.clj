@@ -8,7 +8,46 @@
    [malli.registry :as mr]
    [claij.util :refer [index-by ->key map-values make-retrier]]
    [claij.malli :refer [def-fsm fsm-registry base-registry expand-refs-for-llm]]
+   [claij.action :refer [def-action]]
    [claij.llm.open-router :refer [open-router-async]]))
+
+;;------------------------------------------------------------------------------
+;; Action Dispatch Helpers
+;;------------------------------------------------------------------------------
+
+(defn- curried-action?
+  "Check if an action is a curried def-action (has :action/name metadata on var).
+   Returns false for legacy 7-arg actions."
+  [action-or-var]
+  (and (var? action-or-var)
+       (-> action-or-var meta :action/name)))
+
+(defn- invoke-action
+  "Invoke an action, handling both curried and legacy signatures.
+   
+   Curried actions (def-action):
+     (action config fsm ix state) -> f2
+     (f2 context event trail handler)
+   
+   Legacy actions (defn):
+     (action context fsm ix state event trail handler)
+   
+   DEPRECATED: Legacy 7-arg actions will be removed in a future version.
+   Use def-action from claij.action namespace instead."
+  [action-or-var context fsm ix state event trail handler]
+  (if (curried-action? action-or-var)
+    ;; Curried: call factory with empty config, then call f2
+    (let [action @action-or-var
+          f2 (action {} fsm ix state)]
+      (f2 context event trail handler))
+    ;; Legacy: call directly with all 7 args
+    (do
+      (log/warn "DEPRECATED: Legacy 7-arg action signature detected."
+                "Migrate to def-action from claij.action namespace."
+                (when (var? action-or-var)
+                  (str "Action var: " action-or-var)))
+      (let [action (if (var? action-or-var) @action-or-var action-or-var)]
+        (action context fsm ix state event trail handler)))))
 
 ;; the plan
 ;; to transition we need a json document - a "proposal"
@@ -191,7 +230,7 @@
                         (log/info "      [>>] Sending validation error feedback to LLM")
                            ;; Call action again with error in trail
                         (if-let [action (get-in context [:id->action a])]
-                          (action new-context fsm ix state event error-trail handler)
+                          (invoke-action action new-context fsm ix state event error-trail handler)
                           (handler new-context (get-in (peek error-trail) [:error :message]) error-trail))))
                        ;; Max retries exceeded
                     (fn []
@@ -205,7 +244,7 @@
       (if-let [action (get-in context [:id->action a])]
         (do
           (log/info (str "   Action: " a))
-          (action context fsm ix state event trail handler))
+          (invoke-action action context fsm ix state event trail handler))
         (handler context event)))
     (catch Throwable t
       (log/error t "Error in xform"))))
@@ -522,58 +561,68 @@
       ;; Add conversation trail
       (map (fn [m] (update m "content" pr-str)) trail)))))
 
-(defn llm-action
+(def-action llm-action
   "FSM action: call LLM with prompts built from FSM config and trail.
-   Extracts provider/model from event, then context, then uses defaults.
+   
+   Config schema (all optional):
+   - \"provider\" - LLM provider (anthropic, google, openai, xai)
+   - \"model\" - Model identifier string
+   
+   Provider/model precedence: config → event → context → defaults
    
    Passes the output schema (Malli :or of valid output transitions) to open-router-async
    for structured output enforcement."
-  [context {xs "xitions" :as fsm} ix {sid "id" :as state} event trail handler]
-  (log/info "llm-action entry, trail-count:" (count trail))
-  (let [{provider "provider" model "model"} (get event "llm")
-        ;; Check event, then context, then defaults
-        provider (or provider (:llm/provider context) "google")
-        model (or model (:llm/model context) "gemini-2.5-flash")
+  [:map
+   ["provider" {:optional true} [:enum "anthropic" "google" "openai" "xai"]]
+   ["model" {:optional true} :string]]
+  [config {xs "xitions" :as fsm} ix {sid "id" :as state}]
+  (fn [context event trail handler]
+    (log/info "llm-action entry, trail-count:" (count trail))
+    (let [{event-provider "provider" event-model "model"} (get event "llm")
+          {config-provider "provider" config-model "model"} config
+          ;; Precedence: config → event → context → defaults
+          provider (or config-provider event-provider (:llm/provider context) "google")
+          model (or config-model event-model (:llm/model context) "gemini-2.5-flash")
 
-        ;; Compute output transitions from current state
-        output-xitions (filter (fn [{[from _to] "id"}] (= from sid)) xs)
-        output-schema (state-schema context fsm state output-xitions)
+          ;; Compute output transitions from current state
+          output-xitions (filter (fn [{[from _to] "id"}] (= from sid)) xs)
+          output-schema (state-schema context fsm state output-xitions)
 
-        ;; Get registry for expanding refs
-        registry (or (get context :malli/registry)
-                     (build-fsm-registry fsm context))
-        
-        ;; Build prompt trail from history
-        prompt-trail (trail->prompts context fsm trail)
-        
-        ;; CRITICAL: When trail is empty (first call), we need to send the initial event!
-        ;; POC sends [input-schema input-doc output-schema] as user message
-        ;; We do the same here - use entry transition schema as input-schema
-        initial-message (when (empty? trail)
-                          (let [ix-schema-raw (resolve-schema context ix (get ix "schema"))
-                                ix-schema (expand-refs-for-llm ix-schema-raw registry)
-                                out-schema (expand-refs-for-llm output-schema registry)]
-                            [{"role" "user" 
-                              "content" (pr-str [ix-schema event out-schema])}]))
-        
-        ;; Combine: trail prompts + initial message if needed
-        full-trail (if initial-message
-                     initial-message
-                     prompt-trail)
-        
-        prompts (make-prompts fsm ix state full-trail provider model)]
-    (log/info (str "   Using LLM: " provider "/" model " with " (count prompts) " prompts"))
-    (open-router-async
-     provider model
-     prompts
-     (fn [output]
-       (log/info "llm-action got output, id:" (get output "id") ":" (pr-str output))
-       (handler context output))
-     {:schema output-schema
-      :error (fn [error-info]
-               (log/error "LLM action failed:" (pr-str error-info))
-               ;; Return error to handler so FSM can see it
-               (handler context {"id" "error" "error" error-info}))})))
+          ;; Get registry for expanding refs
+          registry (or (get context :malli/registry)
+                       (build-fsm-registry fsm context))
+          
+          ;; Build prompt trail from history
+          prompt-trail (trail->prompts context fsm trail)
+          
+          ;; CRITICAL: When trail is empty (first call), we need to send the initial event!
+          ;; POC sends [input-schema input-doc output-schema] as user message
+          ;; We do the same here - use entry transition schema as input-schema
+          initial-message (when (empty? trail)
+                            (let [ix-schema-raw (resolve-schema context ix (get ix "schema"))
+                                  ix-schema (expand-refs-for-llm ix-schema-raw registry)
+                                  out-schema (expand-refs-for-llm output-schema registry)]
+                              [{"role" "user" 
+                                "content" (pr-str [ix-schema event out-schema])}]))
+          
+          ;; Combine: trail prompts + initial message if needed
+          full-trail (if initial-message
+                       initial-message
+                       prompt-trail)
+          
+          prompts (make-prompts fsm ix state full-trail provider model)]
+      (log/info (str "   Using LLM: " provider "/" model " with " (count prompts) " prompts"))
+      (open-router-async
+       provider model
+       prompts
+       (fn [output]
+         (log/info "llm-action got output, id:" (get output "id") ":" (pr-str output))
+         (handler context output))
+       {:schema output-schema
+        :error (fn [error-info]
+                 (log/error "LLM action failed:" (pr-str error-info))
+                 ;; Return error to handler so FSM can see it
+                 (handler context {"id" "error" "error" error-info}))}))))
 
 ;; a correlation id threaded through the data
 ;; a monitor or callback on each state

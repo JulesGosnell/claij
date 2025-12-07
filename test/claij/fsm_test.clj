@@ -268,14 +268,16 @@
           event {"id" ["start" "processor"]
                  "input" "test data"}
           trail []
-          context {:test true}]
+          context {:test true}
+          ;; Create curried f2 by calling factory with empty config
+          action-f2 (llm-action {} fsm ix state)]
       ;; Call the real llm-action with mocked open-router-async
       (with-redefs [open-router-async (fn [_provider _model _prompts success-handler & _opts]
                                         ;; Immediately call success with fake LLM response
                                         (success-handler {"id" ["processor" "end"]
                                                           "result" "processed"}))]
         (try
-          (llm-action context fsm ix state event trail mock-handler)
+          (action-f2 context event trail mock-handler)
           ;; If we get here without exception, check handler was called with 2 args
           (is (= 1 (count @handler-calls)) "handler should be called once")
           (is (= 2 (count (first @handler-calls))) "handler should receive 2 args (context, event)")
