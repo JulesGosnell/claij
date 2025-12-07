@@ -1,5 +1,9 @@
 # Recursively Self-Descriptive Systems
 
+> ## "The God Problem"
+>
+> *— Nick Caine, Nomura, late 1990s*
+
 ## The Necessity of Reflexive Self-Description
 
 For a system to **improve itself**, it must first **understand itself**. To understand itself, it must have a **description of itself**. But that description is part of the system. So the description must describe... itself.
