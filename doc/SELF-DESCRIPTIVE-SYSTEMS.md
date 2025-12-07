@@ -1,6 +1,6 @@
 # Recursively Self-Descriptive Systems
 
-> *"The God Problem"* — Nick Caine, Nomura, late 1990s*
+> *"The God Problem"* — Nick Caine, Nomura, late 1990s
 
 > *[The Art of the Metaobject Protocol](https://en.wikipedia.org/wiki/The_Art_of_the_Metaobject_Protocol)* — Kiczales, des Rivières & Bobrow (1991)
 
