@@ -24,7 +24,7 @@
 >
 > *"...we envision a mind (or brain) as composed of many partially autonomous 'agents'—a 'Society' of smaller minds..."* — Marvin Minsky, The Society of Mind
 >
-> *"Anything you can do, I can do Meta."* — Julian Gosnell
+> *"Anything you can do, I can do Meta."* — Julian Gosnell - Marsh - 2007
 
 [![CI](https://github.com/JulesGosnell/claij/actions/workflows/ci.yml/badge.svg)](https://github.com/JulesGosnell/claij/actions/workflows/ci.yml)
 

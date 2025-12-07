@@ -1,8 +1,6 @@
 # Recursively Self-Descriptive Systems
 
-> ## "The God Problem"
->
-> *— Nick Caine, Nomura, late 1990s*
+> *"The God Problem"* — Nick Caine, Nomura, late 1990s
 
 ## The Necessity of Reflexive Self-Description
 
