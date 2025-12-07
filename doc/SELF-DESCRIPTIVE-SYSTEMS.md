@@ -181,6 +181,8 @@ The same function generates:
 - Schema editors (walking m3)
 - Meta-schema editors (walking m3 to edit m3)
 
+📋 **[Epic #49: Schema-driven forms library](https://github.com/JulesGosnell/claij/issues/49)**
+
 ## The Transitive Closure Problem
 
 When sending schemas to an LLM (or any external system), you must include all referenced definitions. The LLM can't access your local registry.
