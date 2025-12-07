@@ -17,10 +17,10 @@ Layer N-1: [what depends on it]
 Layer N-2: [runtime behavior]
 ```
 
-Example from Malli migration:
+Example from Malli migration (completed):
 - Layer 1: FSM structure validation (def-fsm) → Malli ✓
-- Layer 2: Event schema definition (def-m2) → JSON Schema (for now)
-- Layer 3: Runtime validation (xform) → m3.validate (for now)
+- Layer 2: Event schema definition → Malli ✓
+- Layer 3: Runtime validation (xform) → Malli ✓
 
 **Don't start coding until you can name the layers.**
 
