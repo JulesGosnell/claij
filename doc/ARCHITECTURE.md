@@ -79,7 +79,7 @@ This is not optional. A self-improving system *must* be a reflexively self-descr
 
 ### Foundational Structured Messaging
 
-All interactions in the LLM society rely on structured JSON messages—both requests and responses—treated symmetrically as proposals. Each message is validated against schemas tied to FSM transitions, ensuring no invalid or hallucinated data slips through, with `additionalProperties: false` to lock down structures and prevent extra fields.
+All interactions in the LLM society rely on structured EDN messages—both requests and responses—treated symmetrically as proposals. Each message is validated against Malli schemas tied to FSM transitions, ensuring no invalid or hallucinated data slips through, with `:closed` maps to lock down structures and prevent extra fields.
 
 ### Finite State Machine as Control Flow
 
@@ -95,7 +95,7 @@ Memory is bound to the active path: log all prompts, requests, and responses raw
 
 ### Emergent DSL for Efficiency
 
-As the society runs on structured messages and accumulates memory/logs, agents dynamically evolve a domain-specific language (DSL) as a compression layer atop JSON. This shorthand is negotiated via toolsmith or retros, inserted into prompts for efficiency, without replacing core JSON validation.
+As the society runs on structured messages and accumulates memory/logs, agents dynamically evolve a domain-specific language (DSL) as a compression layer atop EDN. This shorthand is negotiated via toolsmith or retros, inserted into prompts for efficiency, without replacing core Malli validation.
 
 ### Dynamism
 
