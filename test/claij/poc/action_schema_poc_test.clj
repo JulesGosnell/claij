@@ -1,166 +1,198 @@
 (ns claij.poc.action-schema-poc-test
-  "POC: Actions carry their own schemas as metadata.
+  "POC: def-action macro - validated functions with input/output schemas.
    
    The pattern:
-   - Each action fn has metadata with :action (discriminator) and :schema (Malli schema)
-   - FSM states reference actions by the discriminator value
-   - def-fsm can validate state params against the action's schema
-   - Actions remain an open set - just define a fn with the right metadata"
+   - def-action defines a function with input and output schemas
+   - The function is wrapped with validation: input checked before call, output after
+   - Schemas and name are available as metadata for FSM pre-validation
+   - Throws on validation failure"
   (:require
    [clojure.test :refer [deftest testing is]]
    [malli.core :as m]))
 
 ;;==============================================================================
-;; Example Actions with Schema Metadata
+;; Action Exception
 ;;==============================================================================
 
-(defn llm-action
-  "An action that calls an LLM."
-  {:action "llm"
-   :schema [:map {:closed true}
-            ["action" [:= "llm"]]
-            ["prompts" {:optional true} [:vector :string]]
-            ["provider" {:optional true} :string]
-            ["model" {:optional true} :string]]}
-  [context fsm state event trail]
-  ;; Implementation would go here
-  :llm-action-called)
-
-(defn end-action
-  "An action that ends the FSM."
-  {:action "end"
-   :schema [:map {:closed true}
-            ["action" [:= "end"]]]}
-  [context fsm state event trail]
-  :end-action-called)
-
-(defn fsm-action
-  "An action that embeds another FSM."
-  {:action "fsm"
-   :schema [:map {:closed true}
-            ["action" [:= "fsm"]]
-            ["fsm-id" :string]
-            ["input-mapping" {:optional true} [:map-of :string :string]]]}
-  [context fsm state event trail]
-  :fsm-action-called)
+(defn action-exception [type action-name schema value explanation]
+  (ex-info (str "Action " type " validation failed: " action-name)
+           {:type type
+            :action action-name
+            :schema schema
+            :value value
+            :explanation explanation}))
 
 ;;==============================================================================
-;; Action Registry (built from metadata)
+;; def-action macro
 ;;==============================================================================
 
-(def action-registry
-  "Registry mapping action discriminator -> action fn.
-   In practice, this could be built by scanning namespaces."
-  (->> [#'llm-action #'end-action #'fsm-action]
-       (map (fn [v] [(-> v meta :action) v]))
-       (into {})))
-
-(defn lookup-action [discriminator]
-  (get action-registry discriminator))
-
-(defn action-schema [discriminator]
-  (-> (lookup-action discriminator) meta :schema))
+(defmacro def-action
+  "Define a validated action function.
+   
+   Usage:
+   (def-action my-action
+     \"Documentation string\"
+     [:tuple :string :int]           ;; input schema (tuple-n for multiple args)
+     :string                          ;; output schema
+     [name age]                       ;; params (must match input tuple arity)
+     (str name \" is \" age \" years old\"))
+   
+   The defined var has metadata:
+   - :action/name - the action name as string
+   - :action/input-schema - Malli schema for input
+   - :action/output-schema - Malli schema for output
+   - :action/doc - documentation string
+   
+   The function validates input before calling and output after.
+   Throws ExceptionInfo on validation failure."
+  [name doc input-schema output-schema params & body]
+  (let [action-name (str name)]
+    `(def ~(with-meta name
+             {:action/name action-name
+              :action/input-schema input-schema
+              :action/output-schema output-schema
+              :action/doc doc})
+       (fn [& args#]
+         (let [input# (vec args#)]
+           ;; Validate input
+           (when-not (m/validate ~input-schema input#)
+             (throw (action-exception :input-validation
+                                      ~action-name
+                                      ~input-schema
+                                      input#
+                                      (m/explain ~input-schema input#))))
+           ;; Call the actual function
+           (let [result# (apply (fn ~params ~@body) args#)]
+             ;; Validate output
+             (when-not (m/validate ~output-schema result#)
+               (throw (action-exception :output-validation
+                                        ~action-name
+                                        ~output-schema
+                                        result#
+                                        (m/explain ~output-schema result#))))
+             result#))))))
 
 ;;==============================================================================
-;; Validation
+;; Helper to inspect action metadata
 ;;==============================================================================
 
-(defn validate-state-params
-  "Validate a state's parameters against its action's schema.
-   Returns nil if valid, error map if invalid."
-  [state]
-  (let [action-type (get state "action")
-        schema (action-schema action-type)]
-    (when schema
-      (when-not (m/validate schema state)
-        {:error :invalid-action-params
-         :action action-type
-         :state state
-         :explanation (m/explain schema state)}))))
+(defn action-name [action-var]
+  (-> action-var meta :action/name))
+
+(defn action-input-schema [action-var]
+  (-> action-var meta :action/input-schema))
+
+(defn action-output-schema [action-var]
+  (-> action-var meta :action/output-schema))
+
+(defn action-doc [action-var]
+  (-> action-var meta :action/doc))
+
+;;==============================================================================
+;; Example Actions
+;;==============================================================================
+
+(def-action greet
+  "Greet a person by name and age."
+  [:tuple :string :int]
+  :string
+  [name age]
+  (str "Hello " name ", you are " age " years old!"))
+
+(def-action add-numbers
+  "Add two numbers together."
+  [:tuple :int :int]
+  :int
+  [a b]
+  (+ a b))
+
+(def-action parse-config
+  "Parse a config string into a map."
+  [:tuple :string]
+  [:map ["host" :string] ["port" :int]]
+  [config-str]
+  ;; Simplified - in reality would parse the string
+  {"host" "localhost" "port" 8080})
+
+(def-action broken-output
+  "An action that returns wrong type (for testing)."
+  [:tuple :string]
+  :int
+  [input]
+  ;; Returns string instead of int - should fail output validation
+  (str "not an int: " input))
 
 ;;==============================================================================
 ;; Tests
 ;;==============================================================================
 
-(deftest action-metadata-test
-  (testing "Actions carry :action discriminator in metadata"
-    (is (= "llm" (-> #'llm-action meta :action)))
-    (is (= "end" (-> #'end-action meta :action)))
-    (is (= "fsm" (-> #'fsm-action meta :action))))
+(deftest def-action-metadata-test
+  (testing "Action has name in metadata"
+    (is (= "greet" (action-name #'greet)))
+    (is (= "add-numbers" (action-name #'add-numbers))))
   
-  (testing "Actions carry :schema in metadata"
-    (is (vector? (-> #'llm-action meta :schema)))
-    (is (vector? (-> #'end-action meta :schema)))
-    (is (vector? (-> #'fsm-action meta :schema)))))
+  (testing "Action has input schema in metadata"
+    (is (= [:tuple :string :int] (action-input-schema #'greet)))
+    (is (= [:tuple :int :int] (action-input-schema #'add-numbers))))
+  
+  (testing "Action has output schema in metadata"
+    (is (= :string (action-output-schema #'greet)))
+    (is (= :int (action-output-schema #'add-numbers)))
+    (is (= [:map ["host" :string] ["port" :int]] 
+           (action-output-schema #'parse-config))))
+  
+  (testing "Action has documentation in metadata"
+    (is (= "Greet a person by name and age." (action-doc #'greet)))))
 
-(deftest action-registry-test
-  (testing "Can lookup action by discriminator"
-    (is (= #'llm-action (lookup-action "llm")))
-    (is (= #'end-action (lookup-action "end")))
-    (is (= #'fsm-action (lookup-action "fsm")))
-    (is (nil? (lookup-action "unknown")))))
+(deftest def-action-valid-call-test
+  (testing "Valid input and output passes"
+    (is (= "Hello Jules, you are 42 years old!" (greet "Jules" 42)))
+    (is (= 7 (add-numbers 3 4)))
+    (is (= {"host" "localhost" "port" 8080} (parse-config "any")))))
 
-(deftest action-schema-lookup-test
-  (testing "Can retrieve schema for action"
-    (is (= [:map {:closed true}
-            ["action" [:= "llm"]]
-            ["prompts" {:optional true} [:vector :string]]
-            ["provider" {:optional true} :string]
-            ["model" {:optional true} :string]]
-           (action-schema "llm")))
-    (is (= [:map {:closed true}
-            ["action" [:= "end"]]]
-           (action-schema "end")))))
+(deftest def-action-input-validation-test
+  (testing "Wrong type for first arg throws"
+    (let [ex (try (greet 123 42) nil
+                  (catch Exception e e))]
+      (is (some? ex))
+      (is (= :input-validation (:type (ex-data ex))))
+      (is (= "greet" (:action (ex-data ex))))))
+  
+  (testing "Wrong type for second arg throws"
+    (let [ex (try (greet "Jules" "not-an-int") nil
+                  (catch Exception e e))]
+      (is (some? ex))
+      (is (= :input-validation (:type (ex-data ex))))))
+  
+  (testing "Wrong arity throws"
+    (let [ex (try (greet "Jules") nil
+                  (catch Exception e e))]
+      (is (some? ex))
+      (is (= :input-validation (:type (ex-data ex))))))
+  
+  (testing "Extra args throws"
+    (let [ex (try (greet "Jules" 42 "extra") nil
+                  (catch Exception e e))]
+      (is (some? ex))
+      (is (= :input-validation (:type (ex-data ex)))))))
 
-(deftest validate-state-params-test
-  (testing "Valid llm state passes validation"
-    (is (nil? (validate-state-params
-               {"action" "llm"
-                "prompts" ["You are a helpful assistant."]}))))
-  
-  (testing "Valid llm state with all optional params"
-    (is (nil? (validate-state-params
-               {"action" "llm"
-                "prompts" ["System prompt"]
-                "provider" "anthropic"
-                "model" "claude-sonnet-4-20250514"}))))
-  
-  (testing "Valid end state (no params needed)"
-    (is (nil? (validate-state-params
-               {"action" "end"}))))
-  
-  (testing "Valid fsm state"
-    (is (nil? (validate-state-params
-               {"action" "fsm"
-                "fsm-id" "code-review-fsm"}))))
-  
-  (testing "Invalid: extra params on closed map"
-    (let [result (validate-state-params
-                  {"action" "end"
-                   "unexpected" "param"})]
-      (is (some? result))
-      (is (= :invalid-action-params (:error result)))))
-  
-  (testing "Invalid: wrong type for prompts"
-    (let [result (validate-state-params
-                  {"action" "llm"
-                   "prompts" "should be a vector"})]
-      (is (some? result))
-      (is (= :invalid-action-params (:error result)))))
-  
-  (testing "Invalid: missing required param"
-    (let [result (validate-state-params
-                  {"action" "fsm"
-                   ;; missing fsm-id which is required
-                   })]
-      (is (some? result))
-      (is (= :invalid-action-params (:error result))))))
+(deftest def-action-output-validation-test
+  (testing "Wrong output type throws"
+    (let [ex (try (broken-output "test") nil
+                  (catch Exception e e))]
+      (is (some? ex))
+      (is (= :output-validation (:type (ex-data ex))))
+      (is (= "broken-output" (:action (ex-data ex))))
+      (is (= :int (:schema (ex-data ex))))
+      (is (= "not an int: test" (:value (ex-data ex)))))))
 
-(deftest unknown-action-test
-  (testing "Unknown action returns nil schema (no validation)"
-    (is (nil? (action-schema "unknown")))
-    ;; For now, unknown actions pass validation (no schema to check against)
-    ;; In production, we might want to fail on unknown actions
-    (is (nil? (validate-state-params
-               {"action" "unknown"
-                "whatever" "params"})))))
+(deftest action-registry-pattern-test
+  (testing "Can build registry from action vars"
+    (let [registry (->> [#'greet #'add-numbers #'parse-config]
+                        (map (fn [v] [(action-name v) v]))
+                        (into {}))]
+      (is (= #'greet (get registry "greet")))
+      (is (= [:tuple :string :int] 
+             (action-input-schema (get registry "greet"))))
+      (is (= :string 
+             (action-output-schema (get registry "greet")))))))
