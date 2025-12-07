@@ -15,19 +15,16 @@
 ;; Schemas - IDENTICAL to POC
 
 (def minimal-schemas
-  "Exact same schemas as POC, with string registry keys"
+  "Schemas with IDs that match FSM transition IDs.
+   The 'id' field must be the actual transition [from to] for FSM routing."
   {"input" [:map {:closed true}
             ["question" :string]]
    
-   "output-agree" [:map {:closed true}
-                   ["id" [:= ["user" "agree"]]]
-                   ["message" :string]]
-   
-   "output-disagree" [:map {:closed true}
-                      ["id" [:= ["user" "disagree"]]]
-                      ["reason" :string]]
-   
-   "output" [:or [:ref "output-agree"] [:ref "output-disagree"]]})
+   ;; Single output schema - id must match transition ["responder" "end"]
+   "output" [:map {:closed true}
+             ["id" [:= ["responder" "end"]]]
+             ["answer" :string]
+             ["agree" :boolean]]})
 
 (def minimal-registry
   (mr/composite-registry base-registry minimal-schemas))
@@ -88,7 +85,9 @@
     (let [{:keys [success response error]} (test-minimal-fsm)]
       (is success (str "Should succeed. Error: " error " Response: " response))
       (when success
-        (is (= ["user" "agree"] (get response "id"))
+        (is (= ["responder" "end"] (get response "id"))
+            "Should have correct transition id")
+        (is (true? (get response "agree"))
             "Should agree that 2+2=4")))))
 
 ;; REPL helper
