@@ -4,8 +4,8 @@
    [clojure.tools.logging :as log]
    [claij.llm.open-router :as llm]))
 
-(deftest json-parse-retry-mock-test
-  (testing "JSON parse errors trigger retries with error feedback"
+(deftest edn-parse-retry-mock-test
+  (testing "EDN parse errors trigger retries with error feedback"
     (let [;; Track attempts and prompts
           attempts (atom [])
 
@@ -17,15 +17,15 @@
                         (swap! attempts conj messages)
 
                         (cond
-                          ;; First attempt: return malformed JSON
+                          ;; First attempt: return malformed EDN (unbalanced braces)
                           (= attempt-num 0)
                           (success-callback {:body (clojure.data.json/write-str
-                                                    {"choices" [{"message" {"content" "[{\"$ref\":\"#/$defs/foo\"}, {\"bad\": json"}}]})})
+                                                    {"choices" [{"message" {"content" "{\"id\" [\"a\" \"b\"] :bad"}}]})})
 
-                          ;; Second attempt: return valid JSON
+                          ;; Second attempt: return valid EDN
                           :else
                           (success-callback {:body (clojure.data.json/write-str
-                                                    {"choices" [{"message" {"content" "{\"id\": [\"a\", \"b\"], \"data\": \"ok\"}"}}]})}))))
+                                                    {"choices" [{"message" {"content" "{\"id\" [\"a\" \"b\"] \"data\" \"ok\"}"}}]})}))))
 
           result (promise)]
 
@@ -48,21 +48,21 @@
               last-message (last retry-messages)
               content (get last-message "content")]
           (is (re-find #"could not unmarshal" content) "Error message should mention unmarshaling")
-          (is (re-find #"clojure\.data\.json" content) "Error message should mention json parser"))
+          (is (re-find #"EDN" content) "Error message should mention EDN"))
 
         ;; Should eventually succeed
-        (is (= (get final-result "id") ["a" "b"]) "Should parse valid JSON on retry")))))
+        (is (= (get final-result "id") ["a" "b"]) "Should parse valid EDN on retry")))))
 
-(deftest json-parse-max-retries-test
-  (testing "JSON parse gives up after max retries"
+(deftest edn-parse-max-retries-test
+  (testing "EDN parse gives up after max retries"
     (let [;; Track attempts
           attempt-count (atom 0)
 
-          ;; Mock HTTP post that always returns bad JSON
+          ;; Mock HTTP post that always returns bad EDN
           mock-post (fn [_url _opts success-callback _error-callback]
                       (swap! attempt-count inc)
                       (success-callback {:body (clojure.data.json/write-str
-                                                {"choices" [{"message" {"content" "bad json {"}}]})}))
+                                                {"choices" [{"message" {"content" "{:bad edn {"}}]})}))
 
           result (promise)
           error-called (atom false)]
