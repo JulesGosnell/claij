@@ -314,10 +314,13 @@
 
         ;; Create interface functions
         submit (fn [input-data]
-                 ;; Send event to entry channel with entry event already in trail
-                 ;; The entry event is the initial transition into the FSM
+                 ;; Send event to entry channel
+                 ;; Only add to trail if entry transition doesn't have omit=true
                  (let [[from to] (get input-data "id")
-                       initial-trail [{:from from :to to :event input-data}]
+                       entry-omit? (get entry-xition "omit")
+                       initial-trail (if entry-omit?
+                                       []
+                                       [{:from from :to to :event input-data}])
                        message {:context context
                                 :event input-data
                                 :trail initial-trail}]
