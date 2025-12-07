@@ -207,7 +207,8 @@
           (testing "Trail contains expected transitions"
             ;; Trail should have at least: entry → request → response → summary
             (is (>= (count trail) 4) "Trail should have at least 4 events")
-            (let [ids (map #(get % "id") trail)]
+            ;; Trail entries are {:from :to :event} - extract id from :event
+            (let [ids (map #(get-in % [:event "id"]) trail)]
               (is (some #{["start" "mc"]} ids) "Should have entry transition")
               (is (some #{["mc" "reviewer"]} ids) "Should have request transition")
               (is (some #{["reviewer" "mc"]} ids) "Should have response transition")
