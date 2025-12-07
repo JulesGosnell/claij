@@ -17,15 +17,15 @@
 (def minimal-schemas
   "Exact same schemas as POC, with string registry keys"
   {"input" [:map {:closed true}
-            [:question :string]]
+            ["question" :string]]
    
    "output-agree" [:map {:closed true}
-                   [:id [:= ["user" "agree"]]]
-                   [:message :string]]
+                   ["id" [:= ["user" "agree"]]]
+                   ["message" :string]]
    
    "output-disagree" [:map {:closed true}
-                      [:id [:= ["user" "disagree"]]]
-                      [:reason :string]]
+                      ["id" [:= ["user" "disagree"]]]
+                      ["reason" :string]]
    
    "output" [:or [:ref "output-agree"] [:ref "output-disagree"]]})
 
@@ -36,29 +36,31 @@
 ;; FSM Definition - Simplest possible: start -> responder -> end
 
 (def minimal-fsm
-  {:id "minimal-test"
-   :schemas minimal-schemas
-   :prompts []  ;; No extra FSM-level prompts
+  {"id" "minimal-test"
+   "schemas" minimal-schemas
+   "prompts" []  ;; No extra FSM-level prompts
    
-   :states
-   [{:id "responder"
-     :action "llm"
-     :prompts []}  ;; No extra state-level prompts - rely on system prompt
-    {:id "end"
-     :action "end"}]
+   "states"
+   [{"id" "responder"
+     "action" "llm"
+     "prompts" []}  ;; No extra state-level prompts - rely on system prompt
+    {"id" "end"
+     "action" "end"}]
    
-   :xitions
-   [{:id ["start" "responder"]
-     :schema [:ref "input"]}
-    {:id ["responder" "end"]
-     :schema [:ref "output"]}]})
+   "xitions"
+   [{"id" ["start" "responder"]
+     "schema" [:ref "input"]}
+    {"id" ["responder" "end"]
+     "schema" [:ref "output"]}]})
 
 ;;------------------------------------------------------------------------------
 ;; End action
 
-(defn end-action [context _fsm _ix _state event trail _handler]
+(defn end-action [context _fsm _ix _state _event trail _handler]
+  ;; Trail already includes current event (added by xform)
+  ;; Remove promise from context to avoid circular refs
   (when-let [p (:fsm/completion-promise context)]
-    (deliver p [context (conj trail event)])))
+    (deliver p [(dissoc context :fsm/completion-promise) trail])))
 
 ;;------------------------------------------------------------------------------
 ;; Test
@@ -70,7 +72,8 @@
         context {:id->action actions
                  :llm/provider "anthropic"
                  :llm/model "claude-sonnet-4.5"}
-        input {:question "Is 2 + 2 = 4?"}
+        ;; Use string keys for input - matches schema
+        input {"question" "Is 2 + 2 = 4?"}
         result (fsm/run-sync minimal-fsm context input 60000)]
     (if (= result :timeout)
       {:success false :error "Timeout"}
@@ -85,7 +88,7 @@
     (let [{:keys [success response error]} (test-minimal-fsm)]
       (is success (str "Should succeed. Error: " error " Response: " response))
       (when success
-        (is (= ["user" "agree"] (:id response))
+        (is (= ["user" "agree"] (get response "id"))
             "Should agree that 2+2=4")))))
 
 ;; REPL helper
