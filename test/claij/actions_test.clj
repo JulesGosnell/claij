@@ -2,7 +2,7 @@
   "Tests for def-action macro and action helpers."
   (:require
    [clojure.test :refer [deftest testing is]]
-   [claij.actions :refer [def-action action? action-name action-config-schema]]))
+   [claij.action :refer [def-action action? action-name action-config-schema]]))
 
 ;;==============================================================================
 ;; Example Actions for Testing

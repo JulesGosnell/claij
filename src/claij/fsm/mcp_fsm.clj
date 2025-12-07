@@ -12,6 +12,7 @@
    [clojure.core.async :refer [chan alt!! timeout <!! >!!]]
    [malli.registry :as mr]
    [claij.malli :refer [def-fsm base-registry]]
+   [claij.action :refer [def-action]]
    [claij.fsm :refer [llm-action]]
    [claij.mcp.bridge :refer [start-mcp-bridge]]
    [claij.mcp :refer [initialise-request
@@ -59,90 +60,105 @@
 ;; MCP FSM Actions
 ;;==============================================================================
 
-(defn start-action [context fsm ix state {d "document" :as event} trail handler]
-  (log/info "start-action:" (pr-str d))
-  (let [n 100
-        config {"command" "bash", "args" ["-c", "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"], "transport" "stdio"}
-        ic (chan n (map write-str))
-        oc (chan n (map read-str))
-        stop (start-mcp-bridge config ic oc)
-        ;; Build composite registry: base + FSM schemas + MCP schemas
-        ;; Preserve existing registry from context (built by start-fsm)
-        existing-registry (get context :malli/registry)
-        mcp-registry (mr/composite-registry
-                      (or existing-registry base-registry)
-                      mcp-schemas)
-        ;; Store MCP bridge in context instead of global atom
-        ;; Register schema functions for dynamic schema resolution
-        ;; Store document in context so it's available throughout the FSM
-        updated-context (assoc context
-                               :mcp/bridge {:input ic :output oc :stop stop}
-                               :mcp/request-id 0
-                               :mcp/document d
-                               :malli/registry mcp-registry
-                               :id->schema {"mcp-request-xition" mcp-request-xition-schema-fn
-                                            "mcp-response-xition" mcp-response-xition-schema-fn})
-        init-request (assoc initialise-request "id" 0)]
-    (handler
-     updated-context
-     (let [{m "method" :as message} (take! oc 5000 init-request)]
-       (cond
-         ;; Server sent initialize request, or we timed out (default is init-request)
-         (= m "initialize")
-         (wrap ["starting" "shedding"] d message)
+(def-action start-action
+  "Starts the MCP bridge and sends initialize request."
+  [:map]
+  [_config _fsm _ix _state]
+  (fn [context {d "document" :as event} _trail handler]
+    (log/info "start-action:" (pr-str d))
+    (let [n 100
+          config {"command" "bash", "args" ["-c", "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"], "transport" "stdio"}
+          ic (chan n (map write-str))
+          oc (chan n (map read-str))
+          stop (start-mcp-bridge config ic oc)
+          ;; Build composite registry: base + FSM schemas + MCP schemas
+          ;; Preserve existing registry from context (built by start-fsm)
+          existing-registry (get context :malli/registry)
+          mcp-registry (mr/composite-registry
+                        (or existing-registry base-registry)
+                        mcp-schemas)
+          ;; Store MCP bridge in context instead of global atom
+          ;; Register schema functions for dynamic schema resolution
+          ;; Store document in context so it's available throughout the FSM
+          updated-context (assoc context
+                                 :mcp/bridge {:input ic :output oc :stop stop}
+                                 :mcp/request-id 0
+                                 :mcp/document d
+                                 :malli/registry mcp-registry
+                                 :id->schema {"mcp-request-xition" mcp-request-xition-schema-fn
+                                              "mcp-response-xition" mcp-response-xition-schema-fn})
+          init-request (assoc initialise-request "id" 0)]
+      (handler
+       updated-context
+       (let [{m "method" :as message} (take! oc 5000 init-request)]
+         (cond
+           ;; Server sent initialize request, or we timed out (default is init-request)
+           (= m "initialize")
+           (wrap ["starting" "shedding"] d message)
 
-         ;; Server sent something else (notifications) - use our initialize request
-         :else
-         (wrap ["starting" "shedding"] d init-request))))))
+           ;; Server sent something else (notifications) - use our initialize request
+           :else
+           (wrap ["starting" "shedding"] d init-request)))))))
 
-(defn shed-action [context fsm ix state {{im "method" :as message} "message" document "document" :as event} trail handler]
-  (log/info "shed-action:" (pr-str message))
-  (let [{{ic :input oc :output} :mcp/bridge} context]
-    (>!! ic message)
-    (handler context (wrap ["shedding" "initing"] document (hack oc)))))
+(def-action shed-action
+  "Sheds unwanted list_changed messages during initialization."
+  [:map]
+  [_config _fsm _ix _state]
+  (fn [context {{im "method" :as message} "message" document "document" :as event} _trail handler]
+    (log/info "shed-action:" (pr-str message))
+    (let [{{ic :input oc :output} :mcp/bridge} context]
+      (>!! ic message)
+      (handler context (wrap ["shedding" "initing"] document (hack oc))))))
 
-(defn init-action [context fsm ix state {{im "method" :as message} "message" document "document" :as event} trail handler]
-  (log/info "init-action:" (pr-str message))
-  ;; Extract capabilities from initialization response and set up cache
-  (let [capabilities (get-in message ["result" "capabilities"])
-        updated-context (if capabilities
-                          (update context "state" initialize-mcp-cache capabilities)
-                          context)]
-    (handler updated-context (wrap ["initing" "servicing"] document initialised-notification))))
+(def-action init-action
+  "Extracts capabilities from initialization response and sets up cache."
+  [:map]
+  [_config _fsm _ix _state]
+  (fn [context {{im "method" :as message} "message" document "document" :as event} _trail handler]
+    (log/info "init-action:" (pr-str message))
+    ;; Extract capabilities from initialization response and set up cache
+    (let [capabilities (get-in message ["result" "capabilities"])
+          updated-context (if capabilities
+                            (update context "state" initialize-mcp-cache capabilities)
+                            context)]
+      (handler updated-context (wrap ["initing" "servicing"] document initialised-notification)))))
 
-(defn service-action
+(def-action service-action
   "Routes messages to MCP bridge and handles responses.
    Routing depends on where the message came from."
-  [context fsm {id "id"} state {m "message" document "document" :as event} trail handler]
-  (log/info "service-action: from" id "message:" (pr-str m))
-  (let [{{ic :input oc :output} :mcp/bridge} context
-        [from _to] id]
-    (>!! ic m)
-    (let [{method "method" :as oe} (take! oc 2000 {})]
-      (handler
-       context
-       (cond
-         ;; Notification received - route to caching
-         method
-         (wrap ["servicing" "caching"] document oe)
+  [:map]
+  [_config _fsm ix _state]
+  (fn [context {m "message" document "document" :as event} _trail handler]
+    (let [{id "id"} ix]
+      (log/info "service-action: from" id "message:" (pr-str m))
+      (let [{{ic :input oc :output} :mcp/bridge} context
+            [from _to] id]
+        (>!! ic m)
+        (let [{method "method" :as oe} (take! oc 2000 {})]
+          (handler
+           context
+           (cond
+             ;; Notification received - route to caching
+             method
+             (wrap ["servicing" "caching"] document oe)
 
-         ;; Response to tool call from llm - route back to llm with result
-         (= from "llm")
-         (cond-> {"id" ["servicing" "llm"] "message" oe}
-           document (assoc "document" document))
+             ;; Response to tool call from llm - route back to llm with result
+             (= from "llm")
+             (cond-> {"id" ["servicing" "llm"] "message" oe}
+               document (assoc "document" document))
 
-         ;; Response to cache request - route back to caching with result
-         (= from "caching")
-         {"id" ["servicing" "caching"] "message" oe}
+             ;; Response to cache request - route back to caching with result
+             (= from "caching")
+             {"id" ["servicing" "caching"] "message" oe}
 
-         ;; Timeout/empty response during init phase - go to caching to populate
-         (= from "initing")
-         {"id" ["servicing" "caching"] "message" {}}
+             ;; Timeout/empty response during init phase - go to caching to populate
+             (= from "initing")
+             {"id" ["servicing" "caching"] "message" {}}
 
-         ;; Other timeout - go to llm
-         :else
-         (cond-> {"id" ["servicing" "llm"]}
-           document (assoc "document" document)))))))
+             ;; Other timeout - go to llm
+             :else
+             (cond-> {"id" ["servicing" "llm"]}
+               document (assoc "document" document)))))))))
 
 (defn check-cache-and-continue
   "Inspect cache for holes. Request missing data until cache is complete.
@@ -171,59 +187,65 @@
         (handler context {"id" ["caching" "llm"]
                           "document" (:mcp/document context)})))))
 
-(defn cache-action
+(def-action cache-action
   "Manages cache population by inspecting state and requesting missing data.
    Routes based on incoming message type."
-  [context fsm {id "id"} state {m "message" :as event} trail handler]
-  (let [{method "method" result "result"} m]
-    (cond
-      ;; Incoming list response - refresh cache with data
-      result
-      (do
-        (log/info "cache-action: received list response, refreshing cache")
-        (let [updated-context (update context "state" refresh-mcp-cache-item result)]
-          (check-cache-and-continue updated-context handler)))
+  [:map]
+  [_config _fsm ix _state]
+  (fn [context {m "message" :as event} _trail handler]
+    (let [{id "id"} ix
+          {method "method" result "result"} m]
+      (cond
+        ;; Incoming list response - refresh cache with data
+        result
+        (do
+          (log/info "cache-action: received list response, refreshing cache")
+          (let [updated-context (update context "state" refresh-mcp-cache-item result)]
+            (check-cache-and-continue updated-context handler)))
 
-      ;; list_changed notification - invalidate and request refresh
-      (and method (list-changed? method))
-      (let [capability (list-changed? method)
-            updated-context (update context "state" invalidate-mcp-cache-item capability)
-            request-id (inc (:mcp/request-id context))
-            request {"jsonrpc" "2.0"
-                     "id" request-id
-                     "method" (str capability "/list")}]
-        (log/info "cache-action: list_changed for" capability ", requesting refresh")
-        (handler
-         (assoc updated-context :mcp/request-id request-id)
-         {"id" ["caching" "servicing"] "message" request}))
+        ;; list_changed notification - invalidate and request refresh
+        (and method (list-changed? method))
+        (let [capability (list-changed? method)
+              updated-context (update context "state" invalidate-mcp-cache-item capability)
+              request-id (inc (:mcp/request-id context))
+              request {"jsonrpc" "2.0"
+                       "id" request-id
+                       "method" (str capability "/list")}]
+          (log/info "cache-action: list_changed for" capability ", requesting refresh")
+          (handler
+           (assoc updated-context :mcp/request-id request-id)
+           {"id" ["caching" "servicing"] "message" request}))
 
-      ;; Initial entry or retry - inspect cache and request missing data
-      :else
-      (do
-        (log/info "cache-action: checking cache for missing data")
-        (check-cache-and-continue context handler)))))
+        ;; Initial entry or retry - inspect cache and request missing data
+        :else
+        (do
+          (log/info "cache-action: checking cache for missing data")
+          (check-cache-and-continue context handler))))))
 
-(defn end-action
+(def-action mcp-end-action
   "Final action that signals FSM completion via promise delivery."
-  [context _fsm _ix _state event trail _handler]
-  (log/info "FSM complete - reached end state")
+  [:map]
+  [_config _fsm _ix _state]
+  (fn [context _event trail _handler]
+    (log/info "FSM complete - reached end state")
 
-  ;; NOTE: We DON'T stop MCP subprocess here because it blocks
-  ;; Let the FSM's stop function or test cleanup handle it
+    ;; NOTE: We DON'T stop MCP subprocess here because it blocks
+    ;; Let the FSM's stop function or test cleanup handle it
 
-  ;; Deliver completion: [context trail]
-  (when-let [p (:fsm/completion-promise context)]
-    (deliver p [context trail]))
-  nil)
+    ;; Deliver completion: [context trail]
+    (when-let [p (:fsm/completion-promise context)]
+      (deliver p [context trail]))
+    nil))
 
 (def mcp-actions
-  {"start" start-action
-   "shed" shed-action
-   "init" init-action
-   "service" service-action
-   "cache" cache-action
-   "llm" llm-action
-   "end" end-action})
+  "MCP action implementations. Stores vars to preserve metadata for action? checks."
+  {"start" #'start-action
+   "shed" #'shed-action
+   "init" #'init-action
+   "service" #'service-action
+   "cache" #'cache-action
+   "llm" #'llm-action
+   "end" #'mcp-end-action})
 
 ;;==============================================================================
 ;; MCP FSM Definition
