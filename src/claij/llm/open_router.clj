@@ -161,10 +161,10 @@
     model - Model name (e.g., 'gpt-4o')
     prompts - Vector of message maps with :role and :content
     handler - Function to call with successful response
-    schema - (Optional) JSON Schema for structured output
+    schema - (Optional) Malli schema for response validation
     error - (Optional) Function to call on error
     retry-count - (Internal) Current retry attempt number
-    max-retries - Maximum number of retries for malformed JSON (default: 3)"
+    max-retries - Maximum number of retries for malformed EDN (default: 3)"
   [provider model prompts handler & [{:keys [schema error retry-count max-retries]
                                       :or {retry-count 0 max-retries 3}}]]
   (log/info (str "      LLM Call: " provider "/" model

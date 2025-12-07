@@ -89,23 +89,8 @@
          :errors [(str "Schema validation error: " schema event (.getMessage e))]}))))
 
 ;;------------------------------------------------------------------------------
-;; Legacy JSON Schema Constants (for reference during migration)
-;;------------------------------------------------------------------------------
-;; FSM Schema Constants
-;;------------------------------------------------------------------------------
-
-;; schema-base-uri removed during Malli migration - was only used by xition-schema
-
-;; meta-schema-uri removed during Malli migration - was only used by xition-schema
-
-;;------------------------------------------------------------------------------
 ;; Schema Utilities
 ;;------------------------------------------------------------------------------
-
-;; expand-schema and xition-schema removed during Malli migration.
-;; These functions produced JSON Schema format and were never used in production.
-;; The MCP equivalents (mcp-request-xition-schema-fn, mcp-response-xition-schema-fn)
-;; now produce Malli schemas directly.
 
 (defn resolve-schema
   "Resolve a transition schema, supporting dynamic schema generation.

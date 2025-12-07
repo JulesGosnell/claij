@@ -8,12 +8,12 @@
 ;; - Alternatives: Cytoscape.js or vis.js (easier animation but different layout).
 ;; Recommendation: d3-graphviz = same look + easy real-time highlighting.
 
-;; TODO: Enhance transition labels by using JSON Schema documentation.
-;; JSON Schema supports top-level "title" (short name) and "description" (detailed explanation).
-;; Plan: When schemas are updated, add "title" and/or top-level "description" to each transition's schema.
+;; TODO: Enhance transition labels by using Malli schema documentation.
+;; Malli schemas support :description in map metadata, e.g. [:map {:description "..."} ...]
+;; Plan: When schemas are updated, add :description to each transition's schema.
 ;; Then update label logic:
-;;   prefer xition "label" → xition "description" → schema "title" → schema "description" → fallback to 'to' state
-;; This gives concise edge labels (title) while keeping full details available if needed.
+;;   prefer xition "label" → xition "description" → schema :description → fallback to 'to' state
+;; This gives concise edge labels while keeping full details available if needed.
 
 
 ;; thanks Grok
