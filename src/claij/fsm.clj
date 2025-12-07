@@ -402,9 +402,9 @@
    - Future: could include :temperature, :max-tokens, etc."
   {["anthropic" "claude-sonnet-4.5"]
    {:prompts [{:role "system"
-               :content "CRITICAL: Your response must be ONLY valid JSON - no explanatory text before or after."}
+               :content "CRITICAL: Your response must be ONLY valid EDN - no explanatory text before or after."}
               {:role "system"
-               :content "CRITICAL: Ensure your JSON is complete - do not truncate. Check that all braces and brackets are closed."}
+               :content "CRITICAL: Use string keys like \"id\" not keyword keys like :id."}
               {:role "system"
                :content "CRITICAL: Be concise in your response to avoid hitting token limits."}]}
 
@@ -491,20 +491,32 @@
          llm-user-prompts (mapv :content (filter #(= (:role %) "user") llm-prompts))]
 
      (concat
-      ;; Build system message with clear tuple-3 explanation
+      ;; Build system message with clear tuple-3 explanation - matches POC style
       [{"role" "system"
         "content" (join
                    "\n"
                    (concat
-                    ["All your requests and responses will be in E[xtensible]D[ata]N[otation] described by Malli schemas."
-                     "You are being given the following reference schema. Later schemas may refer to parts of this:" (pr-str fsm-schemas) "."
-                     "Requests will arrive as [INPUT-SCHEMA, INPUT-DOCUMENT, OUTPUT-SCHEMA] triples."
-                     "The INPUT-SCHEMA describes the structure of the INPUT-DOCUMENT."
-                     "You must respond to the contents of the INPUT-DOCUMENT."
-                     "Your response (The OUTPUT-DOCUMENT) must be whooly and solely a single EDN document that is STRICTLY CONFORMANT to the OUTPUT-SCHEMA."
+                    ["We are living in a Clojure world."
+                     "All communications will be in EDN (Extensible Data Notation) format."
                      ""
-                     "CRITICAL:"
-                     "The \"id\" field is a UNIQUE DISCRIMINATOR that determines routing - you must copy in the const value from the relevant sub-schema"]
+                     "REFERENCE SCHEMAS:"
+                     (pr-str fsm-schemas)
+                     ""
+                     "YOUR REQUEST:"
+                     "- will contain [INPUT-SCHEMA INPUT-DOCUMENT OUTPUT-SCHEMA] triples."
+                     "- INPUT-SCHEMA: Malli schema describing the INPUT-DOCUMENT"
+                     "- INPUT-DOCUMENT: The actual data to process"
+                     "- OUTPUT-SCHEMA: Malli schema your response MUST conform to"
+                     ""
+                     "YOUR RESPONSE - the OUTPUT-DOCUMENT:"
+                     "- Must be ONLY valid EDN (no markdown, no backticks, no explanation)"
+                     "- Must use string keys like \"id\" not keyword keys like :id"
+                     "- The OUTPUT-SCHEMA will offer you a set (possibly only one) of choices/sub-schemas"
+                     "- Your OUTPUT-DOCUMENT must conform strictly to one of these - it is a document NOT a schema itself"
+                     "- Each sub-schema will contain a discriminator called \"id\". You must include this"
+                     "- You must include all non-optional fields with a valid value"
+                     ""
+                     "CONTEXT:"]
                     fsm-prompts
                     ix-prompts
                     state-prompts
@@ -535,8 +547,29 @@
         output-xitions (filter (fn [{[from _to] "id"}] (= from sid)) xs)
         output-schema (state-schema context fsm state output-xitions)
 
+        ;; Get registry for expanding refs
+        registry (or (get context :malli/registry)
+                     (build-fsm-registry fsm context))
+        
+        ;; Build prompt trail from history
         prompt-trail (trail->prompts context fsm trail)
-        prompts (make-prompts fsm ix state prompt-trail provider model)]
+        
+        ;; CRITICAL: When trail is empty (first call), we need to send the initial event!
+        ;; POC sends [input-schema input-doc output-schema] as user message
+        ;; We do the same here - use entry transition schema as input-schema
+        initial-message (when (empty? trail)
+                          (let [ix-schema-raw (resolve-schema context ix (get ix "schema"))
+                                ix-schema (expand-refs-for-llm ix-schema-raw registry)
+                                out-schema (expand-refs-for-llm output-schema registry)]
+                            [{"role" "user" 
+                              "content" (pr-str [ix-schema event out-schema])}]))
+        
+        ;; Combine: trail prompts + initial message if needed
+        full-trail (if initial-message
+                     initial-message
+                     prompt-trail)
+        
+        prompts (make-prompts fsm ix state full-trail provider model)]
     (log/info (str "   Using LLM: " provider "/" model " with " (count prompts) " prompts"))
     (open-router-async
      provider model
