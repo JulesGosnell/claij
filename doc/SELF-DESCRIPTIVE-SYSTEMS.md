@@ -39,6 +39,7 @@ Similar patterns appear throughout computer science and mathematics:
 - **Universal Turing Machines**: Machines that simulate any machine, including themselves  
 - **Gödel Numbering**: Encoding statements as numbers the system can reason about
 - **The Y Combinator**: Achieving recursion without explicit self-reference
+- **GNU**: A recursive acronym (GNU's Not Unix)
 
 A self-improving system is necessarily a reflexively self-descriptive system.
 
