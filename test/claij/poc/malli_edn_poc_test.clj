@@ -50,16 +50,28 @@
 
 (defn call-llm
   "Make a synchronous call to LLM via OpenRouter.
-   Returns the content string from the response."
+   Returns the content string from the response.
+   Logs full request/response for debugging."
   [provider model messages]
-  (let [response (http/post api-url
+  (let [request-body {:model (str provider "/" model)
+                      :messages messages}
+        _ (println "\n========== POC REQUEST ==========")
+        _ (println "Model:" (str provider "/" model))
+        _ (println "Messages:")
+        _ (doseq [m messages]
+            (println "  Role:" (get m "role"))
+            (println "  Content:" (subs (get m "content") 0 (min 500 (count (get m "content")))) "..."))
+        response (http/post api-url
                             {:headers {"Authorization" (str "Bearer " (api-key))
                                        "Content-Type" "application/json"}
-                             :body (json/generate-string
-                                    {:model (str provider "/" model)
-                                     :messages messages})
-                             :as :json})]
-    (get-in response [:body :choices 0 :message :content])))
+                             :body (json/generate-string request-body)
+                             :as :json})
+        content (get-in response [:body :choices 0 :message :content])
+        _ (println "\n========== POC RESPONSE ==========")
+        _ (println "Raw content:")
+        _ (println content)
+        _ (println "==================================")] 
+    content))
 
 ;;------------------------------------------------------------------------------
 ;; System Prompt - CRITICAL: This is what makes EDN/Malli work

@@ -2,10 +2,11 @@
   (:require
    [clojure.string :refer [join split trim]]
    [clojure.tools.logging :as log]
-   [clojure.data.json :refer [read-str]]
+   [clojure.edn :as edn]
    [clojure.pprint :refer [pprint]]
    [clojure.core.async :refer [<! <!! >! >!! chan go-loop]]
    [clj-http.client :refer [post]]
+   [cheshire.core :as json]
    [claij.repl :refer [start-prepl]]
    [claij.util :refer [assert-env-var clj->json json->clj make-retrier]]))
 
@@ -137,10 +138,12 @@
 ;; for claude ?
 
 (defn strip-md-json [s]
-  (let [m (re-matches #"(?s)\s*```json\s*(.*)\s*```\s*" s)]
+  (let [m (re-matches #"(?s)\s*```(?:json|edn|clojure)?\s*(.*)\s*```\s*" s)]
     (if m (second m) s)))
 
-(defn unpack [{b :body}] (let [{[{{c :content} :message}] :choices} (read-str b :key-fn keyword)] c))
+(defn unpack [{b :body}] 
+  (let [{[{{c :content} :message}] :choices} (json/parse-string b true)] 
+    c))
 
 (defn ppr-str [x]
   (with-out-str (pprint x)))
@@ -179,7 +182,7 @@
          (let [d (strip-md-json (unpack r))]
            (reset! llm-response-capture {:raw d :status :received :timestamp (java.time.Instant/now)})
            (try
-             (let [j (read-str d)]
+             (let [j (edn/read-string (trim d))]
                (log/info "      [OK] LLM Response: Valid EDN received")
                (swap! llm-response-capture assoc :parsed j :status :success)
                (handler j))
@@ -212,7 +215,7 @@
      (fn [exception]
        (reset! llm-response-capture {:exception exception :status :error :timestamp (java.time.Instant/now)})
        (try
-         (let [m (read-str (:body (.getData exception)))]
+         (let [m (json/parse-string (:body (.getData exception)) true)]
            (log/error (str "      [X] LLM Request Failed: " (get m "error")))
            (swap! llm-response-capture assoc :error-body m)
            (when error (error m)))
