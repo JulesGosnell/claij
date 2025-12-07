@@ -314,10 +314,13 @@
 
         ;; Create interface functions
         submit (fn [input-data]
-                 ;; Send event and empty trail to entry channel
-                 (let [message {:context context
+                 ;; Send event to entry channel with entry event already in trail
+                 ;; The entry event is the initial transition into the FSM
+                 (let [[from to] (get input-data "id")
+                       initial-trail [{:from from :to to :event input-data}]
+                       message {:context context
                                 :event input-data
-                                :trail []}]
+                                :trail initial-trail}]
                    (safe-channel-operation #(>!! entry-channel %) message)
                    (log/info (str "   Submitted document to FSM: " start-state))))
 
