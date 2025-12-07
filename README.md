@@ -163,6 +163,10 @@ But the architecture is sound. The philosophy is necessary. And the way software
 
 I'm looking for collaborators and opportunities. If you have a Clojure project—particularly one involving AI agents, LLM orchestration, or self-improving systems—I'd love to talk.
 
+## I am looking for work / financial support
+
+If you think CLAIJ or aspects of it could benefit your company or would just like me aboard as someone who knows their way around getting the most out of LLMs and the surrounding tech, please get in touch.
+
 **[Connect on LinkedIn →](https://www.linkedin.com/in/jules-gosnell-15952a1/)**
 
 ---
