@@ -121,8 +121,9 @@
 
           end-action (fn [context _fsm _ix _state _event trail _handler]
                        ;; Deliver [context trail] to completion promise
+                       ;; Remove promise from context to avoid circular refs when printing
                        (when-let [p (:fsm/completion-promise context)]
-                         (deliver p [context trail])))
+                         (deliver p [(dissoc context :fsm/completion-promise) trail])))
 
           code-review-actions {"llm" llm-action "end" end-action}
 
@@ -165,9 +166,11 @@
                     "Simplicity: Can this be simpler?"]
 
           ;; End action that delivers [context trail] to completion promise
-          end-action (fn [context _fsm _ix _state event trail _handler]
+          ;; Note: trail already includes current event (added by xform before calling action)
+          end-action (fn [context _fsm _ix _state _event trail _handler]
                        (when-let [p (:fsm/completion-promise context)]
-                         (deliver p [context (conj trail event)])))
+                         ;; Remove promise from context to avoid circular refs when printing
+                         (deliver p [(dissoc context :fsm/completion-promise) trail])))
 
           ;; Use real llm-action from fsm namespace
           code-review-actions {"llm" llm-action "end" end-action}
