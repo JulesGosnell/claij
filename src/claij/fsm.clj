@@ -316,7 +316,8 @@
         submit (fn [input-data]
                  ;; Send event to entry channel
                  ;; Only add to trail if entry transition doesn't have omit=true
-                 (let [[from to] (get input-data "id")
+                 ;; Use entry-xition-id (["start" first-state]) for the from/to, not input-data
+                 (let [[from to] entry-xition-id
                        entry-omit? (get entry-xition "omit")
                        initial-trail (if entry-omit?
                                        []
