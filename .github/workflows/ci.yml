@@ -36,12 +36,12 @@ jobs:
         restore-keys: ${{ runner.os }}-clojure-
         
     - name: Run tests with coverage
-      run: ./bin/test-coverage.sh
+      run: ./bin/test-coverage.sh --codecov
 
-    - name: Deploy coverage to GitHub Pages
+    - name: Upload coverage to Codecov
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-      uses: peaceiris/actions-gh-pages@v4
+      uses: codecov/codecov-action@v4
       with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: ./target/coverage
-        destination_dir: coverage
+        files: ./target/coverage/codecov.json
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: false
