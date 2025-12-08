@@ -1,6 +1,7 @@
 (ns claij.fsm-test
   (:require
    [clojure.test :refer [deftest testing is]]
+   [claij.action :refer [def-action]]
    [claij.malli :refer [valid-fsm?]]
    [claij.fsm :refer [state-schema resolve-schema start-fsm llm-action trail->prompts]]
    [claij.llm.open-router :refer [open-router-async]]))
@@ -42,6 +43,41 @@
     (is true)))
 
 ;;------------------------------------------------------------------------------
+;; Actions for context-threading-test
+;;------------------------------------------------------------------------------
+
+(def-action ctx-state-a-action
+  "Action A - adds cache to context and transitions to state-b."
+  :any
+  [_config _fsm _ix _state]
+  (fn [context _event _trail handler]
+    (handler (assoc context :cache {:tools []})
+             {"id" ["state-a" "state-b"]
+              "data" "test"})))
+
+(def-action ctx-state-b-action
+  "Action B - asserts cache from A, adds more, transitions to end."
+  :any
+  [_config _fsm _ix _state]
+  (fn [context _event _trail handler]
+    ;; Assert cache is present from previous state
+    (assert (= {:tools []} (:cache context)) "Cache should be present from state-a")
+    ;; Add more to cache and transition to end
+    (handler (assoc context :cache {:tools ["bash" "read_file"]})
+             {"id" ["state-b" "end"]})))
+
+(def-action ctx-end-action
+  "End action - delivers completion promise and verifies final context."
+  :any
+  [_config _fsm _ix _state]
+  (fn [context _event trail _handler]
+    ;; Verify final context has accumulated cache
+    (assert (= {:tools ["bash" "read_file"]} (:cache context)) "Cache should have accumulated")
+    ;; Deliver [context trail] to promise
+    (when-let [p (:fsm/completion-promise context)]
+      (deliver p [context trail]))))
+
+;;------------------------------------------------------------------------------
 ;; Weather Schema Integration Test
 
 ;; weather-schema-test removed during Malli migration.
@@ -53,24 +89,7 @@
 
 (deftest context-threading-test
   (testing "Context flows through FSM transitions"
-    (let [state-a-action (fn [context _fsm _ix _state _event _trail handler]
-                          ;; Add cache to context and transition
-                           (handler (assoc context :cache {:tools []})
-                                    {"id" ["state-a" "state-b"]
-                                     "data" "test"}))
-          state-b-action (fn [context _fsm _ix _state _event _trail handler]
-                          ;; Assert cache is present from previous state
-                           (is (= {:tools []} (:cache context)))
-                          ;; Add more to cache and transition to end
-                           (handler (assoc context :cache {:tools ["bash" "read_file"]})
-                                    {"id" ["state-b" "end"]}))
-          end-action (fn [context _fsm _ix _state _event trail _handler]
-                      ;; Deliver [context trail] to promise
-                       (when-let [p (:fsm/completion-promise context)]
-                         (deliver p [context trail]))
-                      ;; Verify final context has accumulated cache
-                       (is (= {:tools ["bash" "read_file"]} (:cache context))))
-          test-fsm {"id" "context-test"
+    (let [test-fsm {"id" "context-test"
                     "states" [{"id" "state-a" "action" "action-a"}
                               {"id" "state-b" "action" "action-b"}
                               {"id" "end" "action" "end"}]
@@ -85,9 +104,9 @@
                                {"id" ["state-b" "end"]
                                 "schema" [:map {:closed true}
                                           ["id" [:= ["state-b" "end"]]]]}]}
-          initial-context {:id->action {"action-a" state-a-action
-                                        "action-b" state-b-action
-                                        "end" end-action}}
+          initial-context {:id->action {"action-a" #'ctx-state-a-action
+                                        "action-b" #'ctx-state-b-action
+                                        "end" #'ctx-end-action}}
           [submit await stop] (claij.fsm/start-fsm initial-context test-fsm)]
 
       ;; Submit and wait for completion

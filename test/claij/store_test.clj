@@ -1,4 +1,4 @@
-(ns claij.store-test
+(ns ^:integration claij.store-test
   "Tests for FSM document storage with versioning"
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
@@ -67,7 +67,7 @@
 ;;------------------------------------------------------------------------------
 ;; Tests
 
-(deftest ^:integration fsm-storage-test
+(deftest fsm-storage-test
   (testing "Error handling"
     (testing "Loading with nil version throws exception"
       (is (thrown? IllegalArgumentException

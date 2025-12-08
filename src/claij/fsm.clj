@@ -34,7 +34,7 @@
    
    DEPRECATED: Legacy 7-arg actions will be removed in a future version.
    Use def-action from claij.action namespace instead."
-  [action-or-var context fsm ix state event trail handler]
+  [action-name action-or-var context fsm ix state event trail handler]
   (if (curried-action? action-or-var)
     ;; Curried: call factory with empty config, then call f2
     (let [action @action-or-var
@@ -42,10 +42,8 @@
       (f2 context event trail handler))
     ;; Legacy: call directly with all 7 args
     (do
-      (log/warn "DEPRECATED: Legacy 7-arg action signature detected."
-                "Migrate to def-action from claij.action namespace."
-                (when (var? action-or-var)
-                  (str "Action var: " action-or-var)))
+      (log/warn (str "DEPRECATED: Legacy 7-arg action '" action-name "'. "
+                     "Migrate to def-action from claij.action namespace."))
       (let [action (if (var? action-or-var) @action-or-var action-or-var)]
         (action context fsm ix state event trail handler)))))
 
@@ -230,7 +228,7 @@
                         (log/info "      [>>] Sending validation error feedback to LLM")
                            ;; Call action again with error in trail
                         (if-let [action (get-in context [:id->action a])]
-                          (invoke-action action new-context fsm ix state event error-trail handler)
+                          (invoke-action a action new-context fsm ix state event error-trail handler)
                           (handler new-context (get-in (peek error-trail) [:error :message]) error-trail))))
                        ;; Max retries exceeded
                     (fn []
@@ -244,7 +242,7 @@
       (if-let [action (get-in context [:id->action a])]
         (do
           (log/info (str "   Action: " a))
-          (invoke-action action context fsm ix state event trail handler))
+          (invoke-action a action context fsm ix state event trail handler))
         (handler context event)))
     (catch Throwable t
       (log/error t "Error in xform"))))

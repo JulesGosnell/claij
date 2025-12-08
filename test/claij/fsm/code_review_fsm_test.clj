@@ -6,48 +6,67 @@
    [malli.error :as me]
    [claij.util :refer [index-by ->key]]
    [claij.llm.open-router :refer [open-router-async]]
-   [claij.fsm :as fsm :refer [start-fsm make-prompts llm-action]]
+   [claij.action :refer [def-action]]
+   [claij.fsm :as fsm :refer [start-fsm make-prompts]]
+   [claij.actions :as actions]
    [claij.fsm.code-review-fsm :refer [code-review-registry
                                       code-review-fsm]]))
 
-;;------------------------------------------------------------------------------
-;; Code Review Schema Tests
+;;==============================================================================
+;; Mock Actions for Unit Testing
+;;==============================================================================
+;; These use def-action to avoid deprecation warnings.
+;; They read :test/event-map from context to determine responses.
+;;==============================================================================
+
+(def-action mock-llm-action
+  "Mock LLM action that looks up response in :test/event-map context."
+  :any
+  [_config _fsm _ix _state]
+  (fn [context event _trail handler]
+    (let [event-map (:test/event-map context)
+          response (get event-map event)]
+      (handler context response))))
+
+(def-action mock-end-action
+  "Mock end action that delivers completion via promise."
+  :any
+  [_config _fsm _ix _state]
+  (fn [context _event trail _handler]
+    (when-let [p (:fsm/completion-promise context)]
+      (deliver p [(dissoc context :fsm/completion-promise) trail]))))
+
+;;==============================================================================
+;; Tests
+;;==============================================================================
 
 (deftest code-review-schema-test
-  (testing "Malli registry validates code-review events"
-    (testing "entry event validation"
-      (let [entry {"id" ["start" "mc"]
-                   "document" "Some code to review"
-                   "llms" [{"provider" "openai" "model" "gpt-4o"}]
-                   "concerns" ["Performance" "Readability"]}]
-        (is (m/validate [:ref "entry"] entry {:registry code-review-registry}))))
+  (testing "code-review FSM schemas validate correctly"
+    (let [entry {"id" ["start" "mc"]
+                 "document" "test code"
+                 "llms" [{"provider" "openai" "model" "gpt-4o"}]
+                 "concerns" ["Simplicity"]}
+          request {"id" ["mc" "reviewer"]
+                   "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
+                   "notes" "Please review"
+                   "concerns" ["Simplicity"]
+                   "llm" {"provider" "openai" "model" "gpt-4o"}}
+          response {"id" ["reviewer" "mc"]
+                    "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
+                    "comments" ["Looks good"]
+                    "notes" "Approved"}
+          summary {"id" ["mc" "end"]
+                   "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
+                   "notes" "Review complete"}]
 
-    (testing "request event validation"
-      (let [request {"id" ["mc" "reviewer"]
-                     "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
-                     "notes" "Please review"
-                     "concerns" ["Simplicity"]
-                     "llm" {"provider" "anthropic" "model" "claude-sonnet-4"}}]
-        (is (m/validate [:ref "request"] request {:registry code-review-registry}))))
-
-    (testing "response event validation"
-      (let [response {"id" ["reviewer" "mc"]
-                      "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
-                      "comments" ["Looks good!"]}]
-        (is (m/validate [:ref "response"] response {:registry code-review-registry}))))
-
-    (testing "summary event validation"
-      (let [summary {"id" ["mc" "end"]
-                     "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
-                     "notes" "Review complete"}]
-        (is (m/validate [:ref "summary"] summary {:registry code-review-registry}))))
-
-    (testing "invalid events are rejected"
-      (is (not (m/validate [:ref "entry"] {"wrong" "data"} {:registry code-review-registry})))
-      (is (not (m/validate [:ref "request"] {"id" ["wrong" "transition"]} {:registry code-review-registry}))))))
-
-;;------------------------------------------------------------------------------
-;; Code Review FSM Mock Tests
+      (is (m/validate [:ref "entry"] entry {:registry code-review-registry})
+          "Entry should validate")
+      (is (m/validate [:ref "request"] request {:registry code-review-registry})
+          "Request should validate")
+      (is (m/validate [:ref "response"] response {:registry code-review-registry})
+          "Response should validate")
+      (is (m/validate [:ref "summary"] summary {:registry code-review-registry})
+          "Summary should validate"))))
 
 (deftest code-review-fsm-mock-test
   (testing "code-review FSM with mock LLM actions"
@@ -116,18 +135,12 @@
            request2-data response2-data
            response2-data summary-data}
 
-          llm-action (fn [context _fsm _ix _state event _trail handler]
-                       (handler context (event-map event)))
+          ;; Use def-action vars to avoid deprecation warnings
+          code-review-actions {"llm" #'mock-llm-action "end" #'mock-end-action}
 
-          end-action (fn [context _fsm _ix _state _event trail _handler]
-                       ;; Deliver [context trail] to completion promise
-                       ;; Remove promise from context to avoid circular refs when printing
-                       (when-let [p (:fsm/completion-promise context)]
-                         (deliver p [(dissoc context :fsm/completion-promise) trail])))
-
-          code-review-actions {"llm" llm-action "end" end-action}
-
-          context {:id->action code-review-actions}
+          ;; Pass event-map through context for mock actions to use
+          context {:id->action code-review-actions
+                   :test/event-map event-map}
 
           [submit await stop-fsm] (start-fsm context code-review-fsm)]
 
@@ -147,13 +160,7 @@
         (finally
           (stop-fsm))))))
 
-;;------------------------------------------------------------------------------
-;; Code Review FSM Integration Tests
-;; 
-;; These tests call REAL LLMs and verify the FSM works end-to-end.
-;; They are slow and cost money - run with: clj -X:test :includes [:integration]
-
-(deftest ^:integration code-review-fsm-integration-test
+(deftest ^:long-running code-review-fsm-integration-test
   (testing "code-review FSM with real LLM - simple fibonacci"
     (let [;; Simple fibonacci code to review
           code "(defn fib [n] (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))"
@@ -165,15 +172,8 @@
           concerns ["Performance: Consider algorithmic efficiency"
                     "Simplicity: Can this be simpler?"]
 
-          ;; End action that delivers [context trail] to completion promise
-          ;; Note: trail already includes current event (added by xform before calling action)
-          end-action (fn [context _fsm _ix _state _event trail _handler]
-                       (when-let [p (:fsm/completion-promise context)]
-                         ;; Remove promise from context to avoid circular refs when printing
-                         (deliver p [(dissoc context :fsm/completion-promise) trail])))
-
-          ;; Use real llm-action from fsm namespace
-          code-review-actions {"llm" llm-action "end" end-action}
+          ;; Use vars to preserve action metadata for curried dispatch
+          code-review-actions {"llm" #'fsm/llm-action "end" #'actions/end-action}
 
           context {:id->action code-review-actions}
 

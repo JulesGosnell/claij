@@ -13,7 +13,7 @@
   []
   (let [env-file (io/file ".env")]
     (when (.exists env-file)
-      (println "Loading environment variables from .env...")
+      ;;(println "Loading environment variables from .env...")
       (doseq [line (line-seq (io/reader env-file))
               :let [line (str/trim line)]
               :when (and (not (str/blank? line))
@@ -21,10 +21,12 @@
                          (str/starts-with? line "export"))]
         (when-let [[_ key value] (re-matches #"export\s+([^=]+)=\"([^\"]*)\"" line)]
           (System/setProperty key value)
-          (println "  -" key "=" (subs value 0 (min 20 (count value))) "...")))
-      (println "Environment variables loaded!"))))
+          ;;(println "  -" key "=" (subs value 0 (min 20 (count value))) "...")
+          ))
+      ;;(println "Environment variables loaded!")
+      )))
 
 ;; Load .env automatically when this namespace loads
 (load-env-file)
 
-(println "User namespace loaded. .env variables available.")
+;;(println "User namespace loaded. .env variables available.")

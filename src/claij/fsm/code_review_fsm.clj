@@ -3,7 +3,8 @@
    [malli.core :as m]
    [malli.registry :as mr]
    [claij.malli :refer [def-fsm base-registry]]
-   [claij.fsm :refer [llm-action]]))
+   [claij.fsm :as fsm]
+   [claij.actions :as actions]))
 
 ;;------------------------------------------------------------------------------
 ;; Code Review FSM Schema and Definition
@@ -195,15 +196,9 @@
      :concerns - Vector of concerns to evaluate (default: example-code-review-concerns)"
   [& body]
   (let [code-str (pr-str (cons 'do body))]
-    `(let [;; End action delivers [context trail] to completion promise
-           ;; Note: trail already includes current event (added by xform before calling action)
-           end-action# (fn [context# _fsm# _ix# _state# _event# trail# _handler#]
-                         (when-let [p# (:fsm/completion-promise context#)]
-                           ;; Remove promise from context to avoid circular refs when printing
-                           (deliver p# [(dissoc context# :fsm/completion-promise) trail#])))
-           code-review-actions# {"llm" llm-action "end" end-action#}
+    `(let [code-review-actions# {"llm" #'fsm/llm-action "end" #'actions/end-action}
            context# {:id->action code-review-actions#}
-           [submit# await# stop-fsm#] (claij.fsm/start-fsm context# code-review-fsm)
+           [submit# await# stop-fsm#] (fsm/start-fsm context# code-review-fsm)
            ;; Available LLMs - must match schema enum exactly
            llms# [{"provider" "anthropic" "model" "claude-sonnet-4"}
                   {"provider" "google" "model" "gemini-2.5-flash"}

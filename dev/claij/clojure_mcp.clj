@@ -1,4 +1,5 @@
 (ns claij.clojure-mcp
+  "Dev utility: starts nREPL + clojure-mcp in same process."
   (:require
    [nrepl.server :refer [start-server] :rename {start-server start-nrepl-server}]
    [clojure-mcp.main :refer [start-mcp-server]]))
@@ -10,5 +11,5 @@
 
 (defn -main []
   (let [{p :port} (start-nrepl-server)]
-    (println "connecting clojure-mcp to nrepl on port:" p)
+    ;;(println "connecting clojure-mcp to nrepl on port:" p)
     (start-mcp-server {:port p})))
