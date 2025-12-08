@@ -12,7 +12,8 @@
                         analyze-for-emission inline-refs expand-refs-for-llm emit-for-llm
                         format-for-prompt schema-prompt-note
                         valid-m2? valid-m1? def-m2 def-m1
-                        fsm-registry fsm-schema valid-fsm? def-fsm]]))
+                        fsm-registry fsm-schema valid-fsm? def-fsm
+                        subsumes?]]))
 
 (deftest malli-test
   (testing "valid-schema?"
@@ -382,3 +383,132 @@
       (testing "throws when :schema property is missing"
         (is (thrown? clojure.lang.ExceptionInfo
                      (m/schema [:json-schema {}] opts)))))))
+
+(deftest subsumes-test
+  (testing "primitive types"
+    (testing "same type"
+      (is (subsumes? :int :int))
+      (is (subsumes? :string :string))
+      (is (subsumes? :boolean :boolean))
+      (is (subsumes? :keyword :keyword)))
+
+    (testing "different types"
+      (is (not (subsumes? :int :string)))
+      (is (not (subsumes? :string :int)))
+      (is (not (subsumes? :boolean :int)))))
+
+  (testing ":any subsumes everything"
+    (is (subsumes? :any :int))
+    (is (subsumes? :any :string))
+    (is (subsumes? :any [:map [:a :int]]))
+    (is (subsumes? :any [:vector :string])))
+
+  (testing "enums"
+    (testing "subset relationship"
+      (is (subsumes? [:enum :a :b :c] [:enum :a :b]))
+      (is (subsumes? [:enum :a :b :c] [:enum :a]))
+      (is (subsumes? [:enum :a :b :c] [:enum :a :b :c])))
+
+    (testing "non-subset fails"
+      (is (not (subsumes? [:enum :a :b] [:enum :a :b :c])))
+      (is (not (subsumes? [:enum :a] [:enum :b])))))
+
+  (testing "unions (:or)"
+    (testing "input union subsumes member"
+      (is (subsumes? [:or :int :string] :int))
+      (is (subsumes? [:or :int :string] :string)))
+
+    (testing "input union fails on non-member"
+      (is (not (subsumes? [:or :int :string] :boolean))))
+
+    (testing "output union requires all branches covered"
+      (is (subsumes? [:or :int :string] [:or :int]))
+      (is (subsumes? [:or :int :string :boolean] [:or :int :string]))
+      (is (not (subsumes? [:or :int] [:or :int :string]))))
+
+    (testing "scalar fails to subsume union"
+      (is (not (subsumes? :string [:or :int :string])))))
+
+  (testing "maybe"
+    (is (subsumes? [:maybe :string] :string))
+    (is (subsumes? [:maybe :string] :nil))
+    (is (subsumes? [:maybe :string] [:maybe :string]))
+    (is (not (subsumes? :string [:maybe :string]))))
+
+  (testing "maps"
+    (testing "same structure"
+      (is (subsumes? [:map [:a :int]] [:map [:a :int]])))
+
+    (testing "output has extra keys - ok"
+      (is (subsumes? [:map [:a :int]]
+                     [:map [:a :int] [:b :string]])))
+
+    (testing "output missing required key - fails"
+      (is (not (subsumes? [:map [:a :int] [:b :string]]
+                          [:map [:a :int]]))))
+
+    (testing "optional keys in input don't need to exist in output"
+      (is (subsumes? [:map [:a :int] [:b {:optional true} :string]]
+                     [:map [:a :int]])))
+
+    (testing "nested schema compatibility"
+      (is (subsumes? [:map [:a [:or :int :string]]]
+                     [:map [:a :int]]))
+      (is (not (subsumes? [:map [:a :int]]
+                          [:map [:a :string]])))))
+
+  (testing "vectors"
+    (is (subsumes? [:vector :int] [:vector :int]))
+    (is (subsumes? [:vector :any] [:vector :string]))
+    (is (not (subsumes? [:vector :int] [:vector :string]))))
+
+  (testing "tuples"
+    (is (subsumes? [:tuple :int :string] [:tuple :int :string]))
+    (is (not (subsumes? [:tuple :int :string] [:tuple :string :int])))
+    (is (not (subsumes? [:tuple :int] [:tuple :int :string]))))
+
+  (testing "literal :="
+    (is (subsumes? [:= 42] [:= 42]))
+    (is (not (subsumes? [:= 42] [:= 43]))))
+
+  (testing "complex FSM-like example"
+    (let [action-output [:map
+                         [:status [:enum :success :failure]]
+                         [:data [:map [:id :int] [:name :string]]]
+                         [:timestamp :string]]
+          state-input [:map
+                       [:status [:enum :success :failure :pending]]
+                       [:data [:map [:id :int]]]]]
+      (is (subsumes? state-input action-output)
+          "state-input subsumes action-output: wider enum, fewer required keys")))
+
+  (testing "map-of"
+    (is (subsumes? [:map-of :string :int] [:map-of :string :int]))
+    (is (subsumes? [:map-of :any :any] [:map-of :string :int]))
+    (is (not (subsumes? [:map-of :string :int] [:map-of :string :string])))
+    (is (not (subsumes? [:map-of :keyword :int] [:map-of :string :int]))))
+
+  (testing "and (intersection)"
+    (testing "same :and types"
+      (is (subsumes? [:and :int] [:and :int]))
+      (is (subsumes? [:and :string :keyword] [:and :string :keyword])))
+
+    (testing "output has more constraints than input - ok"
+      ;; If input requires [:and A], and output provides [:and A B],
+      ;; output satisfies all of input's constraints
+      (is (subsumes? [:and [:map [:a :int]]]
+                     [:and [:map [:a :int]] [:map [:b :string]]]))))
+
+  (testing "cross-numeric types"
+    (testing "double subsumes int"
+      (is (subsumes? :double :int)))
+    (testing "float subsumes int"
+      (is (subsumes? :float :int)))
+    (testing "int does not subsume double"
+      (is (not (subsumes? :int :double)))))
+
+  (testing "cross-collection types"
+    (testing "sequential subsumes vector"
+      (is (subsumes? [:sequential :int] [:vector :int])))
+    (testing "vector does not subsume sequential"
+      (is (not (subsumes? [:vector :int] [:sequential :int]))))))

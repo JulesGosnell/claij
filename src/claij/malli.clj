@@ -6,11 +6,13 @@
    - Form transformations (vector ↔ map) for walkability
    - Transitive closure analysis for LLM emission
    - Token-optimized schema emission for prompts
+   - Schema subsumption for type-safe FSM composition
    - def-m2/def-m1 macros for schema/document validation
    - Custom :json-schema type for embedding JSON Schema in Malli
    
    See doc/SELF-DESCRIPTIVE-SYSTEMS.md for architectural rationale."
   (:require
+   [clojure.set :as set]
    [clojure.walk :refer [postwalk]]
    [clojure.string :refer [includes?]]
    [clojure.tools.logging :as log]
@@ -504,6 +506,200 @@
            m1# ~doc]
        (assert (valid-m1? m2# m1#) (str "Invalid document: " '~name))
        m1#)))
+
+;;==============================================================================
+;; Schema Subsumption
+;;==============================================================================
+;;
+;; (subsumes? input-schema output-schema) returns true if every valid instance
+;; of output-schema is guaranteed to be valid for input-schema.
+;;
+;; Mathematically: instances(output) ⊆ instances(input)
+;;
+;; This enables compile-time verification that FSM transitions are type-safe:
+;; the next state's input schema must subsume the previous action's output.
+;;
+;; Example:
+;;   (subsumes? [:map [:a :int]]                     ; input - what next state accepts
+;;              [:map [:a :int] [:b :string]])       ; output - what action produces
+;;   => true (output has everything input needs, plus extra)
+;;
+;; Implementation is conservative and incremental:
+;; - Known type pairs have explicit rules
+;; - Same-type unknowns warn and return true (permissive)
+;; - Different-type unknowns return false (conservative)
+;; - Add rules as real mismatches are discovered
+
+(defn- ->malli-schema
+  "Normalize to compiled Malli schema."
+  [s]
+  (if (m/schema? s) s (m/schema s {:registry base-registry})))
+
+(defmulti -subsumes?
+  "Internal multimethod for type-specific subsumption rules.
+   Dispatches on [(m/type input) (m/type output)]."
+  (fn [input output]
+    [(m/type input) (m/type output)]))
+
+(defn subsumes?
+  "True if input-schema subsumes output-schema.
+   i.e., every valid instance of output is also valid for input.
+   
+   Use at FSM boundaries to verify type safety:
+     (subsumes? next-state-input previous-action-output)
+   
+   Returns true if the transition is type-safe."
+  [input output]
+  (let [in (->malli-schema input)
+        out (->malli-schema output)
+        in-type (m/type in)
+        out-type (m/type out)]
+    (cond
+      ;; Equality is trivially true
+      (= (m/form in) (m/form out)) true
+      ;; :any subsumes everything
+      (= :any in-type) true
+      ;; Union on output: input must subsume all branches (check BEFORE input union)
+      (= :or out-type)
+      (every? #(subsumes? input %) (m/children out))
+      ;; Union on input: any branch subsumes output
+      (= :or in-type)
+      (boolean (some #(subsumes? % output) (m/children in)))
+      ;; Maybe on output: input must handle both nil and inner (check BEFORE input maybe)
+      (= :maybe out-type)
+      (let [inner (first (m/children out))]
+        (and (subsumes? input inner)
+             (subsumes? input :nil)))
+      ;; Maybe on input: inner subsumes output, OR output is nil
+      (= :maybe in-type)
+      (let [inner (first (m/children in))]
+        (or (= :nil out-type)
+            (subsumes? inner output)))
+      ;; Delegate to multimethod for specific type pairs
+      :else (-subsumes? in out))))
+
+;; Default - same type without rule warns, different types fail
+(defmethod -subsumes? :default [input output]
+  (let [in-type (m/type input)
+        out-type (m/type output)]
+    (if (= in-type out-type)
+      (do (log/warnf "No subsumption rule for same type [%s] - assuming true" in-type)
+          true)
+      false)))
+
+;; Same primitive types - check constraints
+(doseq [t [:int :string :boolean :keyword :symbol :uuid :double :float :nil]]
+  (defmethod -subsumes? [t t] [input output]
+    (let [in-props (m/properties input)
+          out-props (m/properties output)]
+      (cond
+        ;; Both unconstrained - trivially true
+        (and (nil? in-props) (nil? out-props)) true
+        ;; Input unconstrained, output constrained - true (output is narrower)
+        (nil? in-props) true
+        ;; Input constrained, output unconstrained - false (output might violate)
+        (nil? out-props) false
+        ;; Both constrained - check ranges (TODO: implement range checking)
+        :else (do (log/warnf "Constrained %s subsumption not fully implemented" t)
+                  true)))))
+
+;; Enums - output values must be subset of input values
+(defmethod -subsumes? [:enum :enum] [input output]
+  (let [in-vals (set (m/children input))
+        out-vals (set (m/children output))]
+    (set/subset? out-vals in-vals)))
+
+;; Literal := must be equal
+(defmethod -subsumes? [:= :=] [input output]
+  (= (m/children input) (m/children output)))
+
+;; := subsumes :enum if enum is single-valued and matches
+(defmethod -subsumes? [:= :enum] [input output]
+  (let [literal (first (m/children input))
+        enum-vals (m/children output)]
+    (and (= 1 (count enum-vals))
+         (= literal (first enum-vals)))))
+
+;; :enum subsumes := if literal is in enum
+(defmethod -subsumes? [:enum :=] [input output]
+  (let [literal (first (m/children output))
+        enum-vals (set (m/children input))]
+    (contains? enum-vals literal)))
+
+;; Helper for map entries
+(defn- map-entries
+  "Extract map entries as {:key k :optional? bool :schema s}"
+  [map-schema]
+  (for [[k props schema] (m/children map-schema)]
+    {:key k
+     :optional? (get props :optional false)
+     :schema schema}))
+
+;; Maps - every required input key must exist in output with compatible schema
+(defmethod -subsumes? [:map :map] [input output]
+  (let [in-entries (map-entries input)
+        out-by-key (into {} (map (juxt :key identity) (map-entries output)))]
+    (every?
+     (fn [{:keys [key optional? schema]}]
+       (if-let [out-entry (get out-by-key key)]
+         ;; Key exists in output - check schema subsumption
+         (subsumes? schema (:schema out-entry))
+         ;; Key not in output - only ok if optional in input
+         optional?))
+     in-entries)))
+
+;; Vectors - element schemas must subsume
+(defmethod -subsumes? [:vector :vector] [input output]
+  (subsumes? (first (m/children input))
+             (first (m/children output))))
+
+;; Sequential
+(defmethod -subsumes? [:sequential :sequential] [input output]
+  (subsumes? (first (m/children input))
+             (first (m/children output))))
+
+;; Set
+(defmethod -subsumes? [:set :set] [input output]
+  (subsumes? (first (m/children input))
+             (first (m/children output))))
+
+;; Tuple - positional, all elements must subsume
+(defmethod -subsumes? [:tuple :tuple] [input output]
+  (let [in-children (m/children input)
+        out-children (m/children output)]
+    (and (= (count in-children) (count out-children))
+         (every? true? (map subsumes? in-children out-children)))))
+
+;; Maybe-Maybe already handled in main function, this is for multimethod completeness
+(defmethod -subsumes? [:maybe :maybe] [input output]
+  (subsumes? (first (m/children input))
+             (first (m/children output))))
+
+;; And - input must subsume ALL branches of the output :and
+(defmethod -subsumes? [:and :and] [input output]
+  (let [in-children (m/children input)
+        out-children (m/children output)]
+    ;; Every constraint in input must be satisfied by output
+    ;; For practical purposes: output must satisfy at least all input constraints
+    (every? (fn [in-child]
+              (some #(subsumes? in-child %) out-children))
+            in-children)))
+
+;; Map-of - both key and value schemas must subsume
+(defmethod -subsumes? [:map-of :map-of] [input output]
+  (let [[in-key in-val] (m/children input)
+        [out-key out-val] (m/children output)]
+    (and (subsumes? in-key out-key)
+         (subsumes? in-val out-val))))
+
+;; Cross-collection: vector subsumes sequential (vectors are sequential)
+(defmethod -subsumes? [:sequential :vector] [input output]
+  (subsumes? (first (m/children input))
+             (first (m/children output))))
+
+;; Cross-numeric: double subsumes int (every int is a valid double)
+(defmethod -subsumes? [:double :int] [_ _] true)
+(defmethod -subsumes? [:float :int] [_ _] true)
 
 ;;==============================================================================
 ;; FSM Schema Definitions
