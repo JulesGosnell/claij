@@ -28,6 +28,7 @@
 
 [![CI](https://github.com/JulesGosnell/claij/actions/workflows/ci.yml/badge.svg)](https://github.com/JulesGosnell/claij/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/JulesGosnell/claij/branch/main/graph/badge.svg)](https://codecov.io/gh/JulesGosnell/claij)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 ---
 
@@ -171,9 +172,3 @@ I'm looking for collaborators and opportunities. If you have a Clojure projectâ€
 If you think CLAIJ or aspects of it could benefit your company or would just like me aboard as someone who knows their way around getting the most out of LLMs and the surrounding tech, please get in touch.
 
 **[Connect on LinkedIn â†’](https://www.linkedin.com/in/jules-gosnell-15952a1/)**
-
----
-
-## License
-
-EPL-2.0
