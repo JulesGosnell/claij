@@ -12,6 +12,14 @@
 
 cd "$(dirname "$0")/.."
 
+# Load API keys for long-running tests
+if [ -f .env ]; then
+    # shellcheck source=/dev/null
+    . ./.env
+else
+    echo "Warning: .env file not found - long-running tests may fail"
+fi
+
 echo "Running long-running tests..."
 echo "(Tests marked with ^:long-running metadata)"
 echo ""

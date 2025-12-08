@@ -16,9 +16,14 @@
             :kaocha.plugin/filter]
   :cloverage/opts {:ns-exclude-regex ["claij\\.agent.*"
                                       "claij\\.core$"
+                                      "claij\\.llm\\.claude"
+                                      "claij\\.llm\\.gpt"
                                       "claij\\.llm\\.grok"
                                       "claij\\.llm\\.gemini"
+                                      "claij\\.llm\\.open-router"
+                                      "claij\\.mcp\\.core"
                                       "claij\\.pipeline.*"
+                                      "claij\\.store"
                                       "claij\\.stt.*"
                                       "claij\\.tts.*"]}
   :color? true

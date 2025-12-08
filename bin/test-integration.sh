@@ -9,6 +9,14 @@
 
 cd "$(dirname "$0")/.."
 
+# Load API keys for integration tests
+if [ -f .env ]; then
+    # shellcheck source=/dev/null
+    . ./.env
+else
+    echo "Warning: .env file not found - integration tests may fail"
+fi
+
 echo "Running integration tests..."
 echo "(Tests marked with ^:integration metadata)"
 echo ""
