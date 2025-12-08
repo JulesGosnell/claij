@@ -21,8 +21,6 @@
             [claij.tts.piper.python :refer [create-backend]])
   (:gen-class))
 
-(set! *warn-on-reflection* true)
-
 (defonce ^:private server-state (atom nil))
 
 ;;; Middleware

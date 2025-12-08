@@ -31,8 +31,6 @@
    [java.net URL])
   (:gen-class))
 
-(set! *warn-on-reflection* true)
-
 ;;------------------------------------------------------------------------------
 ;; LLM Backend
 

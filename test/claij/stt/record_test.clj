@@ -23,7 +23,7 @@
 (deftest test-audio-data->wav-bytes
   (testing "audio-data->wav-bytes creates WAV format in memory"
     (let [audio-data (byte-array 32000)
-          wav-bytes (record/audio-data->wav-bytes audio-data)]
+          ^bytes wav-bytes (record/audio-data->wav-bytes audio-data)]
 
       (testing "returns byte array"
         (is (bytes? wav-bytes)))
@@ -32,14 +32,14 @@
         (is (pos? (alength wav-bytes))))
 
       (testing "result is larger than input (due to WAV headers)"
-        (is (> (alength wav-bytes) (alength audio-data))))
+        (is (> (alength wav-bytes) (alength ^bytes audio-data))))
 
       (testing "starts with RIFF header"
-        (let [header (String. (java.util.Arrays/copyOfRange wav-bytes 0 4) "UTF-8")]
+        (let [header (String. ^bytes (java.util.Arrays/copyOfRange wav-bytes (int 0) (int 4)) "UTF-8")]
           (is (= "RIFF" header))))
 
       (testing "contains WAVE format identifier"
-        (let [wave-id (String. (java.util.Arrays/copyOfRange wav-bytes 8 12) "UTF-8")]
+        (let [wave-id (String. ^bytes (java.util.Arrays/copyOfRange wav-bytes (int 8) (int 12)) "UTF-8")]
           (is (= "WAVE" wave-id)))))))
 
 (deftest test-prepare-audio
@@ -93,27 +93,27 @@
 (deftest test-audio-data->wav-bytes-edge-cases
   (testing "audio-data->wav-bytes with edge case inputs"
     (testing "very small audio array (10 bytes)"
-      (let [tiny-audio (byte-array 10)
-            wav-bytes (record/audio-data->wav-bytes tiny-audio)]
+      (let [^bytes tiny-audio (byte-array 10)
+            ^bytes wav-bytes (record/audio-data->wav-bytes tiny-audio)]
         (is (bytes? wav-bytes))
         (is (> (alength wav-bytes) (alength tiny-audio))
             "WAV headers should make result larger than input")))
 
     (testing "exact threshold boundary (32000 bytes)"
-      (let [exact-audio (byte-array 32000)
-            wav-bytes (record/audio-data->wav-bytes exact-audio)]
+      (let [^bytes exact-audio (byte-array 32000)
+            ^bytes wav-bytes (record/audio-data->wav-bytes exact-audio)]
         (is (bytes? wav-bytes))
         (is (> (alength wav-bytes) 32000))))
 
     (testing "odd number of bytes (not 16-bit aligned)"
-      (let [odd-audio (byte-array 32001)
-            wav-bytes (record/audio-data->wav-bytes odd-audio)]
+      (let [^bytes odd-audio (byte-array 32001)
+            ^bytes wav-bytes (record/audio-data->wav-bytes odd-audio)]
         (is (bytes? wav-bytes))
         (is (pos? (alength wav-bytes)))))
 
     (testing "large audio array (1MB)"
-      (let [large-audio (byte-array 1000000)
-            wav-bytes (record/audio-data->wav-bytes large-audio)]
+      (let [^bytes large-audio (byte-array 1000000)
+            ^bytes wav-bytes (record/audio-data->wav-bytes large-audio)]
         (is (bytes? wav-bytes))
         (is (> (alength wav-bytes) 1000000))))))
 

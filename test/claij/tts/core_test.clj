@@ -10,10 +10,10 @@
     (reset! initialized?-atom true)
     this)
   (synthesize [_this text]
-    {:audio-bytes (.getBytes text "UTF-8")
+    {:audio-bytes (.getBytes ^String text "UTF-8")
      :sample-rate 22050})
   (synthesize [_this text options]
-    {:audio-bytes (.getBytes text "UTF-8")
+    {:audio-bytes (.getBytes ^String text "UTF-8")
      :sample-rate (:sample-rate options 22050)})
   (health-check [_this]
     {:healthy? @initialized?-atom

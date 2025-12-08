@@ -22,8 +22,6 @@
             [claij.stt.whisper.python :refer [create-backend get-module-cache]])
   (:gen-class))
 
-(set! *warn-on-reflection* true)
-
 (defonce ^:private server-state (atom nil))
 
 ;;; Middleware

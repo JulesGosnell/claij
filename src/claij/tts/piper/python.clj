@@ -17,8 +17,6 @@
             [claij.tts.core :refer [TTSBackend synthesize initialize!]])
   (:import [java.io ByteArrayOutputStream]))
 
-(set! *warn-on-reflection* true)
-
 ;;; Python Interop Helpers
 
 (defn- python-available?

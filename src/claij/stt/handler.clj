@@ -22,8 +22,6 @@
             [claij.stt.whisper.audio :refer [wav-bytes->audio-array]]
             [claij.stt.whisper.multipart :refer [extract-bytes validate-audio]]))
 
-(set! *warn-on-reflection* true)
-
 ;;; Request Processing Helpers
 
 (defn- log-audio-info

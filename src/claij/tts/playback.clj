@@ -34,7 +34,7 @@
 (defn- create-temp-wav-file
   "Create a temporary WAV file with the given audio bytes.
    Returns the File object."
-  [audio-bytes]
+  ^File [^bytes audio-bytes]
   (let [temp-file (File/createTempFile "tts-audio-" ".wav")]
     (.deleteOnExit temp-file)
     (with-open [out (java.io.FileOutputStream. temp-file)]
@@ -43,7 +43,7 @@
 
 (defn- play-with-aplay
   "Play audio using aplay (ALSA player)."
-  [audio-file]
+  [^File audio-file]
   (sh "aplay" "-d" "1" "/dev/zero")
   (let [result (sh "aplay" "-q" (.getAbsolutePath audio-file))]
     (when-not (zero? (:exit result))
@@ -53,7 +53,7 @@
 
 (defn- play-with-paplay
   "Play audio using paplay (PulseAudio player)."
-  [audio-file]
+  [^File audio-file]
   (let [result (sh "paplay" (.getAbsolutePath audio-file))]
     (when-not (zero? (:exit result))
       (throw (ex-info "paplay failed"
@@ -62,7 +62,7 @@
 
 (defn- play-with-afplay
   "Play audio using afplay (macOS audio player)."
-  [audio-file]
+  [^File audio-file]
   (let [result (sh "afplay" (.getAbsolutePath audio-file))]
     (when-not (zero? (:exit result))
       (throw (ex-info "afplay failed"
@@ -94,7 +94,7 @@
                       (throw (ex-info "No audio player found"
                                       {:available-players [:aplay :paplay :afplay]})))
                   player)
-         temp-file (create-temp-wav-file audio-bytes)
+         ^File temp-file (create-temp-wav-file audio-bytes)
          play-fn (case player
                    :aplay play-with-aplay
                    :paplay play-with-paplay

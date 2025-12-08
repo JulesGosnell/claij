@@ -95,7 +95,7 @@
           "Should return WAV content type")
       (is (bytes? (:body response))
           "Should return byte array")
-      (is (= 100 (alength (:body response)))
+      (is (= 100 (alength ^bytes (:body response)))
           "Should return audio bytes from mock backend"))))
 
 (deftest test-synthesize-handler-with-json

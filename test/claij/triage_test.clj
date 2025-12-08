@@ -41,7 +41,7 @@
 
     {:container container :store store}))
 
-(defn teardown-test-db [{:keys [container]}]
+(defn teardown-test-db [{:keys [^PostgreSQLContainer container]}]
   (when container
     (.stop container)))
 
