@@ -31,8 +31,6 @@
            [java.io ByteArrayOutputStream ByteArrayInputStream]
            [java.nio ByteBuffer ByteOrder]))
 
-(set! *warn-on-reflection* true)
-
 ;; Audio configuration
 (def audio-format
   (AudioFormat. 16000 16 1 true false)) ; 16kHz, 16-bit, mono, signed PCM, little-endian

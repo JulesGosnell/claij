@@ -18,8 +18,6 @@
             [clojure.tools.logging :as log]
             [claij.tts.core :refer [synthesize health-check backend-info]]))
 
-(set! *warn-on-reflection* true)
-
 ;;; Response Builders
 
 (defn- build-success-response

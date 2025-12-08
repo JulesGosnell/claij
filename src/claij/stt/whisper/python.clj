@@ -14,8 +14,6 @@
   (:require [clojure.tools.logging :as log]
             [claij.stt.core :refer [STTBackend initialize!]]))
 
-(set! *warn-on-reflection* true)
-
 ;;; Python Interop Helpers
 
 (defn- python-available?

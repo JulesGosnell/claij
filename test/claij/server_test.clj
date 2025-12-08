@@ -13,7 +13,7 @@
 
   (testing "string->url"
     (testing "converts valid URL string to URL object"
-      (let [url (string->url "https://example.com/path")]
+      (let [^URL url (string->url "https://example.com/path")]
         (is (instance? URL url))
         (is (= "https" (.getProtocol url)))
         (is (= "example.com" (.getHost url)))

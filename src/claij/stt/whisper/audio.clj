@@ -16,8 +16,6 @@
    - Requires libpython-clj and Python libraries (numpy, soundfile)
    - Use with :whisper alias: clojure -M:whisper")
 
-(set! *warn-on-reflection* true)
-
 ;;; Python Interop Helpers
 
 (defn- py-get-attr
