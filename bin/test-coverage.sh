@@ -33,9 +33,14 @@ echo ""
 # Check for --debug flag
 DEBUG_OPTS=""
 ARGS=""
+CODECOV_MODE=false
 for arg in "$@"; do
     if [ "$arg" = "--debug" ]; then
         DEBUG_OPTS="--no-capture-output"
+    elif [ "$arg" = "--codecov" ]; then
+        CODECOV_MODE=true
+        # Use LCOV format for Codecov (more reliable than JSON)
+        ARGS="$ARGS --lcov"
     else
         ARGS="$ARGS $arg"
     fi
