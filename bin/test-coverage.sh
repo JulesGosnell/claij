@@ -4,9 +4,10 @@
 # Uses kaocha with cloverage plugin
 #
 # Usage:
-#   ./bin/coverage.sh               # Run coverage with HTML report
-#   ./bin/coverage.sh --debug       # Run with full output (not captured)
-#   ./bin/coverage.sh --text        # Include text summary
+#   ./bin/test-coverage.sh               # Run coverage with HTML report
+#   ./bin/test-coverage.sh --debug       # Run with full output (not captured)
+#   ./bin/test-coverage.sh --codecov     # Generate codecov.json for CI upload
+#   ./bin/test-coverage.sh --text        # Include text summary
 
 cd "$(dirname "$0")/.."
 
