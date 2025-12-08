@@ -2,7 +2,9 @@
   "Tests for def-action macro and action helpers."
   (:require
    [clojure.test :refer [deftest testing is]]
-   [claij.action :refer [def-action action? action-name action-config-schema]]))
+   [claij.action :refer [def-action action? action-name action-config-schema]]
+   [claij.actions :refer [default-actions end-action fork-action generate-action
+                          with-actions with-default-actions make-context]]))
 
 ;;==============================================================================
 ;; Example Actions for Testing
@@ -74,23 +76,23 @@
   (testing "Action has name in metadata"
     (is (= "test-llm-action" (action-name #'test-llm-action)))
     (is (= "test-end-action" (action-name #'test-end-action))))
-  
+
   (testing "Action has config schema in metadata"
     (is (= [:map
             ["provider" [:enum "anthropic" "google" "openai" "xai"]]
             ["model" :string]]
            (action-config-schema #'test-llm-action)))
     (is (= [:map] (action-config-schema #'test-end-action))))
-  
+
   (testing "Action has standard Clojure docstring"
     (is (= "LLM action - calls configured provider and model."
            (:doc (meta #'test-llm-action)))))
-  
+
   (testing "action? recognizes action vars"
     (is (action? #'test-llm-action))
     (is (action? #'test-end-action))
     (is (action? #'test-timeout-action)))
-  
+
   (testing "action? returns false for non-actions"
     (is (not (action? #'action-name)))
     (is (not (action? #'mock-fsm)))))
@@ -100,11 +102,11 @@
     (let [config {"provider" "anthropic" "model" "claude-sonnet-4"}
           f2 (test-llm-action config mock-fsm mock-ix mock-state)]
       (is (fn? f2))))
-  
+
   (testing "Empty config works for actions that don't need config"
     (let [f2 (test-end-action {} mock-fsm mock-ix mock-state)]
       (is (fn? f2))))
-  
+
   (testing "Optional config fields work"
     (let [f2-default (test-timeout-action {} mock-fsm mock-ix mock-state)
           f2-custom (test-timeout-action {"timeout-ms" 10000} mock-fsm mock-ix mock-state)]
@@ -114,14 +116,14 @@
 (deftest def-action-config-validation-test
   (testing "Invalid config throws at factory call time"
     (let [ex (try
-               (test-llm-action {"provider" "invalid-provider" "model" "x"} 
+               (test-llm-action {"provider" "invalid-provider" "model" "x"}
                                 mock-fsm mock-ix mock-state)
                nil
                (catch Exception e e))]
       (is (some? ex))
       (is (= :config-validation (:type (ex-data ex))))
       (is (= "test-llm-action" (:action (ex-data ex))))))
-  
+
   (testing "Missing required config field throws"
     (let [ex (try
                (test-broken-config-action {"count" 5}
@@ -130,7 +132,7 @@
                (catch Exception e e))]
       (is (some? ex))
       (is (= :config-validation (:type (ex-data ex))))))
-  
+
   (testing "Wrong type for config field throws"
     (let [ex (try
                (test-broken-config-action {"required-field" "ok" "count" "not-an-int"}
@@ -153,14 +155,14 @@
       (is (= "google" (get @result "provider")))
       (is (= "gemini-2.5-flash" (get @result "model")))
       (is (= mock-event (get @result "input")))))
-  
+
   (testing "Config-time params are available in runtime function"
     (let [f2 (test-timeout-action {"timeout-ms" 3000} mock-fsm mock-ix mock-state)
           result (atom nil)
           mock-handler (fn [ctx out] (reset! result out))]
       (f2 {} {} [] mock-handler)
       (is (= 3000 (get @result "timeout-used")))))
-  
+
   (testing "Default config values work"
     (let [f2 (test-timeout-action {} mock-fsm mock-ix mock-state)
           result (atom nil)
@@ -189,7 +191,7 @@
               ["model" :string]]
              (action-config-schema (get registry "llm"))))
       (is (= [:map] (action-config-schema (get registry "end"))))))
-  
+
   (testing "Can instantiate actions from registry"
     (let [registry {"llm" test-llm-action
                     "end" test-end-action}
@@ -197,3 +199,101 @@
           config {"provider" "xai" "model" "grok-4"}
           f2 (llm-factory config mock-fsm mock-ix mock-state)]
       (is (fn? f2)))))
+
+;;==============================================================================
+;; claij.actions Module Tests
+;;==============================================================================
+
+(deftest actions-module-test
+
+  (testing "default-actions"
+    (testing "contains expected action keys"
+      (is (contains? default-actions "llm"))
+      (is (contains? default-actions "end"))
+      (is (contains? default-actions "triage"))
+      (is (contains? default-actions "reuse"))
+      (is (contains? default-actions "fork"))
+      (is (contains? default-actions "generate")))
+
+    (testing "all values are action vars"
+      (doseq [[k v] default-actions]
+        (is (var? v) (str "Expected var for action: " k))
+        (is (action? v) (str "Expected action? true for: " k)))))
+
+  (testing "end-action"
+    (testing "delivers to completion promise when present"
+      (let [f2 (end-action {} mock-fsm mock-ix mock-state)
+            completion-promise (promise)
+            context {:fsm/completion-promise completion-promise}
+            trail [{:from "start" :to "end"}]]
+        (f2 context {"id" ["test" "end"]} trail nil)
+        (let [[ctx tr] (deref completion-promise 100 :timeout)]
+          (is (not= :timeout ctx))
+          (is (= context ctx))
+          (is (= trail tr)))))
+
+    (testing "does nothing when no promise in context"
+      ;; Should not throw
+      (let [f2 (end-action {} mock-fsm mock-ix mock-state)]
+        (is (nil? (f2 {} {} [] nil))))))
+
+  (testing "fork-action"
+    (testing "calls handler with not-implemented response"
+      (let [f2 (fork-action {} mock-fsm mock-ix mock-state)
+            result (atom nil)
+            handler (fn [ctx out] (reset! result out))]
+        (f2 {} {} [] handler)
+        (is (= ["fork" "end"] (get @result "id")))
+        (is (false? (get @result "success"))))))
+
+  (testing "generate-action"
+    (testing "calls handler with not-implemented response"
+      (let [f2 (generate-action {} mock-fsm mock-ix mock-state)
+            result (atom nil)
+            handler (fn [ctx out] (reset! result out))]
+        (f2 {} {} [] handler)
+        (is (= ["generate" "end"] (get @result "id")))
+        (is (false? (get @result "success"))))))
+
+  (testing "with-actions"
+    (testing "adds actions to empty context"
+      (let [ctx (with-actions {} {"custom" #'test-llm-action})]
+        (is (= #'test-llm-action (get-in ctx [:id->action "custom"])))))
+
+    (testing "merges with existing actions"
+      (let [ctx {:id->action {"existing" #'test-end-action}}
+            ctx' (with-actions ctx {"new" #'test-llm-action})]
+        (is (= #'test-end-action (get-in ctx' [:id->action "existing"])))
+        (is (= #'test-llm-action (get-in ctx' [:id->action "new"]))))))
+
+  (testing "with-default-actions"
+    (testing "adds default actions to context"
+      (let [ctx (with-default-actions {})]
+        (is (= default-actions (:id->action ctx)))))
+
+    (testing "merges with existing actions"
+      (let [ctx {:id->action {"custom" #'test-llm-action}}
+            ctx' (with-default-actions ctx)]
+        ;; defaults should be merged in
+        (is (contains? (:id->action ctx') "llm"))
+        (is (contains? (:id->action ctx') "end"))
+        ;; custom should still be there
+        (is (= #'test-llm-action (get-in ctx' [:id->action "custom"]))))))
+
+  (testing "make-context"
+    (testing "creates context with defaults"
+      (let [ctx (make-context {:store :mock-store
+                                       :provider "anthropic"
+                                       :model "claude-sonnet-4"})]
+        (is (= :mock-store (:store ctx)))
+        (is (= "anthropic" (:provider ctx)))
+        (is (= "claude-sonnet-4" (:model ctx)))
+        (is (= default-actions (:id->action ctx)))))
+
+    (testing "allows overriding id->action"
+      (let [custom-actions {"llm" #'test-llm-action}
+            ctx (make-context {:store :mock
+                                       :provider "test"
+                                       :model "test"
+                                       :id->action custom-actions})]
+        (is (= custom-actions (:id->action ctx)))))))

@@ -3,9 +3,64 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.tools.logging :as log]
-   [claij.action :refer [def-action]]
+   [claij.action :refer [def-action action?]]
    [claij.fsm :as fsm :refer [start-fsm]]
-   [claij.fsm.mcp-fsm :refer [mcp-actions mcp-fsm]]))
+   [claij.fsm.mcp-fsm :as mcp-fsm :refer [mcp-actions mcp-fsm wrap unwrap]]))
+
+;;==============================================================================
+;; Unit Tests for Utility Functions
+;;==============================================================================
+
+(deftest mcp-fsm-test
+
+  (testing "wrap"
+    (testing "3-arity creates map with id, document, and message"
+      (let [result (wrap ["a" "b"] "doc" {"foo" "bar"})]
+        (is (= ["a" "b"] (get result "id")))
+        (is (= "doc" (get result "document")))
+        (is (= {"foo" "bar"} (get result "message")))))
+
+    (testing "2-arity creates map with id and message only"
+      (let [result (wrap ["x" "y"] {"baz" 123})]
+        (is (= ["x" "y"] (get result "id")))
+        (is (= {"baz" 123} (get result "message")))
+        (is (not (contains? result "document"))))))
+
+  (testing "unwrap"
+    (testing "extracts message from wrapped map"
+      (is (= {"foo" "bar"} (unwrap {"message" {"foo" "bar"}}))))
+
+    (testing "returns nil for missing message"
+      (is (nil? (unwrap {"id" "test"})))))
+
+  (testing "mcp-actions"
+    (testing "contains expected action keys"
+      (is (contains? mcp-actions "start"))
+      (is (contains? mcp-actions "shed"))
+      (is (contains? mcp-actions "init"))
+      (is (contains? mcp-actions "service"))
+      (is (contains? mcp-actions "cache"))
+      (is (contains? mcp-actions "llm"))
+      (is (contains? mcp-actions "end")))
+
+    (testing "all values are action vars"
+      (doseq [[k v] mcp-actions]
+        (is (var? v) (str "Expected var for action: " k))
+        (is (action? v) (str "Expected action? true for: " k)))))
+
+  (testing "mcp-fsm"
+    (testing "has correct id"
+      (is (= "mcp" (get mcp-fsm "id"))))
+
+    (testing "has expected states"
+      (let [state-ids (set (map #(get % "id") (get mcp-fsm "states")))]
+        (is (contains? state-ids "starting"))
+        (is (contains? state-ids "shedding"))
+        (is (contains? state-ids "initing"))
+        (is (contains? state-ids "servicing"))
+        (is (contains? state-ids "caching"))
+        (is (contains? state-ids "llm"))
+        (is (contains? state-ids "end"))))))
 
 ;;==============================================================================
 ;; Stub Actions for Unit Testing (no MCP server required)
