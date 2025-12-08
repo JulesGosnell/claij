@@ -171,6 +171,6 @@ I'm looking for collaborators and opportunities. If you have a Clojure projectâ€
 
 ## I am looking for work / financial support
 
-If you think CLAIJ or aspects of it could benefit your company or would just like me aboard as someone who knows their way around getting the most out of LLMs and the surrounding tech, please get in touch.
+If you think CLAIJ or aspects of it could benefit your company or would just like me aboard as someone who knows their way around Clojure, LLMs and the surrounding tech, please get in touch.
 
 **[Connect on LinkedIn â†’](https://www.linkedin.com/in/jules-gosnell-15952a1/)**
