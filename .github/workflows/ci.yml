@@ -35,5 +35,13 @@ jobs:
         key: ${{ runner.os }}-clojure-${{ hashFiles('deps.edn') }}
         restore-keys: ${{ runner.os }}-clojure-
         
-    - name: Run tests
-      run: ./bin/test-unit.sh
+    - name: Run tests with coverage
+      run: ./bin/test-coverage.sh
+
+    - name: Deploy coverage to GitHub Pages
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      uses: peaceiris/actions-gh-pages@v4
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./target/coverage
+        destination_dir: coverage
