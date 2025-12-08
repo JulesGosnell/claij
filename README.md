@@ -62,6 +62,8 @@ Each LLM is like a junior developer: the more structure you give them, the bette
 
 ### 3. Anything You Can Do, I Can Do Meta
 
+*"If you can describe a system, I can describe a system that describes your system. Therefore, I am always one step ahead of you."*
+
 The system's power comes from reflexivity:
 
 ```
