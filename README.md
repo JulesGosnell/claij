@@ -27,6 +27,7 @@
 > *"Anything you can do, I can do Meta."* — Julian Gosnell - Marsh - 2007
 
 [![CI](https://github.com/JulesGosnell/claij/actions/workflows/ci.yml/badge.svg)](https://github.com/JulesGosnell/claij/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/JulesGosnell/claij/branch/main/graph/badge.svg)](https://codecov.io/gh/JulesGosnell/claij)
 
 ---
 
