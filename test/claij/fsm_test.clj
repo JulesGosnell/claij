@@ -2,8 +2,9 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [claij.action :refer [def-action]]
-   [claij.malli :refer [valid-fsm?]]
-   [claij.fsm :refer [state-schema resolve-schema start-fsm llm-action trail->prompts]]
+   [claij.malli :refer [valid-fsm? base-registry]]
+   [claij.fsm :refer [state-schema resolve-schema start-fsm llm-action trail->prompts
+                      build-fsm-registry validate-event last-event llm-configs]]
    [claij.llm.open-router :refer [open-router-async]]))
 
 ;;------------------------------------------------------------------------------
@@ -32,6 +33,70 @@
 ;;------------------------------------------------------------------------------
 
 (deftest fsm-test
+
+  (testing "build-fsm-registry"
+    (testing "returns a registry with base types"
+      (let [registry (build-fsm-registry {} {})]
+        (is (some? registry))))
+
+    (testing "includes FSM schemas when provided"
+      (let [fsm {"schemas" {"custom-type" [:string {:min 1}]}}
+            registry (build-fsm-registry fsm {})]
+        (is (some? registry))))
+
+    (testing "includes context registry when provided"
+      (let [context {:malli/registry {"ctx-type" :int}}
+            registry (build-fsm-registry {} context)]
+        (is (some? registry)))))
+
+  (testing "validate-event"
+    (testing "returns valid for matching schema"
+      (let [result (validate-event nil :string "hello")]
+        (is (:valid? result))))
+
+    (testing "returns invalid with errors for non-matching schema"
+      (let [result (validate-event nil :int "not-an-int")]
+        (is (not (:valid? result)))
+        (is (some? (:errors result)))))
+
+    (testing "validates map schemas"
+      (let [schema [:map ["name" :string] ["age" :int]]
+            valid-data {"name" "Alice" "age" 30}
+            invalid-data {"name" "Bob" "age" "thirty"}]
+        (is (:valid? (validate-event nil schema valid-data)))
+        (is (not (:valid? (validate-event nil schema invalid-data)))))))
+
+  (testing "last-event"
+    (testing "returns event from last trail entry"
+      (let [trail [{:from "a" :to "b" :event {"id" "first"}}
+                   {:from "b" :to "c" :event {"id" "second"}}
+                   {:from "c" :to "d" :event {"id" "last"}}]]
+        (is (= {"id" "last"} (last-event trail)))))
+
+    (testing "returns nil for empty trail"
+      (is (nil? (last-event []))))
+
+    (testing "returns nil for nil trail"
+      (is (nil? (last-event nil)))))
+
+  (testing "llm-configs"
+    (testing "is a map of provider/model tuples to configs"
+      (is (map? llm-configs)))
+
+    (testing "contains anthropic claude config"
+      (is (contains? llm-configs ["anthropic" "claude-sonnet-4.5"])))
+
+    (testing "contains openai configs"
+      (is (contains? llm-configs ["openai" "gpt-4o"]))
+      (is (contains? llm-configs ["openai" "gpt-5-codex"])))
+
+    (testing "contains xai configs"
+      (is (contains? llm-configs ["x-ai" "grok-code-fast-1"]))
+      (is (contains? llm-configs ["x-ai" "grok-4"])))
+
+    (testing "contains google config"
+      (is (contains? llm-configs ["google" "gemini-2.5-flash"]))))
+
   ;; xition-schema and expand-schema tests removed during Malli migration.
   ;; These functions produced JSON Schema format and were never used in production.
   ;; 
@@ -107,7 +172,7 @@
           initial-context {:id->action {"action-a" #'ctx-state-a-action
                                         "action-b" #'ctx-state-b-action
                                         "end" #'ctx-end-action}}
-          [submit await stop] (claij.fsm/start-fsm initial-context test-fsm)]
+          [submit await stop] (start-fsm initial-context test-fsm)]
 
       ;; Submit and wait for completion
       (submit {"id" ["start" "state-a"] "input" "test-input"})
@@ -116,7 +181,7 @@
         (is (not= result :timeout) "FSM should complete within timeout")
         (when (not= result :timeout)
           (let [[final-context trail] result
-                final-event (claij.fsm/last-event trail)]
+                final-event (last-event trail)]
             (is (= {"id" ["state-b" "end"]} final-event) "FSM should return final event"))))
 
       ;; Clean up

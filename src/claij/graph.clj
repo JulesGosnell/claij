@@ -15,16 +15,15 @@
 ;;   prefer xition "label" → xition "description" → schema :description → fallback to 'to' state
 ;; This gives concise edge labels while keeping full details available if needed.
 
-
 ;; thanks Grok
 
 (defn fsm->dot [fsm]
-  (let [{fsm-id     "id"
-         fsm-desc   "description"
+  (let [{fsm-id "id"
+         fsm-desc "description"
          fsm-prompts "prompts"
-         states     "states"
-         xitions    "xitions"
-         :or        {fsm-id "fsm" states [] xitions []}} fsm
+         states "states"
+         xitions "xitions"
+         :or {fsm-id "fsm" states [] xitions []}} fsm
         title-text (or fsm-desc (some->> fsm-prompts (join "\\n")))]
     (str "digraph \"" fsm-id "\" {\n"
          "  rankdir=TB;\n"
@@ -50,7 +49,7 @@
          (apply str
                 (for [{[from to] "id" label "label" desc "description"} xitions
                       :let [texts (filter seq [label desc])
-                            text  (if (seq texts) (join "\\n" texts) to)
+                            text (if (seq texts) (join "\\n" texts) to)
                             label (replace text "\n" "\\n")]]
                   (format "  %s -> %s [label=\"%s\"];\n"
                           (if (= from "start") "start" from)

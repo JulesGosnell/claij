@@ -4,13 +4,12 @@
    [clojure.tools.logging :as log]
    [malli.core :as m]
    [malli.error :as me]
-   [claij.util :refer [index-by ->key]]
-   [claij.llm.open-router :refer [open-router-async]]
    [claij.action :refer [def-action]]
-   [claij.fsm :as fsm :refer [start-fsm make-prompts]]
+   [claij.fsm :as fsm :refer [start-fsm]]
    [claij.actions :as actions]
    [claij.fsm.code-review-fsm :refer [code-review-registry
-                                      code-review-fsm]]))
+                                      code-review-fsm
+                                      example-code-review-concerns]]))
 
 ;;==============================================================================
 ;; Mock Actions for Unit Testing
@@ -40,33 +39,64 @@
 ;; Tests
 ;;==============================================================================
 
-(deftest code-review-schema-test
-  (testing "code-review FSM schemas validate correctly"
-    (let [entry {"id" ["start" "mc"]
-                 "document" "test code"
-                 "llms" [{"provider" "openai" "model" "gpt-4o"}]
-                 "concerns" ["Simplicity"]}
-          request {"id" ["mc" "reviewer"]
-                   "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
-                   "notes" "Please review"
-                   "concerns" ["Simplicity"]
-                   "llm" {"provider" "openai" "model" "gpt-4o"}}
-          response {"id" ["reviewer" "mc"]
-                    "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
-                    "comments" ["Looks good"]
-                    "notes" "Approved"}
-          summary {"id" ["mc" "end"]
-                   "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
-                   "notes" "Review complete"}]
+(deftest code-review-fsm-test
+  (testing "code-review-schemas"
+    (testing "entry validates"
+      (let [entry {"id" ["start" "mc"]
+                   "document" "test code"
+                   "llms" [{"provider" "openai" "model" "gpt-4o"}]
+                   "concerns" ["Simplicity"]}]
+        (is (m/validate [:ref "entry"] entry {:registry code-review-registry}))))
 
-      (is (m/validate [:ref "entry"] entry {:registry code-review-registry})
-          "Entry should validate")
-      (is (m/validate [:ref "request"] request {:registry code-review-registry})
-          "Request should validate")
-      (is (m/validate [:ref "response"] response {:registry code-review-registry})
-          "Response should validate")
-      (is (m/validate [:ref "summary"] summary {:registry code-review-registry})
-          "Summary should validate"))))
+    (testing "request validates"
+      (let [request {"id" ["mc" "reviewer"]
+                     "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
+                     "notes" "Please review"
+                     "concerns" ["Simplicity"]
+                     "llm" {"provider" "openai" "model" "gpt-4o"}}]
+        (is (m/validate [:ref "request"] request {:registry code-review-registry}))))
+
+    (testing "response validates"
+      (let [response {"id" ["reviewer" "mc"]
+                      "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
+                      "comments" ["Looks good"]
+                      "notes" "Approved"}]
+        (is (m/validate [:ref "response"] response {:registry code-review-registry}))))
+
+    (testing "summary validates"
+      (let [summary {"id" ["mc" "end"]
+                     "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
+                     "notes" "Review complete"}]
+        (is (m/validate [:ref "summary"] summary {:registry code-review-registry})))))
+
+  (testing "example-code-review-concerns"
+    (testing "is a vector of strings"
+      (is (vector? example-code-review-concerns))
+      (is (every? string? example-code-review-concerns)))
+
+    (testing "contains expected concerns"
+      (is (some #(re-find #"Simplicity" %) example-code-review-concerns))
+      (is (some #(re-find #"Naming" %) example-code-review-concerns))
+      (is (some #(re-find #"YAGNI" %) example-code-review-concerns))))
+
+  (testing "code-review-fsm structure"
+    (testing "has required keys"
+      (is (contains? code-review-fsm "id"))
+      (is (contains? code-review-fsm "states"))
+      (is (contains? code-review-fsm "xitions")))
+
+    (testing "has expected states"
+      (let [state-ids (set (map #(get % "id") (get code-review-fsm "states")))]
+        (is (contains? state-ids "mc"))
+        (is (contains? state-ids "reviewer"))
+        (is (contains? state-ids "end"))))
+
+    (testing "has expected transitions"
+      (let [xition-ids (set (map #(get % "id") (get code-review-fsm "xitions")))]
+        (is (contains? xition-ids ["start" "mc"]))
+        (is (contains? xition-ids ["mc" "reviewer"]))
+        (is (contains? xition-ids ["reviewer" "mc"]))
+        (is (contains? xition-ids ["mc" "end"]))))))
 
 (deftest code-review-fsm-mock-test
   (testing "code-review FSM with mock LLM actions"
@@ -150,7 +180,7 @@
         (let [result (await 5000)]
           (is (not= result :timeout) "FSM should complete within timeout")
           (when (not= result :timeout)
-            (let [[final-context trail] result
+            (let [[_context trail] result
                   final-event (fsm/last-event trail)]
               (is (= summary-data final-event) "FSM should complete with summary"))))
 
@@ -188,7 +218,7 @@
       (is (not= result :timeout) "FSM should complete within timeout")
 
       (when (not= result :timeout)
-        (let [[final-context trail] result
+        (let [[_context trail] result
               final-event (fsm/last-event trail)]
 
           (testing "FSM reached end state"
