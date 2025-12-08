@@ -1,14 +1,12 @@
 (ns claij.util
   (:require
    [clojure.tools.logging :as log]
-   [clojure.data.json :refer [read-str write-str]]
-   [claij.env :refer [getenv]]))
+   [clojure.data.json :refer [read-str write-str]]))
 
 (defn assert-env-var
-  "Get environment variable, throwing if not found.
-   Checks claij.env/env map which includes .env file and System/getenv."
+  "Get environment variable, throwing if not found."
   [v]
-  (if-let [k (getenv v)]
+  (if-let [k (System/getenv v)]
     k
     (throw (ex-info (str "Missing environment variable: " v) {:var v}))))
 

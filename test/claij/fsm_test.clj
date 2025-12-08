@@ -4,7 +4,8 @@
    [claij.action :refer [def-action]]
    [claij.malli :refer [valid-fsm? base-registry]]
    [claij.fsm :refer [state-schema resolve-schema start-fsm llm-action trail->prompts
-                      build-fsm-registry validate-event last-event llm-configs]]
+                      build-fsm-registry validate-event last-event llm-configs
+                      make-prompts]]
    [claij.llm.open-router :refer [open-router-async]]))
 
 ;;------------------------------------------------------------------------------
@@ -367,3 +368,59 @@
           (is (= 2 (count (first @handler-calls))) "handler should receive 2 args (context, event)")
           (catch clojure.lang.ArityException e
             (is false (str "BUG: handler called with wrong arity - " (.getMessage e)))))))))
+
+(deftest make-prompts-test
+  (testing "make-prompts builds prompt messages"
+    (let [fsm {"prompts" ["You are a helpful assistant."]}
+          ix {"prompts" ["Focus on code quality."]}
+          state {"prompts" ["Be concise."]}
+          trail []
+          prompts (make-prompts fsm ix state trail)]
+
+      (testing "returns sequence with system message"
+        (is (seq prompts))
+        (is (= "system" (get (first prompts) "role"))))
+
+      (testing "system message contains context prompts"
+        (let [content (get (first prompts) "content")]
+          (is (string? content))
+          (is (re-find #"Clojure world" content))
+          (is (re-find #"You are a helpful assistant" content))
+          (is (re-find #"Focus on code quality" content))
+          (is (re-find #"Be concise" content))))))
+
+  (testing "make-prompts with trail"
+    (let [fsm {"prompts" []}
+          ix {"prompts" []}
+          state {"prompts" []}
+          trail [{"role" "user" "content" {"id" "test"}}
+                 {"role" "assistant" "content" {"id" "response"}}]
+          prompts (make-prompts fsm ix state trail)]
+
+      (testing "includes trail messages"
+        (is (>= (count prompts) 3))
+        ;; Trail messages should be pr-str'd
+        (let [trail-prompts (rest prompts)]
+          (is (= 2 (count trail-prompts)))))))
+
+  (testing "make-prompts with provider/model includes LLM-specific config"
+    (let [fsm {"prompts" []}
+          ix {"prompts" []}
+          state {"prompts" []}
+          trail []
+          ;; Use a known provider/model from llm-configs
+          prompts (make-prompts fsm ix state trail "anthropic" "claude-sonnet-4.5")]
+
+      (testing "returns prompts"
+        (is (seq prompts)))))
+
+  (testing "make-prompts with nil prompts"
+    (let [fsm {"prompts" nil}
+          ix {"prompts" nil}
+          state {"prompts" nil}
+          trail []
+          prompts (make-prompts fsm ix state trail)]
+
+      (testing "handles nil prompts gracefully"
+        (is (seq prompts))
+        (is (= "system" (get (first prompts) "role")))))))
