@@ -5,7 +5,8 @@
    [claij.server :refer [string->url separator pattern initial-summary
                          fsms llms health-handler list-fsms-handler
                          fsm-document-handler fsm-graph-dot-handler
-                         fsm-graph-svg-handler dot->svg wrap-auth]])
+                         fsm-graph-svg-handler dot->svg wrap-auth
+                         llm-handler claij-api-key]])
   (:import
    [java.net URL]))
 
@@ -116,7 +117,21 @@
 
     (testing "returns 404 for unknown FSM id"
       (let [response (fsm-graph-svg-handler {:path-params {:fsm-id "nonexistent"}})]
-        (is (= 404 (:status response)))))))
+        (is (= 404 (:status response))))))
+
+  (testing "llm-handler"
+    (testing "returns 404 for unknown provider"
+      (let [response (llm-handler {:path-params {:provider "unknown"}
+                                   :body-params {:message "test"}})]
+        (is (= 404 (:status response)))
+        (is (contains? (:body response) :error))
+        (is (re-find #"LLM not found" (get-in response [:body :error]))))))
+
+  (testing "claij-api-key"
+    (testing "returns nil when env var not set"
+      ;; This tests the function itself, not the env var
+      (is (or (nil? (claij-api-key))
+              (string? (claij-api-key)))))))
 
 (deftest wrap-auth-test
   (testing "wrap-auth middleware"

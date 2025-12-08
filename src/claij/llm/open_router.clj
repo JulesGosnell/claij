@@ -7,7 +7,6 @@
    [clojure.core.async :refer [<! <!! >! >!! chan go-loop]]
    [clj-http.client :refer [post]]
    [cheshire.core :as json]
-   [claij.repl :refer [start-prepl]]
    [claij.util :refer [assert-env-var clj->json json->clj make-retrier]]))
 
 ;; https://openrouter.ai/docs/quickstart
@@ -110,7 +109,6 @@
 ;; (def clj->ai (chan 1024 (map (comp (partial trc "clj->ai:") x-out))))
 ;; (defmacro i [form] `(>!! ai->clj (pr-str '~form)))
 ;; (defn o [] (<!! clj->ai))
-;; (def stop-prepl (start-prepl ai->clj clj->ai))
 ;; (defn start []
 ;;   (ai gpt clj->ai ai->clj))
 
@@ -141,8 +139,8 @@
   (let [m (re-matches #"(?s)\s*```(?:json|edn|clojure)?\s*(.*)\s*```\s*" s)]
     (if m (second m) s)))
 
-(defn unpack [{b :body}] 
-  (let [{[{{c :content} :message}] :choices} (json/parse-string b true)] 
+(defn unpack [{b :body}]
+  (let [{[{{c :content} :message}] :choices} (json/parse-string b true)]
     c))
 
 (defn ppr-str [x]
