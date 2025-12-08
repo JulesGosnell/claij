@@ -36,4 +36,4 @@ jobs:
         restore-keys: ${{ runner.os }}-clojure-
         
     - name: Run tests
-      run: ./bin/test.sh
+      run: ./bin/test-unit.sh
