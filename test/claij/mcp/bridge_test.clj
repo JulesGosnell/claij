@@ -52,14 +52,55 @@
         (stop))))
 
   (testing "json-string?"
-    (is (json-string? "{}"))
-    (is (not (json-string? "foo"))))
+    (testing "valid JSON objects"
+      (is (json-string? "{}") "empty object")
+      (is (json-string? "{\"key\": \"value\"}") "simple object")
+      (is (json-string? "  {\"key\": 123}") "leading whitespace")
+      (is (json-string? "\t{\"nested\": {}}") "tab whitespace")
+      (is (json-string? "\n{\"array\": [1,2,3]}") "newline whitespace"))
+
+    (testing "invalid JSON (not objects)"
+      (is (not (json-string? "foo")) "plain string")
+      (is (not (json-string? "")) "empty string")
+      (is (not (json-string? "[]")) "array")
+      (is (not (json-string? "123")) "number")
+      (is (not (json-string? "null")) "null")
+      (is (not (json-string? "\"string\"")) "quoted string")))
 
   (testing "start-mcp-bridge"
-    (testing "MCP agent invalid config"
-      (is (thrown? IllegalArgumentException (start-mcp-bridge {:command "" :args [] :transport "stdio"} (chan) (chan)))
-          "Empty command should throw")
-      (is (thrown? IllegalArgumentException (start-mcp-bridge {:command "bash" :args "not-a-vector" :transport "stdio"} (chan) (chan)))
-          "Non-vector args should throw")
-      (is (thrown? IllegalArgumentException (start-mcp-bridge {:command "bash" :args [] :transport nil} (chan) (chan)))
-          "Nil transport should throw"))))
+    (testing "valid stdio config"
+      ;; Note: Uses string keys to match code expectations
+      (let [input-chan (chan)
+            output-chan (chan)
+            stop (start-mcp-bridge {"command" "echo" "args" ["hello"] "transport" "stdio"}
+                                   input-chan output-chan)]
+        (is (fn? stop) "Should return a stop function")
+        (stop)))
+
+    (testing "invalid config - empty command"
+      (is (thrown? IllegalArgumentException
+                   (start-mcp-bridge {"command" "" "args" [] "transport" "stdio"} (chan) (chan)))
+          "Empty command should throw"))
+
+    (testing "invalid config - nil command"
+      (is (thrown? IllegalArgumentException
+                   (start-mcp-bridge {"command" nil "args" [] "transport" "stdio"} (chan) (chan)))
+          "Nil command should throw"))
+
+    (testing "invalid config - non-vector args"
+      (is (thrown? IllegalArgumentException
+                   (start-mcp-bridge {"command" "bash" "args" "not-a-vector" "transport" "stdio"} (chan) (chan)))
+          "Non-vector args should throw"))
+
+    (testing "nil args is allowed"
+      (let [input-chan (chan)
+            output-chan (chan)
+            stop (start-mcp-bridge {"command" "echo" "args" nil "transport" "stdio"}
+                                   input-chan output-chan)]
+        (is (fn? stop) "nil args should be allowed")
+        (stop)))
+
+    (testing "unsupported transport throws"
+      (is (thrown? IllegalArgumentException
+                   (start-mcp-bridge {"command" "bash" "args" [] "transport" "http"} (chan) (chan)))
+          "Unsupported transport should throw"))))

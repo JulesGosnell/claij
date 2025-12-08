@@ -4,7 +4,8 @@
    [clojure.test :refer [deftest testing is]]
    [claij.server :refer [string->url separator pattern initial-summary
                          fsms llms health-handler list-fsms-handler
-                         fsm-document-handler fsm-graph-dot-handler]])
+                         fsm-document-handler fsm-graph-dot-handler
+                         fsm-graph-svg-handler dot->svg wrap-auth]])
   (:import
    [java.net URL]))
 
@@ -54,6 +55,18 @@
       (doseq [[k v] llms]
         (is (fn? v) (str "LLM " k " should be a function")))))
 
+  (testing "dot->svg"
+    (testing "converts simple DOT to SVG"
+      (let [dot "digraph G { A -> B; }"
+            svg (dot->svg dot)]
+        (is (string? svg))
+        (is (re-find #"<svg" svg) "Output should contain SVG element")
+        (is (re-find #"</svg>" svg) "Output should be complete SVG")))
+
+    (testing "throws on invalid DOT syntax"
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (dot->svg "not valid dot syntax {{{")))))
+
   (testing "health-handler"
     (testing "returns 200 with ok body"
       (let [response (health-handler {})]
@@ -91,4 +104,68 @@
 
     (testing "returns 404 for unknown FSM id"
       (let [response (fsm-graph-dot-handler {:path-params {:fsm-id "nonexistent"}})]
+        (is (= 404 (:status response))))))
+
+  (testing "fsm-graph-svg-handler"
+    (testing "returns 200 with SVG for valid id"
+      (let [response (fsm-graph-svg-handler {:path-params {:fsm-id "code-review-fsm"}})]
+        (is (= 200 (:status response)))
+        (is (= "image/svg+xml" (get-in response [:headers "content-type"])))
+        (is (string? (:body response)))
+        (is (re-find #"<svg" (:body response)))))
+
+    (testing "returns 404 for unknown FSM id"
+      (let [response (fsm-graph-svg-handler {:path-params {:fsm-id "nonexistent"}})]
         (is (= 404 (:status response)))))))
+
+(deftest wrap-auth-test
+  (testing "wrap-auth middleware"
+    (let [mock-handler (fn [_req] {:status 200 :body "success"})]
+
+      (testing "allows requests when no API key configured"
+        ;; When CLAIJ_API_KEY is blank/nil, all requests pass through
+        (with-redefs [claij.server/claij-api-key (constantly nil)]
+          (let [wrapped (wrap-auth mock-handler)
+                response (wrapped {:headers {}})]
+            (is (= 200 (:status response)))
+            (is (= "success" (:body response))))))
+
+      (testing "allows requests when no API key configured (empty string)"
+        (with-redefs [claij.server/claij-api-key (constantly "")]
+          (let [wrapped (wrap-auth mock-handler)
+                response (wrapped {:headers {}})]
+            (is (= 200 (:status response))))))
+
+      (testing "allows requests with valid Bearer token"
+        (with-redefs [claij.server/claij-api-key (constantly "secret-key")]
+          (let [wrapped (wrap-auth mock-handler)
+                response (wrapped {:headers {"authorization" "Bearer secret-key"}})]
+            (is (= 200 (:status response)))
+            (is (= "success" (:body response))))))
+
+      (testing "rejects requests with missing authorization header"
+        (with-redefs [claij.server/claij-api-key (constantly "secret-key")]
+          (let [wrapped (wrap-auth mock-handler)
+                response (wrapped {:headers {}})]
+            (is (= 401 (:status response)))
+            (is (= "Unauthorized" (get-in response [:body :error]))))))
+
+      (testing "rejects requests with invalid token"
+        (with-redefs [claij.server/claij-api-key (constantly "secret-key")]
+          (let [wrapped (wrap-auth mock-handler)
+                response (wrapped {:headers {"authorization" "Bearer wrong-key"}})]
+            (is (= 401 (:status response)))
+            (is (= "Unauthorized" (get-in response [:body :error]))))))
+
+      (testing "rejects requests with malformed authorization header"
+        (with-redefs [claij.server/claij-api-key (constantly "secret-key")]
+          (let [wrapped (wrap-auth mock-handler)
+                response (wrapped {:headers {"authorization" "Basic abc123"}})]
+            (is (= 401 (:status response))))))
+
+      (testing "returns WWW-Authenticate header on 401"
+        (with-redefs [claij.server/claij-api-key (constantly "secret-key")]
+          (let [wrapped (wrap-auth mock-handler)
+                response (wrapped {:headers {}})]
+            (is (= "Bearer realm=\"claij\""
+                   (get-in response [:headers "WWW-Authenticate"])))))))))

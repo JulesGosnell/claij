@@ -1,7 +1,112 @@
 (ns claij.util-test
   (:require
    [clojure.test :refer [deftest testing is]]
-   [claij.util :refer [should-retry? make-retrier]]))
+   [claij.util :refer [trace json->clj clj->json index-by map-values ->key
+                       should-retry? make-retrier assert-env-var]]))
+
+;;==============================================================================
+;; Pure utility function tests
+;;==============================================================================
+
+(deftest trace-test
+  (testing "trace returns second argument unchanged"
+    (is (= "hello" (trace "label" "hello")))
+    (is (= 42 (trace "num" 42)))
+    (is (= {:a 1} (trace "map" {:a 1})))
+    (is (= [1 2 3] (trace "vec" [1 2 3])))
+    (is (nil? (trace "nil" nil)))))
+
+(deftest json->clj-test
+  (testing "parses JSON with keyword keys"
+    (is (= {:name "test"} (json->clj "{\"name\": \"test\"}")))
+    (is (= {:a 1 :b 2} (json->clj "{\"a\": 1, \"b\": 2}")))
+    (is (= {:nested {:key "value"}} (json->clj "{\"nested\": {\"key\": \"value\"}}"))))
+
+  (testing "handles arrays"
+    (is (= [1 2 3] (json->clj "[1, 2, 3]")))
+    (is (= [{:a 1} {:b 2}] (json->clj "[{\"a\": 1}, {\"b\": 2}]"))))
+
+  (testing "handles primitives"
+    (is (= "hello" (json->clj "\"hello\"")))
+    (is (= 42 (json->clj "42")))
+    (is (= true (json->clj "true")))
+    (is (nil? (json->clj "null")))))
+
+(deftest clj->json-test
+  (testing "serializes maps"
+    (is (= "{\"name\":\"test\"}" (clj->json {:name "test"})))
+    (is (= "{\"a\":1,\"b\":2}" (clj->json {:a 1 :b 2}))))
+
+  (testing "serializes vectors"
+    (is (= "[1,2,3]" (clj->json [1 2 3]))))
+
+  (testing "round-trips correctly"
+    (let [data {:name "test" :count 42 :items [1 2 3]}]
+      (is (= data (json->clj (clj->json data)))))))
+
+(deftest index-by-test
+  (testing "indexes collection by function"
+    (is (= {1 {:id 1 :name "a"}
+            2 {:id 2 :name "b"}}
+           (index-by :id [{:id 1 :name "a"} {:id 2 :name "b"}]))))
+
+  (testing "handles empty collection"
+    (is (= {} (index-by :id []))))
+
+  (testing "last value wins for duplicates"
+    (is (= {1 {:id 1 :name "second"}}
+           (index-by :id [{:id 1 :name "first"} {:id 1 :name "second"}]))))
+
+  (testing "works with string keys"
+    (is (= {"a" {"key" "a" "val" 1}
+            "b" {"key" "b" "val" 2}}
+           (index-by #(get % "key") [{"key" "a" "val" 1} {"key" "b" "val" 2}])))))
+
+(deftest map-values-test
+  (testing "transforms values with key available"
+    (is (= {:a "a:1" :b "b:2"}
+           (map-values (fn [k v] (str (name k) ":" v)) {:a 1 :b 2}))))
+
+  (testing "can ignore key"
+    (is (= {:a 2 :b 4}
+           (map-values (fn [_k v] (* v 2)) {:a 1 :b 2}))))
+
+  (testing "handles empty map"
+    (is (= {} (map-values (fn [k v] v) {})))))
+
+(deftest ->key-test
+  (testing "creates key accessor function"
+    (let [get-name (->key "name")
+          get-id (->key "id")]
+      (is (= "test" (get-name {"name" "test" "id" 1})))
+      (is (= 1 (get-id {"name" "test" "id" 1})))))
+
+  (testing "returns nil for missing key"
+    (let [get-missing (->key "missing")]
+      (is (nil? (get-missing {"other" "value"}))))))
+
+(deftest assert-env-var-test
+  (testing "assert-env-var"
+    (testing "returns value for existing env var"
+      ;; PATH exists in virtually all Unix environments
+      (is (string? (assert-env-var "PATH")))
+      (is (not-empty (assert-env-var "PATH"))))
+
+    (testing "throws for missing env var"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Missing environment variable"
+                            (assert-env-var "DEFINITELY_NOT_A_REAL_VAR_98765"))))
+
+    (testing "exception contains var name in data"
+      (try
+        (assert-env-var "FAKE_VAR_12345")
+        (is false "Should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= "FAKE_VAR_12345" (:var (ex-data e)))))))))
+
+;;==============================================================================
+;; Retry utility tests
+;;==============================================================================
 
 (deftest should-retry-test
   (testing "should-retry? predicate"

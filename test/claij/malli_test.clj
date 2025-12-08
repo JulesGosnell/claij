@@ -4,11 +4,12 @@
    [clojure.test :refer [deftest is testing]]
    [clojure.string :refer [includes?]]
    [malli.core :as m]
+   [malli.registry :as mr]
    [claij.malli :refer [valid-schema? validate-schema validate
                         MalliSchema base-registry
                         ->map-form ->vector-form
                         collect-refs count-refs transitive-closure
-                        analyze-for-emission inline-refs emit-for-llm
+                        analyze-for-emission inline-refs expand-refs-for-llm emit-for-llm
                         format-for-prompt schema-prompt-note
                         valid-m2? valid-m1? def-m2 def-m1
                         fsm-registry fsm-schema valid-fsm? def-fsm]]))
@@ -277,3 +278,107 @@
     (is (= "macro-test" (get test-fsm-1 "id")))
     (is (= 2 (count (get test-fsm-1 "states"))))
     (is (= 1 (count (get test-fsm-1 "xitions"))))))
+
+(deftest inline-refs-test
+  (testing "inline-refs"
+    (let [registry {:address [:map [:street :string] [:city :string]]
+                    :person [:map [:name :string] [:addr [:ref :address]]]}]
+
+      (testing "inlines refs in inline-set"
+        (let [result (inline-refs [:map [:home [:ref :address]]]
+                                  registry
+                                  #{:address})]
+          (is (= [:map [:home [:map [:street :string] [:city :string]]]]
+                 result))))
+
+      (testing "leaves refs not in inline-set"
+        (let [result (inline-refs [:map [:home [:ref :address]]]
+                                  registry
+                                  #{})]
+          (is (= [:map [:home [:ref :address]]]
+                 result))))
+
+      (testing "handles nested refs"
+        (let [result (inline-refs [:ref :person]
+                                  registry
+                                  #{:person :address})]
+          (is (= [:map [:name :string] [:addr [:map [:street :string] [:city :string]]]]
+                 result))))
+
+      (testing "handles primitives unchanged"
+        (is (= :string (inline-refs :string {} #{})))
+        (is (= :int (inline-refs :int {} #{})))))))
+
+(deftest expand-refs-for-llm-test
+  (testing "expand-refs-for-llm"
+    (let [registry {:simple [:map [:x :int]]
+                    :nested [:map [:inner [:ref :simple]]]
+                    :deep [:map [:outer [:ref :nested]]]}]
+
+      (testing "expands single ref"
+        (let [result (expand-refs-for-llm [:ref :simple] registry)]
+          (is (= [:map [:x :int]] result))))
+
+      (testing "expands nested refs recursively"
+        (let [result (expand-refs-for-llm [:ref :nested] registry)]
+          (is (= [:map [:inner [:map [:x :int]]]] result))))
+
+      (testing "expands deeply nested refs"
+        (let [result (expand-refs-for-llm [:ref :deep] registry)]
+          (is (= [:map [:outer [:map [:inner [:map [:x :int]]]]]] result))))
+
+      (testing "handles schema without refs"
+        (let [result (expand-refs-for-llm [:map [:name :string]] registry)]
+          (is (= [:map [:name :string]] result))))
+
+      (testing "handles primitives"
+        (is (= :string (expand-refs-for-llm :string registry)))
+        (is (= :int (expand-refs-for-llm :int registry))))
+
+      (testing "leaves unresolved refs unchanged"
+        (let [result (expand-refs-for-llm [:ref :unknown] registry)]
+          (is (= [:ref :unknown] result))))
+
+      (testing "works with Malli composite registry"
+        (let [malli-reg (mr/composite-registry
+                         (m/default-schemas)
+                         {:my-type [:map [:value :string]]})]
+          (let [result (expand-refs-for-llm [:ref :my-type] malli-reg)]
+            (is (= [:map [:value :string]] result))))))))
+
+(deftest json-schema-type-test
+  (testing "JsonSchema custom Malli type"
+    (let [opts {:registry base-registry}
+          ;; A simple JSON Schema for objects with a required "name" field
+          simple-json-schema {"type" "object"
+                              "properties" {"name" {"type" "string"}
+                                            "age" {"type" "integer"}}
+                              "required" ["name"]}
+          ;; Malli schema using our custom :json-schema type
+          malli-wrapper [:json-schema {:schema simple-json-schema}]]
+
+      (testing "accepts valid JSON Schema values"
+        (is (m/validate malli-wrapper {"name" "Alice"} opts))
+        (is (m/validate malli-wrapper {"name" "Bob" "age" 30} opts)))
+
+      (testing "rejects invalid JSON Schema values"
+        ;; Missing required "name" field
+        (is (not (m/validate malli-wrapper {} opts)))
+        (is (not (m/validate malli-wrapper {"age" 25} opts)))
+        ;; Wrong type for age
+        (is (not (m/validate malli-wrapper {"name" "Charlie" "age" "thirty"} opts))))
+
+      (testing "works embedded in larger Malli schema"
+        (let [composite-schema [:map {:closed true}
+                                ["tool" [:= "bash"]]
+                                ["arguments" [:json-schema {:schema simple-json-schema}]]]]
+          (is (m/validate composite-schema
+                          {"tool" "bash" "arguments" {"name" "test"}}
+                          opts))
+          (is (not (m/validate composite-schema
+                               {"tool" "bash" "arguments" {}}
+                               opts)))))
+
+      (testing "throws when :schema property is missing"
+        (is (thrown? clojure.lang.ExceptionInfo
+                     (m/schema [:json-schema {}] opts)))))))

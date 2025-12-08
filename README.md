@@ -20,6 +20,8 @@
 
 # CLAIJ - Clojure AI Integration Junction
 
+*"...an elastic collection of LLMs coordinating on a self-improving process."*
+
 > *"The factory is the product."* — Elon Musk
 >
 > *"...we envision a mind (or brain) as composed of many partially autonomous 'agents'—a 'Society' of smaller minds..."* — Marvin Minsky, [The Society of Mind](https://en.wikipedia.org/wiki/Society_of_Mind)
