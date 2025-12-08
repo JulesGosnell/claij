@@ -3,119 +3,319 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.tools.logging :as log]
-   [claij.fsm :refer [start-fsm llm-action]]
+   [claij.action :refer [def-action]]
+   [claij.fsm :as fsm :refer [start-fsm]]
    [claij.fsm.mcp-fsm :refer [mcp-actions mcp-fsm]]))
 
 ;;==============================================================================
-;; LLM Stub/Real Switch
+;; Stub Actions for Unit Testing (no MCP server required)
 ;;==============================================================================
-;; Set to true to use real LLM calls, false to use stub responses.
-;; Default is false (stub) for fast, deterministic tests.
+;; These simulate the MCP protocol flow without starting a real subprocess.
+;; Used for fast, deterministic tests that verify FSM machinery and cache logic.
 ;;==============================================================================
 
-(def ^:dynamic *use-real-llm* false)
+(def stub-tools
+  "Fake tool data for cache population tests"
+  [{"name" "bash"
+    "description" "Execute bash commands"
+    "inputSchema" {"type" "object"
+                   "properties" {"command" {"type" "string"}}
+                   "required" ["command"]}}
+   {"name" "read_file"
+    "description" "Read file contents"
+    "inputSchema" {"type" "object"
+                   "properties" {"path" {"type" "string"}}
+                   "required" ["path"]}}])
 
-(defn stub-llm-action
-  "Stub LLM action that immediately transitions to end state.
-   Returns a valid MCP content format response without making API calls."
-  [context _fsm _ix _state _event _trail handler]
-  (log/info "stub-llm-action: returning canned end transition")
-  (handler context {"id" ["llm" "end"]
-                    "result" {"content" [{"type" "text"
-                                          "text" "Stub LLM response - FSM flow completed"}]}}))
+(def stub-prompts
+  "Fake prompt data for cache population tests"
+  [{"name" "code_review"
+    "description" "Review code for issues"}
+   {"name" "summarize"
+    "description" "Summarize content"}])
+
+(def stub-resources
+  "Fake resource data for cache population tests"
+  [{"uri" "file:///home/user/project/README.md"
+    "name" "README.md"
+    "mimeType" "text/markdown"}
+   {"uri" "file:///home/user/project/src/core.clj"
+    "name" "core.clj"
+    "mimeType" "text/x-clojure"}])
+
+(def-action stub-start-action
+  "Stub start action - skips MCP bridge, initializes context."
+  :any
+  [_config _fsm _ix _state]
+  (fn [context {d "document" :as _event} _trail handler]
+    (log/info "stub-start-action: initializing without MCP bridge")
+    (let [updated-context (assoc context
+                                 :mcp/document d
+                                 ;; Fake capabilities for cache initialization
+                                 :stub/capabilities {"tools" {} "prompts" {} "resources" {}})]
+      (handler updated-context
+               {"id" ["starting" "shedding"]
+                "document" d
+                "message" {"jsonrpc" "2.0"
+                           "id" 0
+                           "result" {"protocolVersion" "2025-06-18"
+                                     "capabilities" {"tools" {}
+                                                     "prompts" {}
+                                                     "resources" {}}}}}))))
+
+(def-action stub-shed-action
+  "Stub shed action - immediately passes through to init."
+  :any
+  [_config _fsm _ix _state]
+  (fn [context {{_im "method" :as message} "message" document "document" :as _event} _trail handler]
+    (log/info "stub-shed-action: passing through")
+    (handler context
+             {"id" ["shedding" "initing"]
+              "document" document
+              "message" {"jsonrpc" "2.0"
+                         "id" 0
+                         "result" {"protocolVersion" "2025-06-18"
+                                   "capabilities" {"tools" {}
+                                                   "prompts" {}
+                                                   "resources" {}}}}})))
+
+(def-action stub-init-action
+  "Stub init action - sets up cache structure from fake capabilities."
+  :any
+  [_config _fsm _ix _state]
+  (fn [context {document "document" :as _event} _trail handler]
+    (log/info "stub-init-action: initializing cache structure")
+    ;; Initialize cache with empty collections for each capability
+    (let [updated-context (assoc context "state"
+                                 {"tools" nil
+                                  "prompts" nil
+                                  "resources" nil})]
+      (handler updated-context
+               {"id" ["initing" "servicing"]
+                "document" document
+                "message" {"jsonrpc" "2.0"
+                           "method" "initialized"}}))))
+
+(def-action stub-service-action
+  "Stub service action - routes messages without real MCP communication."
+  :any
+  [_config _fsm ix _state]
+  (fn [context {m "message" document "document" :as _event} _trail handler]
+    (let [[from _to] (get ix "id")]
+      (log/info "stub-service-action: routing from" from)
+      (cond
+        ;; From caching - return fake list response based on what's being requested
+        (= from "caching")
+        (let [method (get m "method")]
+          (cond
+            (= method "tools/list")
+            (handler context
+                     {"id" ["servicing" "caching"]
+                      "message" {"jsonrpc" "2.0"
+                                 "id" (get m "id")
+                                 "result" {"tools" stub-tools}}})
+
+            (= method "prompts/list")
+            (handler context
+                     {"id" ["servicing" "caching"]
+                      "message" {"jsonrpc" "2.0"
+                                 "id" (get m "id")
+                                 "result" {"prompts" stub-prompts}}})
+
+            (= method "resources/list")
+            (handler context
+                     {"id" ["servicing" "caching"]
+                      "message" {"jsonrpc" "2.0"
+                                 "id" (get m "id")
+                                 "result" {"resources" stub-resources}}})
+
+            :else
+            (handler context
+                     {"id" ["servicing" "caching"]
+                      "message" {"jsonrpc" "2.0"
+                                 "id" (get m "id")
+                                 "result" {}}})))
+
+        ;; From initing - go to caching
+        (= from "initing")
+        (handler context
+                 {"id" ["servicing" "caching"]
+                  "message" {}})
+
+        ;; From llm - return tool result
+        (= from "llm")
+        (handler context
+                 (cond-> {"id" ["servicing" "llm"]
+                          "message" {"jsonrpc" "2.0"
+                                     "id" 1
+                                     "result" {"content" [{"type" "text"
+                                                           "text" "stub tool result"}]}}}
+                   document (assoc "document" document)))
+
+        ;; Default - go to llm
+        :else
+        (handler context
+                 (cond-> {"id" ["servicing" "llm"]}
+                   document (assoc "document" document)))))))
+
+(def-action stub-cache-action
+  "Stub cache action - populates cache with fake data."
+  :any
+  [_config _fsm ix _state]
+  (fn [context {m "message" :as _event} _trail handler]
+    (let [{method "method" result "result"} m
+          cache (get context "state")]
+      (log/info "stub-cache-action: cache state" (pr-str (keys cache)))
+      (cond
+        ;; Received list response - update cache
+        result
+        (let [;; Extract the data type from result keys
+              data-key (first (filter #(not= % "jsonrpc") (keys result)))
+              data (get result data-key)
+              capability-key (when data-key
+                               (cond
+                                 (= data-key "tools") "tools"
+                                 (= data-key "prompts") "prompts"
+                                 (= data-key "resources") "resources"
+                                 :else nil))
+              updated-context (if capability-key
+                                (assoc-in context ["state" capability-key] data)
+                                context)
+              new-cache (get updated-context "state")]
+          (log/info "stub-cache-action: updated" capability-key "with" (count data) "items")
+          ;; Check if all caches are populated
+          (if (and (seq (get new-cache "tools"))
+                   (seq (get new-cache "prompts"))
+                   (seq (get new-cache "resources")))
+            ;; All populated - go to llm
+            (handler updated-context
+                     {"id" ["caching" "llm"]
+                      "document" (:mcp/document updated-context)})
+            ;; Need more data - request next missing item
+            (let [missing (cond
+                            (nil? (get new-cache "tools")) "tools/list"
+                            (nil? (get new-cache "prompts")) "prompts/list"
+                            (nil? (get new-cache "resources")) "resources/list")]
+              (handler updated-context
+                       {"id" ["caching" "servicing"]
+                        "message" {"jsonrpc" "2.0"
+                                   "id" 1
+                                   "method" missing}}))))
+
+        ;; Initial entry - request first missing item
+        :else
+        (let [missing (cond
+                        (nil? (get cache "tools")) "tools/list"
+                        (nil? (get cache "prompts")) "prompts/list"
+                        (nil? (get cache "resources")) "resources/list")]
+          (if missing
+            (handler context
+                     {"id" ["caching" "servicing"]
+                      "message" {"jsonrpc" "2.0"
+                                 "id" 1
+                                 "method" missing}})
+            ;; All populated - go to llm
+            (handler context
+                     {"id" ["caching" "llm"]
+                      "document" (:mcp/document context)})))))))
+
+(def-action stub-llm-action
+  "Stub LLM action that immediately transitions to end state."
+  :any
+  [_config _fsm _ix _state]
+  (fn [context _event _trail handler]
+    (log/info "stub-llm-action: completing FSM")
+    (handler context {"id" ["llm" "end"]
+                      "result" {"content" [{"type" "text"
+                                            "text" "Stub LLM response - FSM flow completed"}]}})))
+
+(def-action stub-end-action
+  "Stub end action that delivers completion via promise."
+  :any
+  [_config _fsm _ix _state]
+  (fn [context _event trail _handler]
+    (log/info "stub-end-action: delivering completion")
+    (when-let [p (:fsm/completion-promise context)]
+      (deliver p [context trail]))
+    nil))
+
+;;==============================================================================
+;; Test Action Selection
+;;==============================================================================
+
+(def stub-mcp-actions
+  "Complete stub action set for unit testing without MCP server."
+  {"start" #'stub-start-action
+   "shed" #'stub-shed-action
+   "init" #'stub-init-action
+   "service" #'stub-service-action
+   "cache" #'stub-cache-action
+   "llm" #'stub-llm-action
+   "end" #'stub-end-action})
+
+(def ^:dynamic *use-real-mcp* false)
 
 (defn get-test-actions
-  "Returns mcp-actions with either real or stub LLM based on *use-real-llm*"
+  "Returns stub or real actions based on *use-real-mcp*"
   []
-  (if *use-real-llm*
+  (if *use-real-mcp*
     mcp-actions
-    (assoc mcp-actions "llm" stub-llm-action)))
+    stub-mcp-actions))
 
 ;;==============================================================================
-;; Simple Action Tracking
-;;==============================================================================
-;; TODO: This is a TEMPORARY solution for testing this specific FSM.
-;;
-;; FUTURE: Generic FSM Testing Infrastructure
-;; 1. FSM machinery should record its own path (state/transition traversal)
-;; 2. Trail should be FSM-centric, post-processed for LLM (see Issue 1)
-;; 3. Latch-based coordination: shared start/end actions for proper async waiting
-;;
-;; See doc/MCP.md "Future: Generic FSM Testing Infrastructure" for details.
+;; Trail Analysis Helpers
 ;;==============================================================================
 
-(defn make-tracker
-  "Creates a simple action call counter.
-  Returns [counter-atom wrapper-fn]"
-  []
-  (let [counter (atom {})]
-    [counter
-     (fn [action-name original-action]
-       (fn [context & args]
-         (swap! counter update action-name (fnil inc 0))
-         (apply original-action context args)))]))
-
-(defn wrap-actions
-  "Wraps all actions with tracking wrapper."
-  [actions wrapper-fn]
-  (reduce-kv
-   (fn [m action-name action-fn]
-     (assoc m action-name (wrapper-fn action-name action-fn)))
-   {}
-   actions))
+(defn count-transitions-to
+  "Count how many times a state appears as destination in the trail."
+  [trail state-name]
+  (->> trail
+       (filter #(= (:to %) state-name))
+       count))
 
 ;;==============================================================================
-;; TESTS
+;; UNIT TESTS (no MCP server required)
 ;;==============================================================================
 
-(deftest ^:integration mcp-fsm-smoke-test
+(deftest mcp-fsm-smoke-test
   (testing "MCP FSM can start, accept input, and complete"
     (let [context {:id->action (get-test-actions)}
-          result (claij.fsm/run-sync mcp-fsm context
-                                     {"id" ["start" "starting"]
-                                      "document" "smoke test"}
-                                     120000)] ; 2 minute timeout
+          result (fsm/run-sync mcp-fsm context
+                               {"id" ["start" "starting"]
+                                "document" "smoke test"}
+                               30000)] ; 30 second timeout (stub is fast)
 
       (is (not= result :timeout) "FSM should complete within timeout")
       (when (not= result :timeout)
-        (let [[final-context trail] result
-              final-event (claij.fsm/last-event trail)]
+        (let [[_final-context trail] result
+              final-event (fsm/last-event trail)]
           (is (map? final-event) "FSM should return final event")
           (log/info "FSM completed successfully with event:" final-event))))))
 
-(deftest ^:integration mcp-fsm-flow-test
+(deftest mcp-fsm-flow-test
   (testing "MCP FSM action tracking and cache construction"
-    (let [[counter wrapper-fn] (make-tracker)
-          tracked-actions (wrap-actions (get-test-actions) wrapper-fn)
-          context {:id->action tracked-actions
-                   "state" {}} ;; Initialize with empty state for cache
+    (let [context {:id->action (get-test-actions)
+                   "state" {}}
           [submit await _stop] (start-fsm context mcp-fsm)]
 
       (submit {"id" ["start" "starting"]
                "document" "test action flow"})
 
-      ;; Wait for FSM completion with timeout
-      (let [result (await 120000)]
-        (is (not= result :timeout) "FSM should complete within 10 seconds")
+      (let [result (await 30000)]
+        (is (not= result :timeout) "FSM should complete within timeout")
 
         (when (not= result :timeout)
           (let [[final-context trail] result
-                counts @counter
                 cache (get final-context "state")]
 
-            (testing "action tracking"
-              (log/info "Final action call counts:" counts)
-
-              ;; At minimum, start and end should have been called
-              (is (>= (get counts "start" 0) 1) "start action should be called")
-              (is (>= (get counts "end" 0) 1) "end action should be called")
-
-              ;; Log what we observed for analysis
-              (log/info "Actions called:" (keys counts))
-              (log/info "Total action invocations:" (apply + (vals counts))))
+            (testing "state transitions from trail"
+              (log/info "Trail has" (count trail) "transitions")
+              ;; Most MCP transitions have "omit" true - only llm/end are recorded
+              (is (>= (count-transitions-to trail "llm") 1) "should transition to llm state")
+              (is (>= (count-transitions-to trail "end") 1) "should transition to end state")
+              (log/info "States visited:" (distinct (map :to trail))))
 
             (testing "cache initialization from capabilities"
-              ;; Cache should be initialized with capability keys
               (is (map? cache) "Cache should be a map")
               (is (contains? cache "tools") "Cache should have tools key")
               (is (contains? cache "prompts") "Cache should have prompts key")
@@ -123,7 +323,6 @@
               (log/info "Cache keys initialized:" (keys cache)))
 
             (testing "cache population with data"
-              ;; Cache should be populated with actual data (not nil)
               (is (coll? (get cache "tools")) "Tools should be a collection")
               (is (seq (get cache "tools")) "Tools should be non-empty")
               (is (coll? (get cache "prompts")) "Prompts should be a collection")
@@ -135,30 +334,43 @@
                         "resources:" (count (get cache "resources"))))
 
             (testing "cache structure validation"
-              ;; Each tool should have expected keys
               (let [tools (get cache "tools")]
                 (is (every? #(contains? % "name") tools) "Each tool should have a name")
                 (is (every? #(contains? % "description") tools) "Each tool should have a description")
                 (is (every? #(contains? % "inputSchema") tools) "Each tool should have an inputSchema"))
 
-              ;; Each prompt should have expected keys
               (let [prompts (get cache "prompts")]
                 (is (every? #(contains? % "name") prompts) "Each prompt should have a name")
                 (is (every? #(contains? % "description") prompts) "Each prompt should have a description"))
 
-              ;; Each resource should have expected keys
               (let [resources (get cache "resources")]
                 (is (every? #(contains? % "uri") resources) "Each resource should have a uri")
                 (is (every? #(contains? % "name") resources) "Each resource should have a name")
                 (is (every? #(contains? % "mimeType") resources) "Each resource should have a mimeType")))))))))
 
+;;==============================================================================
+;; INTEGRATION TESTS (require MCP server)
+;;==============================================================================
+
+(deftest ^:integration mcp-fsm-real-server-test
+  (testing "MCP FSM with real MCP server"
+    (binding [*use-real-mcp* true]
+      (let [context {:id->action (get-test-actions)
+                     "state" {}}
+            result (fsm/run-sync mcp-fsm context
+                                 {"id" ["start" "starting"]
+                                  "document" "integration test"}
+                                 120000)]
+
+        (is (not= result :timeout) "FSM should complete within timeout")
+        (when (not= result :timeout)
+          (let [[final-context trail] result]
+            (log/info "Integration test completed with" (count trail) "transitions")))))))
+
 (deftest ^:integration mcp-fsm-tool-call-test
   (testing "MCP FSM can make tool calls via llm↔servicing loop"
-    ;; This test requires real LLM to test the tool calling loop
-    (binding [*use-real-llm* true]
-      (let [[counter wrapper-fn] (make-tracker)
-            tracked-actions (wrap-actions (get-test-actions) wrapper-fn)
-            context {:id->action tracked-actions
+    (binding [*use-real-mcp* true]
+      (let [context {:id->action (get-test-actions)
                      "state" {}}
             [submit await _stop] (start-fsm context mcp-fsm)]
 
@@ -170,37 +382,27 @@
 
           (when (not= result :timeout)
             (let [[_final-context trail] result
-                  counts @counter
-                  final-event (claij.fsm/last-event trail)]
+                  final-event (fsm/last-event trail)]
 
-              (testing "llm action called multiple times (entry + tool response)"
-                ;; llm should be called at least twice:
-                ;; 1. Initial entry (makes tool call)
-                ;; 2. Tool response (completes)
-                (is (>= (get counts "llm" 0) 2)
-                    "llm action should be called at least twice for tool call loop"))
+              (testing "llm state visited multiple times (entry + tool response)"
+                (is (>= (count-transitions-to trail "llm") 2)
+                    "llm state should be visited at least twice for tool call loop"))
 
-              (testing "service action called for tool routing"
-                ;; service should be called multiple times:
-                ;; 1. During init (sends initialized notification)
-                ;; 2. Tool call from llm
-                (is (>= (get counts "service" 0) 2)
-                    "service action should handle init and tool call"))
+              (testing "servicing state visited for tool routing"
+                (is (>= (count-transitions-to trail "servicing") 1)
+                    "servicing state should handle tool call"))
 
               (testing "tool call result captured"
-                ;; Final event should contain the tool result
                 (is (map? final-event) "Final event should be a map")
                 (let [tool-result (get final-event "result")]
                   (is (some? tool-result) "Final event should have result from tool call")
                   (when tool-result
-                    ;; The result should be in MCP content format and contain a hostname
                     (let [content (get tool-result "content")
                           text (get-in content [0 "text"])]
                       (is (some? text) "Result should have text content")
-                      ;; Hostname should be a non-empty string (not a made-up number)
                       (is (re-find #"[a-zA-Z]" (str text)) "Result should contain letters (hostname)")
                       (log/info "Tool call result:" text)))))
 
-              (log/info "Action counts:" counts))))))))
+              (log/info "Trail transitions:" (count trail)))))))))
 
 

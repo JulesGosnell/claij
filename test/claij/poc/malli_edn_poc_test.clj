@@ -218,7 +218,7 @@ CRITICAL:
 ;;------------------------------------------------------------------------------
 ;; Integration Tests
 
-(deftest ^:integration malli-edn-poc-single-test
+(deftest ^:long-running malli-edn-poc-single-test
   (testing "Single LLM (Gemini) can respond with valid EDN matching Malli schema"
     (let [{:keys [success response error]} (test-single {:provider "google" 
                                                           :model "gemini-3-pro-preview"})]
@@ -227,7 +227,7 @@ CRITICAL:
         (is (= ["user" "agree"] (get response "id")) 
             "Should choose 'agree' for 2+2=4")))))
 
-(deftest ^:integration malli-edn-poc-all-reliable-llms-test
+(deftest ^:long-running malli-edn-poc-all-reliable-llms-test
   (testing "All reliable LLMs (4) pass at least once"
     (let [results (mapv #(test-llm-n-times % 3) reliable-llms)
           all-passed? (every? #(pos? (:passed %)) results)]
@@ -235,7 +235,7 @@ CRITICAL:
           (str "All reliable LLMs should pass at least once. Results: "
                (mapv #(select-keys % [:llm :passed :total]) results))))))
 
-(deftest ^:integration malli-edn-poc-reliability-test
+(deftest ^:long-running malli-edn-poc-reliability-test
   (testing "94%+ reliability across all LLMs (10 runs each)"
     (let [{:keys [total-passed total-tests]} (test-all-llms 10)
           pass-rate (/ total-passed total-tests)]

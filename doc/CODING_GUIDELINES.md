@@ -1051,6 +1051,28 @@ When working on complex features that span multiple steps or sessions, maintain 
 - The same issue might be worked on across multiple sessions
 - Multiple approaches may need to be tried
 
+## Git Best Practices
+
+**Use `git mv` when moving or renaming files:**
+- Preserves file history and enables Git to track renames
+- Makes `git log --follow` work correctly
+- Keeps blame information intact
+- Enables proper diff display showing moves vs. delete+create
+
+```bash
+# Good - Git tracks the move
+git mv old/path/file.clj new/path/file.clj
+
+# Bad - Git sees a delete and a new file, history is broken
+mv old/path/file.clj new/path/file.clj
+git add .
+```
+
+**This matters because:**
+- Code archaeology (`git blame`, `git log`) requires history continuity
+- PR reviews are cleaner when Git knows it's a move
+- Merges work better when Git understands file relationships
+
 ## When In Doubt
 
 1. **Ask: "Can this be simpler?"**

@@ -9,7 +9,8 @@
    [malli.core :as m]
    [malli.registry :as mr]
    [claij.malli :refer [base-registry]]
-   [claij.fsm :as fsm]))
+   [claij.fsm :as fsm]
+   [claij.actions :as actions]))
 
 ;;------------------------------------------------------------------------------
 ;; Schemas - IDENTICAL to POC
@@ -19,7 +20,7 @@
    The 'id' field must be the actual transition [from to] for FSM routing."
   {"input" [:map {:closed true}
             ["question" :string]]
-   
+
    ;; Single output schema - id must match transition ["responder" "end"]
    "output" [:map {:closed true}
              ["id" [:= ["responder" "end"]]]
@@ -35,15 +36,15 @@
 (def minimal-fsm
   {"id" "minimal-test"
    "schemas" minimal-schemas
-   "prompts" []  ;; No extra FSM-level prompts
-   
+   "prompts" [] ;; No extra FSM-level prompts
+
    "states"
    [{"id" "responder"
      "action" "llm"
-     "prompts" []}  ;; No extra state-level prompts - rely on system prompt
+     "prompts" []} ;; No extra state-level prompts - rely on system prompt
     {"id" "end"
      "action" "end"}]
-   
+
    "xitions"
    [{"id" ["start" "responder"]
      "schema" [:ref "input"]}
@@ -51,21 +52,12 @@
      "schema" [:ref "output"]}]})
 
 ;;------------------------------------------------------------------------------
-;; End action
-
-(defn end-action [context _fsm _ix _state _event trail _handler]
-  ;; Trail already includes current event (added by xform)
-  ;; Remove promise from context to avoid circular refs
-  (when-let [p (:fsm/completion-promise context)]
-    (deliver p [(dissoc context :fsm/completion-promise) trail])))
-
-;;------------------------------------------------------------------------------
 ;; Test
 
 (defn test-minimal-fsm
   "Test the minimal FSM with a simple question."
   []
-  (let [actions {"llm" fsm/llm-action "end" end-action}
+  (let [actions {"llm" #'fsm/llm-action "end" #'actions/end-action}
         context {:id->action actions
                  :llm/provider "anthropic"
                  :llm/model "claude-sonnet-4.5"}
@@ -80,7 +72,7 @@
           {:success true :response last-evt}
           {:success false :response last-evt :error "Validation failed"})))))
 
-(deftest ^:integration minimal-fsm-test
+(deftest ^:long-running minimal-fsm-test
   (testing "Minimal FSM works with POC-identical schemas"
     (let [{:keys [success response error]} (test-minimal-fsm)]
       (is success (str "Should succeed. Error: " error " Response: " response))

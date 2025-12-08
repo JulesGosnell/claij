@@ -2,12 +2,24 @@
  {:tests [{:id :unit
            :test-paths ["test"]
            :source-paths ["src"]
-           :kaocha.filter/skip-meta [:integration]}
+           :kaocha.filter/skip-meta [:integration :long-running]}
           {:id :integration
            :test-paths ["test"]
            :source-paths ["src"]
-           :kaocha.filter/focus-meta [:integration]}]
+           :kaocha.filter/focus-meta [:integration]
+           :kaocha.filter/skip-meta [:long-running]}
+          {:id :long-running
+           :test-paths ["test"]
+           :source-paths ["src"]
+           :kaocha.filter/focus-meta [:long-running]}]
   :plugins [:kaocha.plugin/profiling
-            :kaocha.plugin/filter] ;; This enables metadata filtering!
+            :kaocha.plugin/filter]
+  :cloverage/opts {:ns-exclude-regex ["claij\\.agent.*"
+                                      "claij\\.core$"
+                                      "claij\\.llm\\.grok"
+                                      "claij\\.llm\\.gemini"
+                                      "claij\\.pipeline.*"
+                                      "claij\\.stt.*"
+                                      "claij\\.tts.*"]}
   :color? true
   :randomize? false}

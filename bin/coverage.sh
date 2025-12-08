@@ -1,23 +1,30 @@
 #!/bin/sh
 
-# Run code coverage analysis
-# Generates HTML report in target/coverage/
-# 
+# Run code coverage analysis on UNIT TESTS ONLY
+# Uses kaocha with cloverage plugin
+#
 # Usage:
-#   ./bin/coverage.sh                    # Run coverage on all unit tests
-#   ./bin/coverage.sh --text             # Show text summary only
-#   ./bin/coverage.sh --html             # Generate HTML report (default)
+#   ./bin/coverage.sh               # Run coverage with HTML report
+#   ./bin/coverage.sh --debug       # Run with full output (not captured)
+#   ./bin/coverage.sh --text        # Include text summary
 
 cd "$(dirname "$0")/.."
 
-echo "Running code coverage analysis..."
-echo ""
-echo "Note: This only runs unit tests (not integration tests)"
-echo "Integration tests require Python/GPU environment"
+echo "Running code coverage analysis (unit tests only)..."
 echo ""
 
-# Run cloverage (excludes integration tests by default since test-integration/ not in test paths)
-clojure -M:coverage "$@"
+# Check for --debug flag
+DEBUG_OPTS=""
+ARGS=""
+for arg in "$@"; do
+    if [ "$arg" = "--debug" ]; then
+        DEBUG_OPTS="--no-capture-output"
+    else
+        ARGS="$ARGS $arg"
+    fi
+done
+
+clojure -M:test unit --plugin cloverage $DEBUG_OPTS $ARGS
 
 EXIT_CODE=$?
 
@@ -26,7 +33,6 @@ if [ $EXIT_CODE -eq 0 ]; then
     echo "✅ Coverage analysis complete!"
     echo ""
     echo "HTML report: target/coverage/index.html"
-    echo "To view: open target/coverage/index.html"
 else
     echo ""
     echo "❌ Coverage analysis failed with exit code $EXIT_CODE"

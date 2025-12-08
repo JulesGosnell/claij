@@ -2,6 +2,7 @@
   "Tests FSM trail omit behavior - transitions with omit=true should not appear in trail."
   (:require
    [clojure.test :refer [deftest testing is]]
+   [claij.action :refer [def-action]]
    [claij.fsm :refer [start-fsm]]))
 
 ;; Extended FSM: start -> middle -> end -> final
@@ -38,26 +39,42 @@
 (def captured-trail-at-middle (atom nil))
 (def captured-trail-at-end (atom nil))
 
-(defn start-action [context _fsm _ix _state _event _trail handler]
-  (handler context {"id" ["start" "middle"] "data" "going to middle"}))
+(def-action start-action
+  "Start action - transitions to middle state."
+  :any
+  [_config _fsm _ix _state]
+  (fn [context _event _trail handler]
+    (handler context {"id" ["start" "middle"] "data" "going to middle"})))
 
-(defn middle-action [context _fsm _ix _state _event trail handler]
-  (reset! captured-trail-at-middle trail)
-  (handler context {"id" ["middle" "end"] "result" "finished"}))
+(def-action middle-action
+  "Middle action - captures trail and transitions to end."
+  :any
+  [_config _fsm _ix _state]
+  (fn [context _event trail handler]
+    (reset! captured-trail-at-middle trail)
+    (handler context {"id" ["middle" "end"] "result" "finished"})))
 
-(defn end-action [context _fsm _ix _state _event trail handler]
-  (reset! captured-trail-at-end trail)
-  (handler context {"id" ["end" "final"] "done" true}))
+(def-action end-action
+  "End action - captures trail and transitions to final."
+  :any
+  [_config _fsm _ix _state]
+  (fn [context _event trail handler]
+    (reset! captured-trail-at-end trail)
+    (handler context {"id" ["end" "final"] "done" true})))
 
-(defn final-action [context _fsm _ix _state _event trail handler]
-  (when-let [p (:fsm/completion-promise context)]
-    (deliver p [context trail])))
+(def-action final-action
+  "Final action - delivers completion promise."
+  :any
+  [_config _fsm _ix _state]
+  (fn [context _event trail _handler]
+    (when-let [p (:fsm/completion-promise context)]
+      (deliver p [context trail]))))
 
 (def omit-test-actions
-  {"start-action" start-action
-   "middle-action" middle-action
-   "end-action" end-action
-   "final-action" final-action})
+  {"start-action" #'start-action
+   "middle-action" #'middle-action
+   "end-action" #'end-action
+   "final-action" #'final-action})
 
 (defn trail-contains-event-id? [trail event-id]
   ;; Audit-style entries: {:from :to :event}

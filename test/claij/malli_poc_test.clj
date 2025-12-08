@@ -929,7 +929,7 @@ Apply the instruction to modify the FSM and return the modified FSM conforming t
 ;; Actual Tests (for CI)
 ;;==============================================================================
 
-(deftest ^:integration poc1-malli-schema-understanding
+(deftest ^:long-running poc1-malli-schema-understanding
   (testing "At least one LLM understands Malli input/output schemas"
     (let [results (run-poc1-all-providers)
           any-success? (some :success results)]
@@ -937,7 +937,7 @@ Apply the instruction to modify the FSM and return the modified FSM conforming t
           (str "No LLM understood Malli schemas. Results: "
                (pr-str (map #(select-keys % [:provider :model :success :errors]) results)))))))
 
-(deftest ^:integration poc2-malli-fsm-modification
+(deftest ^:long-running poc2-malli-fsm-modification
   (testing "At least one LLM can modify FSMs defined in Malli"
     (let [results (run-poc2-all-providers)
           any-success? (some :success results)]
