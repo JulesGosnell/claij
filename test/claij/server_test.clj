@@ -6,7 +6,8 @@
                          fsms llms health-handler list-fsms-handler
                          fsm-document-handler fsm-graph-dot-handler
                          fsm-graph-svg-handler dot->svg wrap-auth
-                         llm-handler claij-api-key]])
+                         llm-handler claij-api-key api-base api-url
+                         state routes app]])
   (:import
    [java.net URL]))
 
@@ -33,7 +34,24 @@
       (is (instance? java.util.regex.Pattern pattern)))
 
     (testing "initial-summary is a string"
-      (is (string? initial-summary))))
+      (is (string? initial-summary)))
+
+    (testing "api-base is OpenRouter URL"
+      (is (= "https://openrouter.ai" api-base)))
+
+    (testing "api-url is derived from api-base"
+      (is (string? api-url))
+      (is (re-find #"openrouter\.ai/api" api-url)))
+
+    (testing "state is an atom"
+      (is (instance? clojure.lang.Atom state)))
+
+    (testing "routes is a vector of route definitions"
+      (is (vector? routes))
+      (is (pos? (count routes))))
+
+    (testing "app is a ring handler function"
+      (is (fn? app))))
 
   (testing "fsms registry"
     (testing "contains expected FSM keys"
@@ -125,7 +143,22 @@
                                    :body-params {:message "test"}})]
         (is (= 404 (:status response)))
         (is (contains? (:body response) :error))
-        (is (re-find #"LLM not found" (get-in response [:body :error]))))))
+        (is (re-find #"LLM not found" (get-in response [:body :error])))))
+
+    (testing "returns 200 for valid provider with mocked LLM"
+      ;; Mock the llms registry to return a simple function
+      (with-redefs [claij.server/llms {"test-provider" (fn [_msg] "mocked response")}]
+        (let [response (llm-handler {:path-params {:provider "test-provider"}
+                                     :body-params {:message "hello"}})]
+          (is (= 200 (:status response)))
+          (is (= "mocked response" (get-in response [:body :response]))))))
+
+    (testing "handles body-params as string when no :message key"
+      (with-redefs [claij.server/llms {"test-provider" (fn [msg] (str "got: " msg))}]
+        (let [response (llm-handler {:path-params {:provider "test-provider"}
+                                     :body-params "raw string input"})]
+          (is (= 200 (:status response)))
+          (is (re-find #"raw string input" (get-in response [:body :response])))))))
 
   (testing "claij-api-key"
     (testing "returns nil when env var not set"
