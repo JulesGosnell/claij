@@ -14,31 +14,53 @@
 ;;------------------------------------------------------------------------------
 
 (defmacro def-action
-  "Define a curried action factory with config schema validation.
+  "Define a curried action factory with schema declarations.
    
-   Usage:
+   Usage (map form - preferred):
    (def-action my-action
      \"Documentation string\"
-     [:map [\"timeout\" :int]]        ;; config schema (validated at def-fsm time)
-     [config fsm ix state]            ;; config-time params
-     (fn [context event trail handler] ;; returns runtime function
+     {:config [:map [\"timeout\" :int]]  ;; config schema (validated at factory call)
+      :input :any                        ;; input schema (what action accepts)
+      :output :any}                      ;; output schema (what action produces)
+     [config fsm ix state]               ;; config-time params
+     (fn [context event trail handler]   ;; returns runtime function
+       ...))
+   
+   Usage (legacy vector form - backward compatible):
+   (def-action my-action
+     \"Documentation string\"
+     [:map [\"timeout\" :int]]           ;; config schema only, input/output default to :any
+     [config fsm ix state]
+     (fn [context event trail handler]
        ...))
    
    The defined var has metadata:
    - :action/name - the action name as string
    - :action/config-schema - Malli schema for config validation
+   - :action/input-schema - Malli schema for action input (default :any)
+   - :action/output-schema - Malli schema for action output (default :any)
    - :doc - standard Clojure docstring (works with clojure.repl/doc)
    
    The factory validates config before returning the runtime function.
    Throws ExceptionInfo on config validation failure.
    
-   Note: Runtime input/output validation is FSM's responsibility via
-   transition schemas. Actions don't validate events or outputs."
-  [name doc config-schema params & body]
-  (let [action-name (str name)]
+   Note: Input/output schemas declare the action's CAPABILITY.
+   FSM transition schemas declare the CONTRACT. Subsumption checking
+   ensures action-input subsumes transition-schema (action accepts
+   at least what transition provides)."
+  [name doc schema-spec params & body]
+  (let [action-name (str name)
+        ;; Support both map form {:config ... :input ... :output ...}
+        ;; and legacy vector form (config-schema only)
+        schema-map? (and (map? schema-spec) (contains? schema-spec :config))
+        config-schema (if schema-map? (:config schema-spec) schema-spec)
+        input-schema (if schema-map? (get schema-spec :input :any) :any)
+        output-schema (if schema-map? (get schema-spec :output :any) :any)]
     `(def ~(with-meta name
              {:action/name action-name
               :action/config-schema config-schema
+              :action/input-schema input-schema
+              :action/output-schema output-schema
               :doc doc})
        (fn [config# fsm# ix# state#]
          ;; Validate config at factory call time (start-fsm)
@@ -72,3 +94,15 @@
   "Get the config schema from an action var's metadata."
   [action-var]
   (-> action-var meta :action/config-schema))
+
+(defn action-input-schema
+  "Get the input schema from an action var's metadata.
+   Returns :any if not explicitly declared."
+  [action-var]
+  (or (-> action-var meta :action/input-schema) :any))
+
+(defn action-output-schema
+  "Get the output schema from an action var's metadata.
+   Returns :any if not explicitly declared."
+  [action-var]
+  (or (-> action-var meta :action/output-schema) :any))

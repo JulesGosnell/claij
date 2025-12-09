@@ -213,12 +213,21 @@
       (is (contains? default-actions "triage"))
       (is (contains? default-actions "reuse"))
       (is (contains? default-actions "fork"))
-      (is (contains? default-actions "generate")))
+      (is (contains? default-actions "generate"))
+      (is (contains? default-actions "fsm")))
 
-    (testing "all values are action vars"
+    (testing "all values are action vars or factories"
+      ;; Most actions are vars, but some (like fsm-action-factory) are
+      ;; dynamically created functions that don't have var metadata.
+      ;; fsm-action-factory is a special case that's a function, not a var.
       (doseq [[k v] default-actions]
-        (is (var? v) (str "Expected var for action: " k))
-        (is (action? v) (str "Expected action? true for: " k)))))
+        (if (= k "fsm")
+          ;; fsm-action-factory is a function, not a var
+          (is (fn? v) (str "Expected fn for dynamic action: " k))
+          ;; Standard actions are vars
+          (do
+            (is (var? v) (str "Expected var for action: " k))
+            (is (action? v) (str "Expected action? true for: " k)))))))
 
   (testing "end-action"
     (testing "delivers to completion promise when present"
@@ -283,8 +292,8 @@
   (testing "make-context"
     (testing "creates context with defaults"
       (let [ctx (make-context {:store :mock-store
-                                       :provider "anthropic"
-                                       :model "claude-sonnet-4"})]
+                               :provider "anthropic"
+                               :model "claude-sonnet-4"})]
         (is (= :mock-store (:store ctx)))
         (is (= "anthropic" (:provider ctx)))
         (is (= "claude-sonnet-4" (:model ctx)))
@@ -293,7 +302,7 @@
     (testing "allows overriding id->action"
       (let [custom-actions {"llm" #'test-llm-action}
             ctx (make-context {:store :mock
-                                       :provider "test"
-                                       :model "test"
-                                       :id->action custom-actions})]
+                               :provider "test"
+                               :model "test"
+                               :id->action custom-actions})]
         (is (= custom-actions (:id->action ctx)))))))
