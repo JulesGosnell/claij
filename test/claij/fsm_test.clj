@@ -6,7 +6,7 @@
    [claij.fsm :refer [state-schema resolve-schema start-fsm llm-action trail->prompts
                       build-fsm-registry validate-event last-event llm-configs
                       make-prompts]]
-   [claij.llm.open-router :refer [open-router-async]]))
+   [claij.llm :refer [open-router-async]]))
 
 ;;------------------------------------------------------------------------------
 ;; how do we know when a trail is finished
