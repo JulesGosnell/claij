@@ -29,7 +29,16 @@
                                       "claij\\.mcp\\.core"
                                       "claij\\.pipeline.*"
                                       "claij\\.store"
-                                      "claij\\.stt.*"
-                                      "claij\\.tts.*"]}
+                                      ;; Python-dependent - can't load without libpython
+                                      "claij\\.stt\\.whisper\\.audio"
+                                      "claij\\.stt\\.whisper\\.python"
+                                      "claij\\.tts\\.piper\\.python"
+                                      ;; These transitively require Python modules
+                                      "claij\\.stt\\.handler"
+                                      "claij\\.stt\\.server"
+                                      "claij\\.stt\\.record"
+                                      "claij\\.tts\\.server"
+                                      "claij\\.tts\\.playback"
+                                      "claij\\.tts\\.test-playback"]}
   :color? true
   :randomize? false}
