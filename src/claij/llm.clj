@@ -8,7 +8,10 @@
    Response transforms: provider->openrouter - convert provider response to canonical format"
   (:require
    [claij.provider.openrouter :as openrouter]
-   [claij.provider.anthropic :as anthropic]))
+   [claij.provider.anthropic :as anthropic]
+   [claij.provider.google :as google]
+   [claij.provider.openai :as openai]
+   [claij.provider.xai :as xai]))
 
 ;;------------------------------------------------------------------------------
 ;; Multimethod dispatch on provider
@@ -78,3 +81,57 @@
 (defmethod provider->openrouter "anthropic"
   [_provider response]
   (anthropic/anthropic->openrouter response))
+
+;;------------------------------------------------------------------------------
+;; Google (Gemini)
+;;------------------------------------------------------------------------------
+
+(defn google-api-key
+  "Get Google AI API key from environment. Public for test mocking."
+  []
+  (or (System/getenv "GOOGLE_API_KEY")
+      (throw (ex-info "GOOGLE_API_KEY not set" {}))))
+
+(defmethod openrouter->provider "google"
+  [_provider model messages]
+  (google/openrouter->google model messages (google-api-key)))
+
+(defmethod provider->openrouter "google"
+  [_provider response]
+  (google/google->openrouter response))
+
+;;------------------------------------------------------------------------------
+;; OpenAI
+;;------------------------------------------------------------------------------
+
+(defn openai-api-key
+  "Get OpenAI API key from environment. Public for test mocking."
+  []
+  (or (System/getenv "OPENAI_API_KEY")
+      (throw (ex-info "OPENAI_API_KEY not set" {}))))
+
+(defmethod openrouter->provider "openai"
+  [_provider model messages]
+  (openai/openrouter->openai model messages (openai-api-key)))
+
+(defmethod provider->openrouter "openai"
+  [_provider response]
+  (openai/openai->openrouter response))
+
+;;------------------------------------------------------------------------------
+;; xAI (Grok)
+;;------------------------------------------------------------------------------
+
+(defn xai-api-key
+  "Get xAI API key from environment. Public for test mocking."
+  []
+  (or (System/getenv "XAI_API_KEY")
+      (throw (ex-info "XAI_API_KEY not set" {}))))
+
+(defmethod openrouter->provider "x-ai"
+  [_provider model messages]
+  (xai/openrouter->xai model messages (xai-api-key)))
+
+(defmethod provider->openrouter "x-ai"
+  [_provider response]
+  (xai/xai->openrouter response))
