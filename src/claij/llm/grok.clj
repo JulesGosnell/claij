@@ -1,7 +1,7 @@
 (ns claij.llm.grok
   (:require
    [clj-http.client :refer [post]]
-   [claij.agent.util :refer [assert-env-var trace clj->json json->clj]]))
+   [claij.util :refer [assert-env-var trace clj->json json->clj]]))
 
 ;; https://docs.x.ai/docs/api-reference
 
