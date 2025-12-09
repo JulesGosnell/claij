@@ -108,7 +108,7 @@
                                 {:fsm-id fsm-id :fsm-version fsm-version})))
 
             ;; Start the child FSM with new API
-            [submit await stop-fsm] (start-fsm context loaded-fsm)]
+            {:keys [submit await stop]} (start-fsm context loaded-fsm)]
 
         ;; Construct entry message based on FSM requirements
         ;; For code-review FSM, include llms list and default concerns
@@ -128,7 +128,7 @@
 
         ;; Wait for the child FSM to complete using new await API
         (let [result (await 60000)]
-          (stop-fsm)
+          (stop)
 
           (if (= result :timeout)
             (do

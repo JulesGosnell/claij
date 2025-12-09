@@ -351,7 +351,7 @@
   (testing "MCP FSM action tracking and cache construction"
     (let [context {:id->action (get-test-actions)
                    "state" {}}
-          [submit await _stop] (start-fsm context mcp-fsm)]
+          {:keys [submit await]} (start-fsm context mcp-fsm)]
 
       (submit {"id" ["start" "starting"]
                "document" "test action flow"})
@@ -427,7 +427,7 @@
     (binding [*use-real-mcp* true]
       (let [context {:id->action (get-test-actions)
                      "state" {}}
-            [submit await _stop] (start-fsm context mcp-fsm)]
+            {:keys [submit await]} (start-fsm context mcp-fsm)]
 
         (submit {"id" ["start" "starting"]
                  "document" "Please use the bash tool to run 'hostname' and return the result"})

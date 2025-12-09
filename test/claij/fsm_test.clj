@@ -173,7 +173,7 @@
           initial-context {:id->action {"action-a" #'ctx-state-a-action
                                         "action-b" #'ctx-state-b-action
                                         "end" #'ctx-end-action}}
-          [submit await stop] (start-fsm initial-context test-fsm)]
+          {:keys [submit await stop]} (start-fsm initial-context test-fsm)]
 
       ;; Submit and wait for completion
       (submit {"id" ["start" "state-a"] "input" "test-input"})

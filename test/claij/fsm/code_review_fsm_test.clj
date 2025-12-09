@@ -172,7 +172,7 @@
           context {:id->action code-review-actions
                    :test/event-map event-map}
 
-          [submit await stop-fsm] (start-fsm context code-review-fsm)]
+          {:keys [submit await stop]} (start-fsm context code-review-fsm)]
 
       (try
         (submit entry-data)
@@ -188,7 +188,7 @@
           (is false (str "event submission failed: " (.getMessage t))))
 
         (finally
-          (stop-fsm))))))
+          (stop))))))
 
 (deftest ^:long-running code-review-fsm-integration-test
   (testing "code-review FSM with real LLM - simple fibonacci"
