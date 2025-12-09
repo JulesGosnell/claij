@@ -16,16 +16,17 @@
 ;;------------------------------------------------------------------------------
 
 (defn- curried-action?
-  "Check if an action is a curried def-action (has :action/name metadata on var).
+  "Check if an action is a curried action (has :action/name metadata).
+   Works with both vars (from def-action) and functions with metadata
+   (from make-fsm-action and similar dynamic factories).
    Returns false for legacy 7-arg actions."
   [action-or-var]
-  (and (var? action-or-var)
-       (-> action-or-var meta :action/name)))
+  (boolean (-> action-or-var meta :action/name)))
 
 (defn- invoke-action
   "Invoke an action, handling both curried and legacy signatures.
    
-   Curried actions (def-action):
+   Curried actions (def-action or functions with :action/name metadata):
      (action config fsm ix state) -> f2
      (f2 context event trail handler)
    
@@ -36,9 +37,11 @@
    Use def-action from claij.action namespace instead."
   [action-name action-or-var context fsm ix state event trail handler]
   (if (curried-action? action-or-var)
-    ;; Curried: call factory with empty config, then call f2
-    (let [action @action-or-var
-          f2 (action {} fsm ix state)]
+    ;; Curried: get the action function, call factory, then call f2
+    ;; Handle both vars (from def-action) and direct functions (from make-fsm-action)
+    (let [action (if (var? action-or-var) @action-or-var action-or-var)
+          config (get state "config" {})
+          f2 (action config fsm ix state)]
       (f2 context event trail handler))
     ;; Legacy: call directly with all 7 args
     (do
@@ -319,6 +322,51 @@
                                    end-xitions))]
      {:input-schema input-schema
       :output-schema output-schema})))
+
+;;------------------------------------------------------------------------------
+;; FSM Composition Design Notes
+;;------------------------------------------------------------------------------
+;;
+;; PROBLEM: How to compose FSMs - use one FSM as an action within another?
+;;
+;; DESIGN DECISIONS (as of 2024-12):
+;;
+;; 1. CONFIG-TIME CONTEXT
+;;    - Actions receive context at config-time (not just runtime)
+;;    - Context provides: :store (DB), :malli/registry, :id->action
+;;    - This enables fsm-action to load child FSM and compute schemas
+;;
+;; 2. ACTION SCHEMAS vs TRANSITION SCHEMAS
+;;    - Actions declare their CAPABILITY (often :any = "I handle anything")
+;;    - Transitions declare the CONTRACT (specific types)
+;;    - Subsumption: action-input must subsume transition-schema
+;;      (action accepts at least what transition provides)
+;;    - Example: llm-action accepts :any, but transition constrains to [:map ...]
+;;
+;; 3. DYNAMIC/LAZY ACTIONS (MCP, etc)
+;;    - Use :any for both input and output at config-time
+;;    - Runtime validation still happens per-call
+;;    - Accept this as fundamental limitation of dynamic systems
+;;    - Future: could tighten at start-time, but MCP varies per-call
+;;
+;; 4. FSM-ACTION SCHEMAS
+;;    - Input schema = child FSM's input-schema (from fsm-schemas)
+;;    - Output schema = child FSM's output-schema
+;;    - Computed at config-time when child FSM is loaded
+;;
+;; DEFERRED PROBLEMS:
+;; - Registry refs in action schemas: actions use primitives or :any for now
+;; - Circular FSM references: need cycle detection, not implemented yet
+;;
+;; ASYNC COMPOSITION:
+;; To compose FSMs asynchronously (child runs, then parent continues):
+;; - start-fsm accepts optional :fsm/on-complete handler in context
+;; - end-action calls this handler instead of (only) delivering to promise
+;; - Handler receives [context trail], can filter trail before propagating
+;; - Trail filtering prevents child FSM internals leaking to parent
+;;
+;; See: fsm-action in claij.actions for implementation
+;;------------------------------------------------------------------------------
 
 (defn start-fsm
   "Start an FSM with context and FSM definition. The start state is automatically 

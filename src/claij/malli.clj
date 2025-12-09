@@ -723,11 +723,12 @@
     ;; Prompts are a vector of prompt strings
     :fsm/prompts [:vector [:ref :fsm/prompt]]
 
-    ;; A state in the FSM
+;; A state in the FSM
     :fsm/state [:map {:closed true}
                 ["id" :string]
                 ["description" {:optional true} :string]
                 ["action" {:optional true} :string]
+                ["config" {:optional true} :any] ;; Action-specific configuration
                 ["prompts" {:optional true} [:ref :fsm/prompts]]]
 
     ;; A transition ID is a tuple of [from-state, to-state]
