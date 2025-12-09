@@ -7,7 +7,8 @@
    Request transforms:  openrouter->provider - convert canonical format to provider-native
    Response transforms: provider->openrouter - convert provider response to canonical format"
   (:require
-   [claij.provider.openrouter :as openrouter]))
+   [claij.provider.openrouter :as openrouter]
+   [claij.provider.anthropic :as anthropic]))
 
 ;;------------------------------------------------------------------------------
 ;; Multimethod dispatch on provider
@@ -59,3 +60,21 @@
 (defmethod provider->openrouter :default
   [_provider response]
   (openrouter/openrouter->openrouter-response response))
+
+;;------------------------------------------------------------------------------
+;; Anthropic (Claude)
+;;------------------------------------------------------------------------------
+
+(defn anthropic-api-key
+  "Get Anthropic API key from environment. Public for test mocking."
+  []
+  (or (System/getenv "ANTHROPIC_API_KEY")
+      (throw (ex-info "ANTHROPIC_API_KEY not set" {}))))
+
+(defmethod openrouter->provider "anthropic"
+  [_provider model messages]
+  (anthropic/openrouter->anthropic model messages (anthropic-api-key)))
+
+(defmethod provider->openrouter "anthropic"
+  [_provider response]
+  (anthropic/anthropic->openrouter response))
