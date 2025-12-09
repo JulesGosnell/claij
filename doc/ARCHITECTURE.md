@@ -458,18 +458,48 @@ Zones are code areas (files, namespaces, functions) that get locked during activ
 
 ## FSM Composition
 
-### Sequential Composition
+*For detailed design decisions and implementation status, see [FSM-COMPOSITION.md](FSM-COMPOSITION.md).*
 
-Chain FSMs together:
+FSMs can be composed in several ways, each with implications for prompt history and control flow:
 
+| Pattern | Status | Description |
+|---------|--------|-------------|
+| **Sub-FSM** | ✅ Implemented | Parent delegates to child, waits, continues. Child trail filtered/summarized. |
+| **Chain** | 📋 Designed | FSM-A completes → FSM-B starts with full trail. One continuous conversation. |
+| **Fork-Join** | 📋 Designed | Spawn N children in parallel, wait for all, aggregate results. |
+| **Event-Driven** | 🔮 Future | FSMs communicate via pub/sub on shared event bus. |
+
+### Key Principle: LLMs Don't Need to Know About FSMs
+
+When composing FSMs, we synthesize prompt history that presents the composition as simple "I asked, I received" interactions. The parent LLM never sees the child's internal deliberations—just the outcome.
+
+### Sub-FSM (Implemented)
+
+```clojure
+{"id" "delegate"
+ "action" "fsm"
+ "config" {"fsm-id" "child-calculator"
+           "success-to" "collect"
+           "trail-mode" :summary}}  ; :omit | :summary | :full
+```
+
+Trail modes control how much child detail appears in parent context:
+- `:omit` - Only result, no child trail info
+- `:summary` - FSM id, step count, first/last events  
+- `:full` - Complete child trail (use sparingly)
+
+### Persistence & Long-Running Workflows
+
+For human-in-the-loop workflows spanning hours/days/weeks, see [FSM-COMPOSITION.md](FSM-COMPOSITION.md#persistence--long-running-workflows). The trail is already an event log—we just need checkpoint storage and resume webhooks.
+
+### Composition Patterns (Vision)
+
+**Sequential:**
 ```clojure
 design-fsm → implementation-fsm → testing-fsm → deployment-fsm
 ```
 
-### Parallel Composition
-
-Run FSMs concurrently, merge results:
-
+**Parallel:**
 ```clojure
 (parallel
   security-review-fsm
@@ -477,36 +507,10 @@ Run FSMs concurrently, merge results:
   code-quality-review-fsm) → merge-results-fsm
 ```
 
-### Conditional Composition
-
-Route based on state/data:
-
-```clojure
-(if-then-else
-  complexity-assessment-fsm
-  simple-review-fsm
-  comprehensive-review-fsm)
-```
-
-### Recursive Composition
-
-FSMs spawning child FSMs:
-
+**Recursive:**
 ```clojure
 project-fsm spawns [feature-fsm feature-fsm ...]
 feature-fsm spawns [task-fsm task-fsm ...]
-```
-
-### Interruptible Composition
-
-FSM pauses, spawns sub-FSM, resumes with updates:
-
-```clojure
-main-fsm
-  └─ pause at state-X
-  └─ spawn improvement-fsm
-       └─ returns schema-updates
-  └─ resume main-fsm with updates
 ```
 
 ---
@@ -716,6 +720,7 @@ The FSM system is **experimental prototype code**:
 - Schema constraints and validation: ✅ Working
 - Token-optimized schema references: ✅ Working
 - Malli migration: ✅ Complete
+- Sub-FSM composition: ✅ Implemented (fsm-action)
 - Channel lifecycle management: ❌ Not implemented
 - FSM interruptibility: ❌ Not implemented
 - Error recovery: ⚠️ Limited
@@ -790,6 +795,7 @@ The FSM system is **experimental prototype code**:
 ## References
 
 - [SELF-DESCRIPTIVE-SYSTEMS.md](SELF-DESCRIPTIVE-SYSTEMS.md) - Philosophical foundation
+- [FSM-COMPOSITION.md](FSM-COMPOSITION.md) - Composition patterns, prompt synthesis, persistence
 - [CODING_GUIDELINES.md](CODING_GUIDELINES.md) - Development standards
 - [DEPLOYMENT.md](DEPLOYMENT.md) - Fly.io deployment
 - [Malli](https://github.com/metosin/malli) - Schema library
