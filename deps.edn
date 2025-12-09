@@ -39,18 +39,17 @@
          :extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}
                       lambdaisland/kaocha-cloverage {:mvn/version "1.1.89"}
                       org.testcontainers/testcontainers {:mvn/version "1.21.0"}
-                      org.testcontainers/postgresql {:mvn/version "1.21.0"}}
+                      org.testcontainers/postgresql {:mvn/version "1.21.0"}
+                      nrepl/nrepl {:mvn/version "1.5.0"}
+                      com.bhauman/clojure-mcp {:mvn/version "0.1.6-SNAPSHOT"
+                                               :exclusions [org.slf4j/slf4j-nop]}}
          :jvm-opts ["-Dapi.version=1.44" "-Dclojure.compiler.warn-on-reflection=true"]
          :main-opts ["-m" "kaocha.runner"]}
 
   :llms {:extra-deps {org.slf4j/slf4j-simple {:mvn/version "2.0.16"}}
          :main-opts ["-m" "claij.server"]}
 
-  :mcp {:extra-paths ["dev"]
-        :extra-deps {nrepl/nrepl {:mvn/version "1.5.0"}
-                     com.bhauman/clojure-mcp {:mvn/version "0.1.6-SNAPSHOT"
-                                              :exclusions [org.slf4j/slf4j-nop]}}
-        :main-opts ["-m" "claij.clojure-mcp"]}
+  :mcp {:main-opts ["-m" "claij.clojure-mcp"]}
 
   :record {:extra-deps {org.slf4j/slf4j-simple {:mvn/version "2.0.16"}
                         clj-python/libpython-clj {:mvn/version "2.025"}}
