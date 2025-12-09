@@ -2,16 +2,21 @@
  {:tests [{:id :unit
            :test-paths ["test"]
            :source-paths ["src"]
-           :kaocha.filter/skip-meta [:integration :long-running]}
+           :kaocha.filter/skip-meta [:integration :long-running :needs-cuda]}
           {:id :integration
            :test-paths ["test"]
            :source-paths ["src"]
            :kaocha.filter/focus-meta [:integration]
-           :kaocha.filter/skip-meta [:long-running]}
+           :kaocha.filter/skip-meta [:long-running :needs-cuda]}
           {:id :long-running
            :test-paths ["test"]
            :source-paths ["src"]
-           :kaocha.filter/focus-meta [:long-running]}]
+           :kaocha.filter/focus-meta [:long-running]
+           :kaocha.filter/skip-meta [:needs-cuda]}
+          {:id :needs-cuda
+           :test-paths ["test"]
+           :source-paths ["src"]
+           :kaocha.filter/focus-meta [:needs-cuda]}]
   :plugins [:kaocha.plugin/profiling
             :kaocha.plugin/filter]
   :cloverage/opts {:ns-exclude-regex ["claij\\.agent.*"
