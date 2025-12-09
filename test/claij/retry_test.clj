@@ -2,7 +2,8 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.tools.logging :as log]
-   [claij.llm.open-router :as llm]))
+   [claij.llm.open-router :as llm]
+   [claij.llm :as llm-dispatch]))
 
 (deftest edn-parse-retry-mock-test
   (testing "EDN parse errors trigger retries with error feedback"
@@ -29,9 +30,9 @@
 
           result (promise)]
 
-      ;; Temporarily replace the HTTP post function and headers
+      ;; Temporarily replace HTTP post and API key
       (with-redefs [clj-http.client/post mock-post
-                    llm/headers (fn [] {"Authorization" "Bearer mock-key"})]
+                    llm-dispatch/openrouter-api-key (fn [] "mock-key")]
         (llm/open-router-async
          "test" "model"
          [{"role" "user" "content" "test"}]
@@ -68,7 +69,7 @@
           error-called (atom false)]
 
       (with-redefs [clj-http.client/post mock-post
-                    llm/headers (fn [] {"Authorization" "Bearer mock-key"})]
+                    llm-dispatch/openrouter-api-key (fn [] "mock-key")]
         (llm/open-router-async
          "test" "model"
          [{"role" "user" "content" "test"}]

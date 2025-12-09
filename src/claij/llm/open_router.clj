@@ -7,7 +7,8 @@
    [clojure.core.async :refer [<! <!! >! >!! chan go-loop]]
    [clj-http.client :refer [post]]
    [cheshire.core :as json]
-   [claij.util :refer [assert-env-var clj->json json->clj make-retrier]]))
+   [claij.util :refer [assert-env-var clj->json json->clj make-retrier]]
+   [claij.llm :as llm]))
 
 ;; https://openrouter.ai/docs/quickstart
 
@@ -151,33 +152,43 @@
 (defonce llm-response-capture (atom nil))
 
 (defn open-router-async
-  "Call OpenRouter API asynchronously. Optionally accepts a JSON schema for structured output.
-  Automatically retries on JSON parse errors with feedback to the LLM.
+  "Call LLM API asynchronously via provider-specific transforms.
+   
+   Uses claij.llm multimethod dispatch to select the appropriate provider.
+   Currently all providers go through OpenRouter (default), but as direct
+   provider methods are added, they will be used automatically.
+   
+   Automatically retries on EDN parse errors with feedback to the LLM.
   
-  Args:
-    provider - Provider name (e.g., 'openai')
-    model - Model name (e.g., 'gpt-4o')
-    prompts - Vector of message maps with :role and :content
-    handler - Function to call with successful response
-    schema - (Optional) Malli schema for response validation
-    error - (Optional) Function to call on error
-    retry-count - (Internal) Current retry attempt number
-    max-retries - Maximum number of retries for malformed EDN (default: 3)"
+   Args:
+     provider - Provider name (e.g., 'openai', 'anthropic')
+     model - Model name (e.g., 'gpt-4o', 'claude-sonnet-4')
+     prompts - Vector of message maps with :role and :content
+     handler - Function to call with successful parsed EDN response
+     schema - (Optional) Malli schema for response validation
+     error - (Optional) Function to call on error
+     retry-count - (Internal) Current retry attempt number
+     max-retries - Maximum number of retries for malformed EDN (default: 3)"
   [provider model prompts handler & [{:keys [schema error retry-count max-retries]
                                       :or {retry-count 0 max-retries 3}}]]
   (log/info (str "      LLM Call: " provider "/" model
                  (when (> retry-count 0) (str " (retry " retry-count "/" max-retries ")"))))
-  (let [body-map (cond-> {:model (str provider "/" model)
-                          :messages prompts})]
-    (reset! llm-call-capture {:provider provider :model model :prompts prompts :body-map body-map :timestamp (java.time.Instant/now)})
+
+  ;; Use transforms to build provider-specific request
+  (let [{:keys [url headers body]} (llm/openrouter->provider provider model prompts)]
+    (reset! llm-call-capture {:provider provider :model model :prompts prompts
+                              :url url :body body :timestamp (java.time.Instant/now)})
     (post
-     (str api-url "/chat/completions")
+     url
      {:async? true
-      :headers (headers)
-      :body (clj->json body-map)}
+      :headers headers
+      :body (clj->json body)}
      (fn [r]
        (try
-         (let [d (strip-md-json (unpack r))]
+         ;; Use transform to extract content from provider response
+         (let [parsed-response (json->clj (:body r))
+               raw-content (llm/provider->openrouter provider parsed-response)
+               d (strip-md-json raw-content)]
            (reset! llm-response-capture {:raw d :status :received :timestamp (java.time.Instant/now)})
            (try
              (let [j (edn/read-string (trim d))]
@@ -188,7 +199,7 @@
                (let [retrier (make-retrier max-retries)]
                  (retrier
                   retry-count
-                   ;; Retry operation: send error feedback and try again
+                  ;; Retry operation: send error feedback and try again
                   (fn []
                     (let [error-msg (str "We could not unmarshal your EDN - it must be badly formed.\n\n"
                                          "Here is the exception:\n"
@@ -202,7 +213,7 @@
                                          {:error error
                                           :retry-count (inc retry-count)
                                           :max-retries max-retries})))
-                   ;; Max retries handler
+                  ;; Max retries handler
                   (fn []
                     (log/debug (str "Final malformed response: " d))
                     (when error (error {:error "max-retries-exceeded"
