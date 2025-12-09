@@ -87,7 +87,7 @@
   (testing "omit=true transition excluded from trail"
     (reset! captured-trail-at-middle nil)
     (reset! captured-trail-at-end nil)
-    (let [[submit await _stop] (start-fsm {:id->action omit-test-actions} omit-test-fsm)]
+    (let [{:keys [submit await]} (start-fsm {:id->action omit-test-actions} omit-test-fsm)]
       (submit {"id" ["start" "middle"] "data" "initial"})
       (let [[_ctx final-trail] (await 5000)]
         ;; [start middle] should NEVER appear - it has omit=true
@@ -101,7 +101,7 @@
   (testing "non-omit transition appears when it becomes input to subsequent step"
     (reset! captured-trail-at-middle nil)
     (reset! captured-trail-at-end nil)
-    (let [[submit await _stop] (start-fsm {:id->action omit-test-actions} omit-test-fsm)]
+    (let [{:keys [submit await]} (start-fsm {:id->action omit-test-actions} omit-test-fsm)]
       (submit {"id" ["start" "middle"] "data" "initial"})
       (let [[_ctx final-trail] (await 5000)]
         ;; [middle end] appears as INPUT to end->final step (not in earlier trails)

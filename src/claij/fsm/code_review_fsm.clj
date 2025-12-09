@@ -198,7 +198,7 @@
   (let [code-str (pr-str (cons 'do body))]
     `(let [code-review-actions# {"llm" #'fsm/llm-action "end" #'actions/end-action}
            context# {:id->action code-review-actions#}
-           [submit# await# stop-fsm#] (fsm/start-fsm context# code-review-fsm)
+           {:keys [~'submit ~'await ~'stop]} (fsm/start-fsm context# code-review-fsm)
            ;; Available LLMs - must match schema enum exactly
            llms# [{"provider" "anthropic" "model" "claude-sonnet-4"}
                   {"provider" "google" "model" "gemini-2.5-flash"}
@@ -210,7 +210,7 @@
                        "llms" llms#
                        "concerns" example-code-review-concerns}]
        (try
-         (submit# entry-msg#)
-         (await# (* 5 60 1000))
+         (~'submit entry-msg#)
+         (~'await (* 5 60 1000))
          (finally
-           (stop-fsm#))))))
+           (~'stop))))))

@@ -278,6 +278,48 @@
 ;;
 ;; Decision needed on the desired semantics.
 
+(defn fsm-schemas
+  "Extract input and output schemas from an FSM definition without starting it.
+   
+   This is a pure function for design-time analysis - use it for:
+   - FSM composition and type checking with subsumes?
+   - Validating FSM compatibility before wiring them together
+   - Static analysis of FSM interfaces
+   
+   Context is optional but needed for dynamic schema resolution:
+   - :id->schema - Map of schema-key to schema-fn for dynamic schemas
+   - :malli/registry - Additional Malli schemas
+   
+   Returns:
+   - :input-schema - Malli :or schema of all transitions FROM 'start'
+   - :output-schema - Malli :or schema of all transitions TO 'end'
+   
+   Usage:
+     (let [{:keys [input-schema output-schema]} (fsm-schemas {} my-fsm)]
+       (when-not (subsumes? next-fsm-input output-schema)
+         (throw (ex-info \"FSM output incompatible with next FSM input\" {}))))"
+  ([fsm] (fsm-schemas {} fsm))
+  ([context {xs "xitions" :as fsm}]
+   (let [;; Group transitions by source and destination
+         sid->ox (group-by (comp first (->key "id")) xs)
+         sid->ix (group-by (comp second (->key "id")) xs)
+
+         ;; Compute input-schema: :or of all xition schemas FROM "start"
+         start-xitions (get sid->ox "start")
+         input-schema (into [:or]
+                            (mapv (fn [{s "schema" :as xition}]
+                                    (resolve-schema context xition s))
+                                  start-xitions))
+
+         ;; Compute output-schema: :or of all xition schemas TO "end"
+         end-xitions (get sid->ix "end")
+         output-schema (into [:or]
+                             (mapv (fn [{s "schema" :as xition}]
+                                     (resolve-schema context xition s))
+                                   end-xitions))]
+     {:input-schema input-schema
+      :output-schema output-schema})))
+
 (defn start-fsm
   "Start an FSM with context and FSM definition. The start state is automatically 
    inferred from the entry transition (the transition with 'start' as the source state).
@@ -286,13 +328,17 @@
    - :id->action - Map of action-id to action function
    - Other keys as needed by actions (e.g. :store, :provider, :model)
    
-   Returns [submit await stop] where:
-   - submit: Function to submit input data to the FSM
-   - await: Function to wait for FSM completion, optionally with timeout-ms
-   - stop: Function to stop the FSM
+   Returns a map with:
+   - :submit - Function to submit input data to the FSM
+   - :await - Function to wait for FSM completion, optionally with timeout-ms
+   - :stop - Function to stop the FSM
+   - :input-schema - Malli :or schema of all transitions FROM 'start'
+   - :output-schema - Malli :or schema of all transitions TO 'end'
+   
+   For design-time schema access without starting the FSM, use fsm-schemas instead.
    
    Usage:
-     (let [[submit await stop] (start-fsm context fsm)]
+     (let [{:keys [submit await stop]} (start-fsm context fsm)]
        (submit input-data)
        (let [result (await 5000)]  ; Wait up to 5 seconds
          (if (= result :timeout)
@@ -322,10 +368,9 @@
         ;; Extract entry transition info
         [[{[_ start-state :as entry-xition-id] "id" :as entry-xition}]] (sid->ox-and-cs "start")
         entry-channel (xid->c entry-xition-id)
-        entry-schema (get entry-xition "schema")
-        start-state-obj (id->s start-state)
-        output-xitions (map first (sid->ox-and-cs start-state))
-        output-schema (state-schema context fsm start-state-obj output-xitions)
+
+        ;; Get schemas via fsm-schemas (pure function, can be called at design time too)
+        {:keys [input-schema output-schema]} (fsm-schemas context fsm)
 
         ;; Error handling for channel operations
         safe-channel-operation (fn [op ch]
@@ -350,9 +395,9 @@
                    (safe-channel-operation #(>!! entry-channel %) message)
                    (log/info (str "   Submitted document to FSM: " start-state))))
 
-        await (fn
-                ([] (deref completion-promise))
-                ([timeout-ms] (deref completion-promise timeout-ms :timeout)))
+        await-fn (fn
+                   ([] (deref completion-promise))
+                   ([timeout-ms] (deref completion-promise timeout-ms :timeout)))
 
         stop-fsm (fn []
                    (log/info (str "stopping fsm: " (or (get fsm "id") "unnamed")))
@@ -376,8 +421,12 @@
                   (xform ctx fsm ix s ox-and-cs event trail)
                   (recur))))))))
 
-    ;; Return interface
-    [submit await stop-fsm]))
+    ;; Return interface as map
+    {:submit submit
+     :await await-fn
+     :stop stop-fsm
+     :input-schema input-schema
+     :output-schema output-schema}))
 
 (defn last-event
   "Extract the final event from a trail.
@@ -413,7 +462,7 @@
   ([fsm context input-data]
    (run-sync fsm context input-data 30000))
   ([fsm context input-data timeout-ms]
-   (let [[submit await stop] (start-fsm context fsm)]
+   (let [{:keys [submit await stop]} (start-fsm context fsm)]
      (try
        (submit input-data)
        (await timeout-ms)
@@ -589,10 +638,10 @@
           ;; Get registry for expanding refs
           registry (or (get context :malli/registry)
                        (build-fsm-registry fsm context))
-          
+
           ;; Build prompt trail from history
           prompt-trail (trail->prompts context fsm trail)
-          
+
           ;; CRITICAL: When trail is empty (first call), we need to send the initial event!
           ;; POC sends [input-schema input-doc output-schema] as user message
           ;; We do the same here - use entry transition schema as input-schema
@@ -600,14 +649,14 @@
                             (let [ix-schema-raw (resolve-schema context ix (get ix "schema"))
                                   ix-schema (expand-refs-for-llm ix-schema-raw registry)
                                   out-schema (expand-refs-for-llm output-schema registry)]
-                              [{"role" "user" 
+                              [{"role" "user"
                                 "content" (pr-str [ix-schema event out-schema])}]))
-          
+
           ;; Combine: trail prompts + initial message if needed
           full-trail (if initial-message
                        initial-message
                        prompt-trail)
-          
+
           prompts (make-prompts fsm ix state full-trail provider model)]
       (log/info (str "   Using LLM: " provider "/" model " with " (count prompts) " prompts"))
       (open-router-async
