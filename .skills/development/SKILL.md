@@ -32,3 +32,8 @@ Document reasoning
 - Clever code
 - Copy-paste
 - Defensive programming
+
+## Git Practices
+- Always use `git mv` (not `mv`) to move/rename files - preserves history
+- Commit related changes together
+- Clear commit messages
