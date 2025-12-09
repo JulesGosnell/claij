@@ -115,7 +115,7 @@
                                        {"triage" mock-triage-llm
                                         "llm" mock-review-llm})})
 
-          [submit await stop-fsm] (start-triage context)]
+          {:keys [submit await stop]} (start-triage context)]
 
       (try
         ;; Submit a code review request to the triage FSM
@@ -132,7 +132,7 @@
               (log/info "Final result:" final-result))))
 
         (finally
-          (stop-fsm))))))
+          (stop))))))
 
 (deftest ^:long-running triage-empty-store-test
   (testing "Triage FSM handles empty store gracefully"
@@ -143,7 +143,7 @@
                     :model "mock"})
           ;; Use real actions - no need to mock since triage-action handles empty store
 
-          [submit await stop-fsm] (start-triage context)]
+          {:keys [submit await stop]} (start-triage context)]
 
       (try
         (submit "Some request")
@@ -159,4 +159,4 @@
               (is (not (get final-result "success")) "Should fail when generation not implemented"))))
 
         (finally
-          (stop-fsm))))))
+          (stop))))))
