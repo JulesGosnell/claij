@@ -9,7 +9,7 @@
    [claij.util :refer [index-by ->key map-values make-retrier]]
    [claij.malli :refer [def-fsm fsm-registry base-registry expand-refs-for-llm]]
    [claij.action :refer [def-action]]
-   [claij.llm.open-router :refer [open-router-async]]))
+   [claij.llm :refer [open-router-async]]))
 
 ;;------------------------------------------------------------------------------
 ;; Action Dispatch Helpers

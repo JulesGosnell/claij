@@ -3,7 +3,7 @@
    [clojure.tools.logging :as log]
    [malli.core :as m]
    [claij.action :refer [def-action action? action-name action-config-schema]]
-   [claij.llm.open-router :refer [open-router-async]]
+   [claij.llm :refer [open-router-async]]
    [claij.fsm :refer [start-fsm llm-action]]
    [claij.store :as store]))
 

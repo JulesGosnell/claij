@@ -1,5 +1,5 @@
 (ns claij.llm
-  "Unified LLM client with multimethod dispatch.
+  "Unified LLM client with multimethod dispatch and async HTTP.
    
    Uses direct provider APIs when available (cheaper - no OpenRouter commission),
    falls back to OpenRouter for unknown providers or when direct API key not set.
@@ -15,6 +15,12 @@
    
    If a provider's API key is not set, calls route through OpenRouter."
   (:require
+   [clojure.string :as str]
+   [clojure.tools.logging :as log]
+   [clojure.edn :as edn]
+   [clj-http.client :refer [post]]
+   [cheshire.core :as json]
+   [claij.util :refer [clj->json json->clj make-retrier]]
    [claij.provider.openrouter :as openrouter]
    [claij.provider.anthropic :as anthropic]
    [claij.provider.google :as google]
@@ -124,3 +130,104 @@
   (defmethod provider->openrouter "x-ai"
     [_provider response]
     (xai/xai->openrouter response)))
+
+;;------------------------------------------------------------------------------
+;; Async HTTP Client
+;;------------------------------------------------------------------------------
+
+(defn strip-md-json
+  "Strip markdown code fences from LLM response.
+   LLMs often wrap JSON/EDN in ```json ... ``` blocks."
+  [s]
+  (-> s
+      (str/replace #"^```(?:json|edn|clojure)?\s*" "")
+      (str/replace #"\s*```$" "")))
+
+;; Debug capture atoms for REPL inspection
+(defonce llm-call-capture (atom nil))
+(defonce llm-response-capture (atom nil))
+
+(defn call-async
+  "Call LLM API asynchronously via provider-specific transforms.
+   
+   Uses multimethod dispatch to select the appropriate provider.
+   If a direct API key is set, uses the provider's native API.
+   Otherwise falls back to OpenRouter.
+   
+   Automatically retries on EDN parse errors with feedback to the LLM.
+  
+   Args:
+     provider - Provider name (e.g., 'openai', 'anthropic')
+     model - Model name (e.g., 'gpt-4o', 'claude-sonnet-4')
+     prompts - Vector of message maps with :role and :content
+     handler - Function to call with successful parsed EDN response
+     schema - (Optional) Malli schema for response validation
+     error - (Optional) Function to call on error
+     retry-count - (Internal) Current retry attempt number
+     max-retries - Maximum number of retries for malformed EDN (default: 3)"
+  [provider model prompts handler & [{:keys [schema error retry-count max-retries]
+                                      :or {retry-count 0 max-retries 3}}]]
+  (log/info (str "      LLM Call: " provider "/" model
+                 (when (> retry-count 0) (str " (retry " retry-count "/" max-retries ")"))))
+
+  ;; Use transforms to build provider-specific request
+  (let [{:keys [url headers body]} (openrouter->provider provider model prompts)]
+    (reset! llm-call-capture {:provider provider :model model :prompts prompts
+                              :url url :body body :timestamp (java.time.Instant/now)})
+    (post
+     url
+     {:async? true
+      :headers headers
+      :body (clj->json body)}
+     (fn [r]
+       (try
+         ;; Use transform to extract content from provider response
+         (let [parsed-response (json->clj (:body r))
+               raw-content (provider->openrouter provider parsed-response)
+               d (strip-md-json raw-content)]
+           (reset! llm-response-capture {:raw d :status :received :timestamp (java.time.Instant/now)})
+           (try
+             (let [j (edn/read-string (str/trim d))]
+               (log/info "      [OK] LLM Response: Valid EDN received")
+               (swap! llm-response-capture assoc :parsed j :status :success)
+               (handler j))
+             (catch Exception e
+               (let [retrier (make-retrier max-retries)]
+                 (retrier
+                  retry-count
+                  ;; Retry operation: send error feedback and try again
+                  (fn []
+                    (let [error-msg (str "We could not unmarshal your EDN - it must be badly formed.\n\n"
+                                         "Here is the exception:\n"
+                                         (.getMessage e) "\n\n"
+                                         "Here is your malformed response:\n" d "\n\n"
+                                         "Please try again. Your response should only contain the relevant EDN document.")
+                          retry-prompts (conj (vec prompts) {"role" "user" "content" error-msg})]
+                      (log/warn (str "      [X] EDN Parse Error: " (.getMessage e)))
+                      (log/info (str "      [>>] Sending error feedback to LLM"))
+                      (call-async provider model retry-prompts handler
+                                  {:error error
+                                   :retry-count (inc retry-count)
+                                   :max-retries max-retries})))
+                  ;; Max retries handler
+                  (fn []
+                    (log/debug (str "Final malformed response: " d))
+                    (when error (error {:error "max-retries-exceeded"
+                                        :raw-response d
+                                        :exception (.getMessage e)}))))))))
+         (catch Throwable t
+           (log/error t "Error processing LLM response"))))
+     (fn [exception]
+       (reset! llm-response-capture {:exception exception :status :error :timestamp (java.time.Instant/now)})
+       (try
+         (let [m (json/parse-string (:body (.getData exception)) true)]
+           (log/error (str "      [X] LLM Request Failed: " (get m "error")))
+           (swap! llm-response-capture assoc :error-body m)
+           (when error (error m)))
+         (catch Throwable t
+           (log/error t "Error handling LLM failure")))))))
+
+;; Backwards compatibility alias
+(def open-router-async
+  "Alias for call-async. Deprecated - use call-async instead."
+  call-async)

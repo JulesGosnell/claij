@@ -2,7 +2,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.tools.logging :as log]
-   [claij.llm.open-router :as llm]
+   [claij.llm :as llm]
    [claij.llm :as llm-dispatch]))
 
 (deftest edn-parse-retry-mock-test
