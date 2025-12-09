@@ -12,13 +12,10 @@
 ;;------------------------------------------------------------------------------
 
 (def model-translations
-  "Map from OpenRouter model names to Anthropic API model names.
-   
-   OpenRouter uses short names, Anthropic API may need versioned names.
-   If a model isn't in this map, it's passed through unchanged."
-  {;; Add translations here as needed, e.g.:
-   ;; "claude-sonnet-4" "claude-sonnet-4-20250514"
-   })
+  {"claude-sonnet-4.5" "claude-sonnet-4-5"
+   "claude-sonnet-4" "claude-sonnet-4-20250514"
+   "claude-opus-4.5" "claude-opus-4-5"
+   "claude-haiku-4.5" "claude-haiku-4-5"})
 
 (defn translate-model
   "Translate OpenRouter model name to Anthropic API model name."
