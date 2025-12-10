@@ -18,6 +18,13 @@ POC (Proof of Concept) tests live in `test/claij/poc/` directory:
 POC files are exempt from the "one x_test.clj per x.clj" rule.
 When POC code matures, move it to production and create matching test file.
 
+## Test Consolidation
+When merging test files:
+- Track test counts before/after to avoid losing tests
+- Use `grep -c "^(deftest"` to count tests per file
+- Verify total assertions match after merge
+- Use `git mv` to preserve history
+
 ## Keep Simple
 - Test behavior not implementation
 - If test too complex, split production code
