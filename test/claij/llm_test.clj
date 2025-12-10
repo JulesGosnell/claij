@@ -59,30 +59,25 @@
   (testing "EDN parse gives up after max retries"
     (let [;; Track attempts
           attempt-count (atom 0)
+          ;; Use promise for coordination instead of Thread/sleep
+          error-promise (promise)
 
           ;; Mock HTTP post that always returns bad EDN
           mock-post (fn [_url _opts success-callback _error-callback]
                       (swap! attempt-count inc)
                       (success-callback {:body (clojure.data.json/write-str
-                                                {"choices" [{"message" {"content" "{:bad edn {"}}]})}))
-
-          result (promise)
-          error-called (atom false)]
+                                                {"choices" [{"message" {"content" "{:bad edn {"}}]})}))]
 
       (with-redefs [clj-http.client/post mock-post
                     llm-dispatch/openrouter-api-key (fn [] "mock-key")]
         (llm/call
          "test" "model"
          [{"role" "user" "content" "test"}]
-         (partial deliver result)
+         (fn [_] nil) ; success handler (won't be called)
          {:max-retries 2
-          :error (fn [_] (reset! error-called true))}))
+          :error (fn [_] (deliver error-promise true))}))
 
-      ;; Give it time to exhaust retries
-      (Thread/sleep 2000)
-
-      ;; Should have tried 3 times (initial + 2 retries)
-      (is (= @attempt-count 3) "Should try initial + 2 retries")
-
-      ;; Error handler should be called
-      (is @error-called "Error handler should be called after max retries"))))
+      ;; Wait for error handler with timeout
+      (let [error-called (deref error-promise 5000 :timeout)]
+        (is (not= error-called :timeout) "Error handler should be called within timeout")
+        (is (= @attempt-count 3) "Should try initial + 2 retries")))))
