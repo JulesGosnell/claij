@@ -33,7 +33,7 @@
       ;; Temporarily replace HTTP post and API key
       (with-redefs [clj-http.client/post mock-post
                     llm-dispatch/openrouter-api-key (fn [] "mock-key")]
-        (llm/open-router-async
+        (llm/call
          "test" "model"
          [{"role" "user" "content" "test"}]
          (partial deliver result)
@@ -70,7 +70,7 @@
 
       (with-redefs [clj-http.client/post mock-post
                     llm-dispatch/openrouter-api-key (fn [] "mock-key")]
-        (llm/open-router-async
+        (llm/call
          "test" "model"
          [{"role" "user" "content" "test"}]
          (partial deliver result)
