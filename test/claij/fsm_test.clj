@@ -90,10 +90,7 @@
       (is (contains? llm-configs ["x-ai" "grok-4"])))
 
     (testing "contains google config"
-      (is (contains? llm-configs ["google" "gemini-2.5-flash"]))))
-
-  (testing "placeholder - see other test files for state-schema tests"
-    (is true)))
+      (is (contains? llm-configs ["google" "gemini-2.5-flash"])))))
 
 ;;==============================================================================
 ;; Context Threading Tests

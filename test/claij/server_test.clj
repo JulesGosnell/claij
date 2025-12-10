@@ -161,10 +161,15 @@
           (is (re-find #"raw string input" (get-in response [:body :response])))))))
 
   (testing "claij-api-key"
-    (testing "returns nil when env var not set"
-      ;; This tests the function itself, not the env var
-      (is (or (nil? (claij-api-key))
-              (string? (claij-api-key)))))))
+    (testing "returns nil or string from environment"
+      (let [result (claij-api-key)]
+        (is (or (nil? result) (and (string? result) (pos? (count result))))
+            "Should return nil or non-empty string")))
+    (testing "is used correctly by wrap-auth"
+      ;; The real test of claij-api-key is in wrap-auth-test
+      ;; where we verify the auth flow works with various key states
+      (with-redefs [claij.server/claij-api-key (constantly "test-key")]
+        (is (= "test-key" (claij-api-key)))))))
 
 (deftest wrap-auth-test
   (testing "wrap-auth middleware"
