@@ -432,7 +432,9 @@
     (let [n 100
           config {"command" "bash" "args" ["-c" "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"] "transport" "stdio"}
           ic (chan n (map write-str))
-          oc (chan n (comp (remove list-changed?) (map read-str)))
+          ;; Filter out notifications - they have "method" key, responses have "result" key
+          notification? (fn [msg] (and (map? msg) (contains? msg "method")))
+          oc (chan n (comp (map read-str) (remove notification?)))
           stop (start-mcp-bridge config ic oc)]
 
       (try
