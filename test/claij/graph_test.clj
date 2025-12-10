@@ -1,78 +1,105 @@
 (ns claij.graph-test
-  "Unit tests for claij.graph - FSM to Graphviz DOT conversion."
+  "Unit tests for claij.graph - FSM to Graphviz DOT conversion.
+   
+   These tests verify that:
+   1. DOT format structure is correct (digraph, node shapes, edge arrows)
+   2. FSM content (IDs, descriptions, prompts) appears in output"
   (:require
    [clojure.test :refer [deftest is testing]]
    [clojure.string :refer [includes?]]
    [claij.graph :refer [fsm->dot]]))
 
+;; DOT format constants - these are Graphviz standard syntax elements
+(def ^:private dot-digraph-prefix "digraph")
+(def ^:private dot-special-node-shape "shape=doublecircle")
+(def ^:private dot-edge-arrow "->")
+(def ^:private dot-label-attr "[label=")
+
 (deftest graph-test
 
   (testing "fsm->dot"
 
-    (testing "minimal FSM"
+    (testing "minimal FSM produces valid DOT structure"
       (let [fsm {"id" "test-fsm"}
             dot (fsm->dot fsm)]
-        (is (includes? dot "digraph \"test-fsm\""))
-        (is (includes? dot "start [shape=doublecircle"))
-        (is (includes? dot "end   [shape=doublecircle"))))
+        ;; DOT format elements
+        (is (includes? dot dot-digraph-prefix)
+            "Should use digraph declaration")
+        (is (includes? dot "\"test-fsm\"")
+            "FSM id should be quoted in digraph name")
+        ;; Special start/end nodes
+        (is (includes? dot (str "start [" dot-special-node-shape))
+            "Start node should have doublecircle shape")
+        (is (includes? dot (str "end   [" dot-special-node-shape))
+            "End node should have doublecircle shape")))
 
-    (testing "FSM with description"
+    (testing "FSM description appears in output"
       (let [fsm {"id" "desc-fsm" "description" "A test FSM"}
             dot (fsm->dot fsm)]
-        (is (includes? dot "A test FSM"))))
+        (is (includes? dot "A test FSM")
+            "Description should appear in DOT output")))
 
-    (testing "FSM with prompts as title fallback"
+    (testing "FSM prompts appear as title fallback"
       (let [fsm {"id" "prompt-fsm" "prompts" ["Line 1" "Line 2"]}
             dot (fsm->dot fsm)]
         (is (includes? dot "Line 1"))
         (is (includes? dot "Line 2"))))
 
-    (testing "FSM with states"
+    (testing "FSM states render with labels"
       (let [fsm {"id" "state-fsm"
                  "states" [{"id" "processing" "action" "process"}
                            {"id" "waiting"}]}
             dot (fsm->dot fsm)]
-        (is (includes? dot "processing [label=\"processing"))
-        (is (includes? dot "(process)"))
-        (is (includes? dot "waiting [label=\"waiting"))))
+        (is (includes? dot "processing [label=\"processing")
+            "State should have label with its id")
+        (is (includes? dot "(process)")
+            "Action should appear in state label")
+        (is (includes? dot "waiting [label=\"waiting")
+            "States without action also render")))
 
-    (testing "FSM with state prompts"
+    (testing "state prompts appear in labels"
       (let [fsm {"id" "prompted-fsm"
                  "states" [{"id" "reviewer" "prompts" ["Review code"]}]}
             dot (fsm->dot fsm)]
-        (is (includes? dot "Review code"))))
+        (is (includes? dot "Review code")
+            "State prompts should appear in DOT output")))
 
     (testing "start and end states are not duplicated"
       (let [fsm {"id" "special-fsm"
                  "states" [{"id" "start"} {"id" "end"} {"id" "middle"}]}
             dot (fsm->dot fsm)]
-        ;; start/end already defined as special nodes, shouldn't appear in states section again
-        (is (includes? dot "middle [label="))
-        ;; count occurrences of start definition
-        (is (= 1 (count (re-seq #"start \[shape=doublecircle" dot))))))
+        (is (includes? dot "middle [label=")
+            "Regular states should render")
+        (is (= 1 (count (re-seq #"start \[shape=doublecircle" dot)))
+            "Start should appear exactly once (as special node)")))
 
-    (testing "FSM with transitions"
+    (testing "transitions render as edges"
       (let [fsm {"id" "xition-fsm"
                  "xitions" [{"id" ["start" "processing"]}
                             {"id" ["processing" "end"]}]}
             dot (fsm->dot fsm)]
-        (is (includes? dot "start -> processing"))
-        (is (includes? dot "processing -> end"))))
+        (is (includes? dot (str "start " dot-edge-arrow " processing"))
+            "Transition should render as DOT edge")
+        (is (includes? dot (str "processing " dot-edge-arrow " end"))
+            "Multiple transitions should all render")))
 
-    (testing "transition with label"
+    (testing "transition label appears as edge attribute"
       (let [fsm {"id" "labeled-fsm"
                  "xitions" [{"id" ["a" "b"] "label" "go next"}]}
             dot (fsm->dot fsm)]
-        (is (includes? dot "[label=\"go next\"]"))))
+        (is (includes? dot "[label=\"go next\"]")
+            "Transition label should be edge attribute")))
 
-    (testing "transition with description"
+    (testing "transition description appears in output"
       (let [fsm {"id" "desc-xition-fsm"
                  "xitions" [{"id" ["a" "b"] "description" "transition desc"}]}
             dot (fsm->dot fsm)]
-        (is (includes? dot "transition desc"))))
+        (is (includes? dot "transition desc")
+            "Transition description should appear")))
 
     (testing "transition uses 'to' state as fallback label"
       (let [fsm {"id" "fallback-fsm"
                  "xitions" [{"id" ["a" "done"]}]}
             dot (fsm->dot fsm)]
-        (is (includes? dot "[label=\"done\"]"))))))
+        (is (includes? dot "[label=\"done\"]")
+            "Should use destination state as label when no explicit label")))))
