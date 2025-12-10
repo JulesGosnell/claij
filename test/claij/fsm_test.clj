@@ -333,13 +333,24 @@
         (is (seq prompts))
         (is (= "system" (get (first prompts) "role"))))
 
-      (testing "system message contains context prompts"
+      (testing "system message contains context prompts from fsm, ix, and state"
         (let [content (get (first prompts) "content")]
           (is (string? content))
-          (is (re-find #"Clojure world" content))
-          (is (re-find #"You are a helpful assistant" content))
-          (is (re-find #"Focus on code quality" content))
-          (is (re-find #"Be concise" content))))))
+          ;; Verify all input prompts are included
+          (is (re-find #"You are a helpful assistant" content)
+              "FSM prompts should be included")
+          (is (re-find #"Focus on code quality" content)
+              "IX prompts should be included")
+          (is (re-find #"Be concise" content)
+              "State prompts should be included")))
+
+      (testing "system message contains EDN format instructions"
+        (let [content (get (first prompts) "content")]
+          ;; Verify structural elements are present (not specific wording)
+          (is (re-find #"(?i)EDN" content)
+              "Should mention EDN format")
+          (is (re-find #"(?i)schema" content)
+              "Should mention schema")))))
 
   (testing "make-prompts with trail"
     (let [fsm {"prompts" []}
@@ -349,10 +360,12 @@
                  {"role" "assistant" "content" {"id" "response"}}]
           prompts (make-prompts fsm ix state trail)]
 
-      (testing "includes trail messages"
+      (testing "includes trail messages after system message"
         (is (>= (count prompts) 3))
         (let [trail-prompts (rest prompts)]
-          (is (= 2 (count trail-prompts)))))))
+          (is (= 2 (count trail-prompts)))
+          (is (= "user" (get (first trail-prompts) "role")))
+          (is (= "assistant" (get (second trail-prompts) "role")))))))
 
   (testing "make-prompts with provider/model includes LLM-specific config"
     (let [fsm {"prompts" []}
@@ -361,8 +374,9 @@
           trail []
           prompts (make-prompts fsm ix state trail "anthropic" "claude-sonnet-4.5")]
 
-      (testing "returns prompts"
-        (is (seq prompts)))))
+      (testing "returns prompts with LLM config applied"
+        (is (seq prompts))
+        (is (= "system" (get (first prompts) "role"))))))
 
   (testing "make-prompts with nil prompts"
     (let [fsm {"prompts" nil}
