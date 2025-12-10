@@ -1,9 +1,13 @@
-(ns claij.fsm.triage
+(ns claij.fsm.triage-fsm
   (:require
+   [clojure.string :as str]
+   [clojure.tools.logging :as log]
    [malli.registry :as mr]
    [claij.malli :refer [def-fsm base-registry]]
+   [claij.action :refer [def-action]]
    [claij.fsm :refer [start-fsm]]
-   [claij.actions :as actions]))
+   [claij.llm :refer [call]]
+   [claij.store :as store]))
 
 ;;------------------------------------------------------------------------------
 ;; Triage Schema
@@ -47,6 +51,50 @@
   (mr/composite-registry
    base-registry
    triage-schemas))
+
+;;------------------------------------------------------------------------------
+;; Triage Action
+;;------------------------------------------------------------------------------
+
+(def-action triage-action
+  "Loads all FSMs from store and asks LLM to choose the best one.
+   
+   Queries the store for FSM metadata and presents them to the LLM for selection."
+  [:map]
+  [_config _fsm ix _state]
+  (fn [context event _trail handler]
+    ;; Extract user's problem description from the event
+    (let [{:keys [store provider model]} context
+          user-text (get event "document")
+
+          ;; Query store for all FSM [id, version, description] triples
+          available-fsms (store/fsm-list-all store)
+
+          _ (log/info (str "   Triage: " (count available-fsms) " FSMs available"))
+
+          ;; Format FSM list for LLM
+          fsm-list (if (empty? available-fsms)
+                     "No FSMs currently available in the store."
+                     (str/join "\n"
+                               (map (fn [{id "id" version "version" description "description"}]
+                                      (str "- FSM: " id " (v" version "): " description))
+                                    available-fsms)))
+
+          ;; Build prompt for LLM
+          prompts [{"role" "user"
+                    "content" (str "User's request: " user-text "\n\n"
+                                   "Available FSMs:\n" fsm-list "\n\n"
+                                   "Choose the best FSM to handle this request. "
+                                   "For now, only 'reuse' is supported - select an existing FSM that matches the request.")}]]
+
+      (if (empty? available-fsms)
+        ;; No FSMs available - fail gracefully
+        (do
+          (log/error "   Triage: No FSMs in store")
+          (handler context {"id" ["triage" "generate"]
+                            "requirements" (str "No existing FSMs found. Need to implement: " user-text)}))
+        ;; Query LLM for selection
+        (call provider model prompts (partial handler context) {:schema (get ix "schema")})))))
 
 ;;------------------------------------------------------------------------------
 ;; Triage FSM Definition
@@ -141,12 +189,11 @@
                  {:store nil ;; TODO: real store connection
                   :provider "openai"
                   :model "gpt-4o"})
-        {:keys [submit await stop]} (start-triage context)
-        result (promise)]
+        {:keys [submit await stop]} (start-triage context)]
 
     (submit "Please review my fibonacci code")
 
     ;; Wait for result
-    @result
+    (await 60000)
 
     (stop)))
