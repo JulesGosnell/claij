@@ -1,4 +1,4 @@
-(ns claij.triage
+(ns claij.fsm.triage
   (:require
    [malli.registry :as mr]
    [claij.malli :refer [def-fsm base-registry]]
