@@ -5,7 +5,7 @@
    [claij.action :refer [def-action action? action-name action-config-schema]]
    [claij.actions :refer [default-actions end-action fork-action generate-action
                           with-actions with-default-actions make-context
-                          fsm-action-factory]]
+                          fsm-action-factory reuse-action]]
    [claij.fsm :refer [start-fsm last-event]]
    [claij.malli :refer [def-fsm]]
    [claij.store :as store]))
@@ -467,6 +467,71 @@
              clojure.lang.ExceptionInfo
              #"Child FSM not found"
              (f1 context {"value" 1} [] (fn [_ _]))))))))
+
+;;==============================================================================
+;; Reuse Action Tests
+;;==============================================================================
+
+;; Simple FSM for reuse-action testing - accepts any input, echoes it back
+(def-fsm reuse-test-fsm
+  {"id" "reuse-test"
+   "states" [{"id" "echo" "action" "echo"}
+             {"id" "end" "action" "end"}]
+   "xitions" [{"id" ["start" "echo"] "schema" :any}
+              {"id" ["echo" "end"] "schema" :any}]})
+
+(def-action echo-action
+  "Echoes input to output."
+  {:config [:map] :input :any :output :any}
+  [_config _fsm _ix _state]
+  (fn [context event _trail handler]
+    (handler context {"id" ["echo" "end"]
+                      "echoed" event})))
+
+(def reuse-test-actions
+  {"echo" #'echo-action
+   "end" #'end-action})
+
+(defn mock-reuse-fsm-load [_store fsm-id _version]
+  (when (= fsm-id "reuse-test")
+    reuse-test-fsm))
+
+(deftest reuse-action-test
+  (testing "reuse-action is a valid action"
+    (is (action? #'reuse-action)))
+
+  (testing "reuse-action loads and runs child FSM from store"
+    (with-redefs [store/fsm-load-version mock-reuse-fsm-load]
+      (let [f1 (reuse-action {} {} {} {"id" "reuse"})
+            handler-result (promise)
+            mock-handler (fn [ctx event] (deliver handler-result {:ctx ctx :event event}))
+            context {:store :mock-store
+                     :id->action reuse-test-actions
+                     :provider "test"
+                     :model "test-model"}
+            event {"fsm-id" "reuse-test"
+                   "fsm-version" 1}
+            trail [{"content" [nil {"document" "user request"}]}]]
+
+        (f1 context event trail mock-handler)
+
+        (let [result (deref handler-result 5000 :timeout)]
+          (is (not= :timeout result) "Handler should be called")
+          (when (not= :timeout result)
+            (is (= ["reuse" "end"] (get-in result [:event "id"])))
+            (is (true? (get-in result [:event "success"])))
+            (is (some? (get-in result [:event "output"]))))))))
+
+  (testing "reuse-action throws when FSM not found"
+    (with-redefs [store/fsm-load-version (constantly nil)]
+      (let [f1 (reuse-action {} {} {} {"id" "reuse"})
+            context {:store :mock-store :id->action reuse-test-actions}
+            event {"fsm-id" "nonexistent" "fsm-version" 1}]
+
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"FSM not found"
+             (f1 context event [] (fn [_ _]))))))))
 
 (deftest fsm-action-version-handling-test
   (testing "loads latest version when no version specified"
