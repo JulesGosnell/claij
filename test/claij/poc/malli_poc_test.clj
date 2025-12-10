@@ -1,4 +1,4 @@
-(ns claij.malli-poc-test
+(ns claij.poc.malli-poc-test
   "PoC tests for Malli-based schema communication with LLMs.
    
    These tests verify that LLMs can:
