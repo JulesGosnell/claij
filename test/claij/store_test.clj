@@ -118,9 +118,8 @@
       (is (= doc-c-v1 (store/fsm-load-version *store* "doc-c" 1)))))
 
   (testing "Refresh operations - with changes"
-    ;; Wait to ensure timestamp difference
-    (Thread/sleep 1000)
-
+    ;; fsm-refresh! detects changes by comparing document content (minus $version)
+    ;; doc-c-v1 has "gamma", doc-c-v2 has "gamma-updated" - different content
     (let [loader (store/make-edn-loader doc-c-v2)
           result (store/fsm-refresh! *store* "doc-c" loader)]
       (is (= doc-c-v2 result))
@@ -129,9 +128,7 @@
       (is (= doc-c-v2 (store/fsm-load-version *store* "doc-c" 2)))))
 
   (testing "Refresh operations - no changes"
-    ;; Wait to ensure timestamp difference
-    (Thread/sleep 1000)
-
+    ;; Same content as before (doc-c-v2) - should return existing doc without storing
     (let [loader (store/make-edn-loader doc-c-v2)
           result (store/fsm-refresh! *store* "doc-c" loader)]
       (is (= doc-c-v2 result))
