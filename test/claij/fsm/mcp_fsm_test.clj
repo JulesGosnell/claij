@@ -1,11 +1,16 @@
 (ns claij.fsm.mcp-fsm-test
-  "Tests for MCP Protocol FSM - verifies cache building and threading"
+  "Tests for MCP Protocol FSM - verifies cache building, threading, and action implementations"
   (:require
-   [clojure.test :refer [deftest testing is]]
+   [clojure.test :refer [deftest testing is use-fixtures]]
    [clojure.tools.logging :as log]
+   [clojure.core.async :refer [chan >!! <!! close!]]
    [claij.action :refer [def-action action?]]
    [claij.fsm :as fsm :refer [start-fsm]]
-   [claij.fsm.mcp-fsm :as mcp-fsm :refer [mcp-actions mcp-fsm wrap unwrap]]))
+   [claij.mcp.bridge :as bridge]
+   [claij.fsm.mcp-fsm :as mcp-fsm :refer [mcp-actions mcp-fsm wrap unwrap take! hack
+                                          start-action shed-action init-action
+                                          service-action cache-action mcp-end-action
+                                          check-cache-and-continue]]))
 
 ;;==============================================================================
 ;; Unit Tests for Utility Functions
@@ -461,3 +466,209 @@
               (log/info "Trail transitions:" (count trail)))))))))
 
 
+
+;;==============================================================================
+;; Test Fixtures
+;;==============================================================================
+
+(defn quiet-logging [f]
+  (with-redefs [log/log* (fn [& _])]
+    (f)))
+
+(use-fixtures :each quiet-logging)
+
+;;==============================================================================
+;; Action Unit Tests (no FSM machinery needed)
+;;==============================================================================
+
+(deftest take!-test
+  (testing "returns value from channel"
+    (let [c (chan 1)]
+      (>!! c "hello")
+      (is (= "hello" (take! c 100 :default)))))
+
+  (testing "returns default on timeout"
+    (let [c (chan)]
+      (is (= :timed-out (take! c 10 :timed-out))))))
+
+(deftest hack-test
+  (testing "passes through normal messages"
+    (let [c (chan 1)]
+      (>!! c {"method" "tools/call"})
+      (is (= {"method" "tools/call"} (hack c)))))
+
+  (testing "sheds list_changed and returns next"
+    (let [c (chan 3)]
+      (>!! c {"method" "notifications/tools/list_changed"})
+      (>!! c {"method" "notifications/prompts/list_changed"})
+      (>!! c {"id" 1 "result" {}})
+      (is (= {"id" 1 "result" {}} (hack c))))))
+
+(deftest start-action-test
+  (testing "initializes bridge and transitions to shedding on init message"
+    (let [result (atom nil)
+          handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
+          mock-bridge (fn [_config _ic oc]
+                        (>!! oc "{\"method\":\"initialize\",\"id\":0}")
+                        (fn [] nil))
+          f2 (start-action {} {} {} {})
+          event {"document" "test-doc"}]
+      (with-redefs [bridge/start-mcp-bridge mock-bridge]
+        (f2 {} event [] handler))
+
+      (is (= ["starting" "shedding"] (get-in @result [:event "id"])))
+      (is (= "test-doc" (get-in @result [:event "document"])))
+      (is (= "initialize" (get-in @result [:event "message" "method"])))
+      (is (some? (get-in @result [:ctx :mcp/bridge])))
+      (is (= 0 (get-in @result [:ctx :mcp/request-id])))
+      (is (= "test-doc" (get-in @result [:ctx :mcp/document]))))))
+
+(deftest shed-action-test
+  (testing "sends message to bridge and transitions to initing"
+    (let [result (atom nil)
+          handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
+          ic (chan 10)
+          oc (chan 10)
+          _ (>!! oc {"id" 0 "result" {"protocolVersion" "2025-06-18"}})
+          f2 (shed-action {} {} {} {})
+          context {:mcp/bridge {:input ic :output oc}}
+          event {"document" "doc"
+                 "message" {"method" "initialize" "id" 0}}]
+      (f2 context event [] handler)
+
+      (is (= {"method" "initialize" "id" 0} (<!! ic)))
+      (is (= ["shedding" "initing"] (get-in @result [:event "id"])))
+      (is (= "doc" (get-in @result [:event "document"])))
+
+      (close! ic)
+      (close! oc))))
+
+(deftest init-action-test
+  (testing "extracts capabilities and transitions to servicing"
+    (let [result (atom nil)
+          handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
+          f2 (init-action {} {} {} {})
+          event {"document" "test-doc"
+                 "message" {"result" {"capabilities" {"tools" {}
+                                                      "prompts" {}}}}}]
+      (f2 {} event [] handler)
+
+      (is (= ["initing" "servicing"] (get-in @result [:event "id"])))
+      (is (= "test-doc" (get-in @result [:event "document"])))
+      (is (= "notifications/initialized" (get-in @result [:event "message" :method])))))
+
+  (testing "handles missing capabilities gracefully"
+    (let [result (atom nil)
+          handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
+          f2 (init-action {} {} {} {})
+          event {"document" "doc" "message" {}}]
+      (f2 {} event [] handler)
+      (is (= ["initing" "servicing"] (get-in @result [:event "id"]))))))
+
+(deftest check-cache-and-continue-test
+  (testing "requests missing tools"
+    (let [result (atom nil)
+          handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
+          context {"state" {"tools" nil "prompts" [] "resources" []}
+                   :mcp/request-id 0}]
+      (check-cache-and-continue context handler)
+
+      (is (= ["caching" "servicing"] (get-in @result [:event "id"])))
+      (is (= "tools/list" (get-in @result [:event "message" "method"])))
+      (is (= 1 (:mcp/request-id (:ctx @result))))))
+
+  (testing "requests missing prompts when tools populated"
+    (let [result (atom nil)
+          handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
+          context {"state" {"tools" [{"name" "bash"}] "prompts" nil "resources" []}
+                   :mcp/request-id 5}]
+      (check-cache-and-continue context handler)
+
+      (is (= "prompts/list" (get-in @result [:event "message" "method"])))
+      (is (= 6 (:mcp/request-id (:ctx @result))))))
+
+  (testing "goes to llm when cache complete"
+    (let [result (atom nil)
+          handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
+          context {"state" {"tools" [{}] "prompts" [{}] "resources" [{}]}
+                   :mcp/document "my-doc"}]
+      (check-cache-and-continue context handler)
+
+      (is (= ["caching" "llm"] (get-in @result [:event "id"])))
+      (is (= "my-doc" (get-in @result [:event "document"]))))))
+
+(deftest cache-action-test
+  (testing "refreshes cache on list response"
+    (let [result (atom nil)
+          handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
+          f2 (cache-action {} {} {"id" ["servicing" "caching"]} {})
+          context {"state" {"tools" nil "prompts" [{}] "resources" [{}]}
+                   :mcp/request-id 0
+                   :mcp/document "doc"}
+          event {"message" {"result" {"tools" [{"name" "bash"}]}}}]
+      (f2 context event [] handler)
+
+      (let [new-cache (get-in @result [:ctx "state"])]
+        (is (= [{"name" "bash"}] (get new-cache "tools"))))))
+
+  (testing "handles list_changed notification"
+    (let [result (atom nil)
+          handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
+          f2 (cache-action {} {} {"id" ["servicing" "caching"]} {})
+          context {"state" {"tools" [{"name" "old"}] "prompts" [] "resources" []}
+                   :mcp/request-id 0}
+          event {"message" {"method" "notifications/tools/list_changed"}}]
+      (f2 context event [] handler)
+
+      (is (= ["caching" "servicing"] (get-in @result [:event "id"])))
+      (is (= "tools/list" (get-in @result [:event "message" "method"])))
+      (is (nil? (get-in @result [:ctx "state" "tools"])) "tools should be invalidated"))))
+
+(deftest service-action-test
+  (testing "routes llm response back to llm"
+    (let [result (atom nil)
+          handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
+          ic (chan 10)
+          oc (chan 10)
+          _ (>!! oc {"id" 1 "result" {"content" [{"type" "text" "text" "done"}]}})
+          f2 (service-action {} {} {"id" ["llm" "servicing"]} {})
+          context {:mcp/bridge {:input ic :output oc}}
+          event {"message" {"method" "tools/call"} "document" "doc"}]
+      (f2 context event [] handler)
+
+      (is (= ["servicing" "llm"] (get-in @result [:event "id"])))
+      (is (= "doc" (get-in @result [:event "document"])))
+      (close! ic)
+      (close! oc)))
+
+  (testing "routes caching response back to caching"
+    (let [result (atom nil)
+          handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
+          ic (chan 10)
+          oc (chan 10)
+          _ (>!! oc {"id" 1 "result" {"tools" []}})
+          f2 (service-action {} {} {"id" ["caching" "servicing"]} {})
+          context {:mcp/bridge {:input ic :output oc}}
+          event {"message" {"method" "tools/list"}}]
+      (f2 context event [] handler)
+
+      (is (= ["servicing" "caching"] (get-in @result [:event "id"])))
+      (close! ic)
+      (close! oc))))
+
+(deftest mcp-end-action-test
+  (testing "delivers to completion promise"
+    (let [p (promise)
+          f2 (mcp-end-action {} {} {} {})
+          context {:fsm/completion-promise p}
+          trail [{:from "llm" :to "end" :event {"result" "done"}}]]
+      (f2 context {} trail nil)
+
+      (let [[ctx trail-out] (deref p 100 :timeout)]
+        (is (not= :timeout [ctx trail-out]))
+        (is (= context ctx))
+        (is (= trail trail-out)))))
+
+  (testing "handles missing promise gracefully"
+    (let [f2 (mcp-end-action {} {} {} {})]
+      (is (nil? (f2 {} {} [] nil))))))
