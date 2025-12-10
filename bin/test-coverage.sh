@@ -11,7 +11,7 @@
 #
 # Thresholds:
 #   - Forms coverage: 60% (cloverage built-in)
-#   - Lines coverage: 80% (custom check)
+#   - Lines coverage: 90% (custom check)
 
 cd "$(dirname "$0")/.."
 
@@ -25,7 +25,7 @@ unset OPENROUTER_API_KEY
 unset GEMINI_API_KEY
 unset GROK_API_KEY
 
-LINE_COVERAGE_THRESHOLD=80
+LINE_COVERAGE_THRESHOLD=90
 
 echo "Running code coverage analysis (unit tests only)..."
 echo ""

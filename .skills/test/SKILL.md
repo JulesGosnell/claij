@@ -8,6 +8,16 @@
 - One testing per function
 - Sub-testings for specific cases
 
+## POC Tests
+POC (Proof of Concept) tests live in `test/claij/poc/` directory:
+- Experimental code that may migrate to production
+- Tests that don't correspond to a production file (yet)
+- Reliability/integration experiments across providers
+- Long-running tests tagged ^:long-running
+
+POC files are exempt from the "one x_test.clj per x.clj" rule.
+When POC code matures, move it to production and create matching test file.
+
 ## Keep Simple
 - Test behavior not implementation
 - If test too complex, split production code
