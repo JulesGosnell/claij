@@ -9,7 +9,7 @@
    [claij.util :refer [index-by ->key map-values make-retrier]]
    [claij.malli :refer [def-fsm fsm-registry base-registry expand-refs-for-llm]]
    [claij.action :refer [def-action]]
-   [claij.llm :refer [open-router-async]]))
+   [claij.llm :refer [call]]))
 
 ;;------------------------------------------------------------------------------
 ;; Action Dispatch Helpers
@@ -665,7 +665,7 @@
    
    Provider/model precedence: config → event → context → defaults
    
-   Passes the output schema (Malli :or of valid output transitions) to open-router-async
+   Passes the output schema (Malli :or of valid output transitions) to call
    for structured output enforcement."
   [:map
    ["provider" {:optional true} [:enum "anthropic" "google" "openai" "xai"]]
@@ -707,7 +707,7 @@
 
           prompts (make-prompts fsm ix state full-trail provider model)]
       (log/info (str "   Using LLM: " provider "/" model " with " (count prompts) " prompts"))
-      (open-router-async
+      (call
        provider model
        prompts
        (fn [output]

@@ -147,7 +147,7 @@
 (defonce llm-call-capture (atom nil))
 (defonce llm-response-capture (atom nil))
 
-(defn call-async
+(defn call
   "Call LLM API asynchronously via provider-specific transforms.
    
    Uses multimethod dispatch to select the appropriate provider.
@@ -205,10 +205,10 @@
                           retry-prompts (conj (vec prompts) {"role" "user" "content" error-msg})]
                       (log/warn (str "      [X] EDN Parse Error: " (.getMessage e)))
                       (log/info (str "      [>>] Sending error feedback to LLM"))
-                      (call-async provider model retry-prompts handler
-                                  {:error error
-                                   :retry-count (inc retry-count)
-                                   :max-retries max-retries})))
+                      (call provider model retry-prompts handler
+                            {:error error
+                             :retry-count (inc retry-count)
+                             :max-retries max-retries})))
                   ;; Max retries handler
                   (fn []
                     (log/debug (str "Final malformed response: " d))
@@ -226,8 +226,3 @@
            (when error (error m)))
          (catch Throwable t
            (log/error t "Error handling LLM failure")))))))
-
-;; Backwards compatibility alias
-(def open-router-async
-  "Alias for call-async. Deprecated - use call-async instead."
-  call-async)

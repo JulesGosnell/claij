@@ -6,7 +6,7 @@
    [claij.fsm :refer [state-schema resolve-schema start-fsm llm-action trail->prompts
                       build-fsm-registry validate-event last-event llm-configs
                       make-prompts]]
-   [claij.llm :refer [open-router-async]]))
+   [claij.llm :refer [call]]))
 
 ;;------------------------------------------------------------------------------
 ;; how do we know when a trail is finished
@@ -356,8 +356,8 @@
           context {:test true}
           ;; Create curried f2 by calling factory with empty config
           action-f2 (llm-action {} fsm ix state)]
-      ;; Call the real llm-action with mocked open-router-async
-      (with-redefs [open-router-async (fn [_provider _model _prompts success-handler & _opts]
+      ;; Call the real llm-action with mocked call
+      (with-redefs [call (fn [_provider _model _prompts success-handler & _opts]
                                         ;; Immediately call success with fake LLM response
                                         (success-handler {"id" ["processor" "end"]
                                                           "result" "processed"}))]

@@ -3,7 +3,7 @@
    [clojure.tools.logging :as log]
    [malli.core :as m]
    [claij.action :refer [def-action action? action-name action-config-schema]]
-   [claij.llm :refer [open-router-async]]
+   [claij.llm :refer [call]]
    [claij.fsm :refer [start-fsm llm-action]]
    [claij.store :as store]))
 
@@ -93,7 +93,7 @@
           (handler context {"id" ["triage" "generate"]
                             "requirements" (str "No existing FSMs found. Need to implement: " user-text)}))
         ;; Query LLM for selection
-        (open-router-async provider model prompts (partial handler context) {:schema (get ix "schema")})))))
+        (call provider model prompts (partial handler context) {:schema (get ix "schema")})))))
 
 (def-action reuse-action
   "Loads the chosen FSM, starts it, delegates the user's text, waits for result.
