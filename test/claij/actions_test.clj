@@ -369,6 +369,27 @@
 (defn mock-fsm-load-version [_store fsm-id version]
   (get-in @mock-fsm-store [fsm-id version]))
 
+;; Test helper to reduce boilerplate in fsm-action tests
+(defn run-action-with-mock-store
+  "Runs an action with mocked store, returning the result or :timeout.
+   
+   Options:
+   - :config - action config map (required)
+   - :state-id - current state id (default: \"test\")
+   - :input - input event map (required)
+   - :context - additional context keys (default: {})
+   - :timeout - deref timeout in ms (default: 5000)"
+  [{:keys [config state-id input context timeout]
+    :or {state-id "test" context {} timeout 5000}}]
+  (with-redefs [store/fsm-latest-version mock-fsm-latest-version
+                store/fsm-load-version mock-fsm-load-version]
+    (let [f1 (fsm-action-factory config {} {} {"id" state-id})
+          result-promise (promise)
+          handler (fn [ctx event] (deliver result-promise {:ctx ctx :event event}))
+          full-context (merge {:store :mock-store :id->action child-fsm-actions} context)]
+      (f1 full-context input [] handler)
+      (deref result-promise timeout :timeout))))
+
 (deftest fsm-action-factory-test
   (testing "fsm-action-factory returns a factory function with action metadata"
     (is (fn? fsm-action-factory))
@@ -424,65 +445,41 @@
 
 (deftest fsm-action-trail-modes-test
   (testing "trail-mode :omit excludes child trail"
-    (with-redefs [store/fsm-latest-version mock-fsm-latest-version
-                  store/fsm-load-version mock-fsm-load-version]
-      (let [config {"fsm-id" "child-doubler"
-                    "success-to" "next"
-                    "trail-mode" :omit}
-            f1 (fsm-action-factory config {} {} {"id" "test"})
-            handler-result (promise)
-            mock-handler (fn [_ctx event] (deliver handler-result event))
-            context {:store :mock-store :id->action child-fsm-actions}]
+    (let [result (run-action-with-mock-store
+                  {:config {"fsm-id" "child-doubler"
+                            "success-to" "next"
+                            "trail-mode" :omit}
+                   :input {"value" 5}})]
+      (is (not= :timeout result))
+      (is (nil? (get-in result [:event "child-trail"])))))
 
-        (f1 context {"value" 5} [] mock-handler)
+  (testing "trail-mode :summary includes summary map"
+    (let [result (run-action-with-mock-store
+                  {:config {"fsm-id" "child-doubler"
+                            "success-to" "next"
+                            "trail-mode" :summary}
+                   :input {"value" 7}})]
+      (is (not= :timeout result))
+      (let [trail (get-in result [:event "child-trail"])]
+        (is (map? trail))
+        (is (= "child-doubler" (:child-fsm trail)))
+        (is (number? (:steps trail)))
+        (is (some? (:first-event trail)))
+        (is (some? (:last-event trail))))))
 
-        (let [event (deref handler-result 5000 :timeout)]
-          (is (not= :timeout event))
-          (is (nil? (get event "child-trail")))))))
-
-  (testing "trail-mode :summary includes summary"
-    (with-redefs [store/fsm-latest-version mock-fsm-latest-version
-                  store/fsm-load-version mock-fsm-load-version]
-      (let [config {"fsm-id" "child-doubler"
-                    "success-to" "next"
-                    "trail-mode" :summary}
-            f1 (fsm-action-factory config {} {} {"id" "test"})
-            handler-result (promise)
-            mock-handler (fn [_ctx event] (deliver handler-result event))
-            context {:store :mock-store :id->action child-fsm-actions}]
-
-        (f1 context {"value" 7} [] mock-handler)
-
-        (let [event (deref handler-result 5000 :timeout)]
-          (is (not= :timeout event))
-          (let [trail (get event "child-trail")]
-            (is (map? trail))
-            (is (= "child-doubler" (:child-fsm trail)))
-            (is (number? (:steps trail)))
-            (is (some? (:first-event trail)))
-            (is (some? (:last-event trail))))))))
-
-  (testing "trail-mode :full includes complete trail"
-    (with-redefs [store/fsm-latest-version mock-fsm-latest-version
-                  store/fsm-load-version mock-fsm-load-version]
-      (let [config {"fsm-id" "child-doubler"
-                    "success-to" "next"
-                    "trail-mode" :full}
-            f1 (fsm-action-factory config {} {} {"id" "test"})
-            handler-result (promise)
-            mock-handler (fn [_ctx event] (deliver handler-result event))
-            context {:store :mock-store :id->action child-fsm-actions}]
-
-        (f1 context {"value" 3} [] mock-handler)
-
-        (let [event (deref handler-result 5000 :timeout)]
-          (is (not= :timeout event))
-          (let [trail (get event "child-trail")]
-            (is (vector? trail))
-            (is (pos? (count trail)))
-            (is (every? #(contains? % :from) trail))
-            (is (every? #(contains? % :to) trail))
-            (is (every? #(contains? % :event) trail))))))))
+  (testing "trail-mode :full includes complete trail vector"
+    (let [result (run-action-with-mock-store
+                  {:config {"fsm-id" "child-doubler"
+                            "success-to" "next"
+                            "trail-mode" :full}
+                   :input {"value" 3}})]
+      (is (not= :timeout result))
+      (let [trail (get-in result [:event "child-trail"])]
+        (is (vector? trail))
+        (is (pos? (count trail)))
+        (is (every? #(contains? % :from) trail))
+        (is (every? #(contains? % :to) trail))
+        (is (every? #(contains? % :event) trail))))))
 
 (deftest fsm-action-error-handling-test
   (testing "throws when FSM not found in store"
@@ -565,69 +562,44 @@
 
 (deftest fsm-action-version-handling-test
   (testing "loads latest version when no version specified"
-    (with-redefs [store/fsm-latest-version mock-fsm-latest-version
-                  store/fsm-load-version mock-fsm-load-version]
-      ;; Add version 2 to mock store
-      (swap! mock-fsm-store assoc-in ["child-doubler" 2]
-             (assoc child-fsm "version" 2))
-
-      (let [config {"fsm-id" "child-doubler"
-                    "success-to" "next"}
-            f1 (fsm-action-factory config {} {} {"id" "test"})
-            handler-result (promise)
-            mock-handler (fn [_ctx event] (deliver handler-result event))
-            context {:store :mock-store :id->action child-fsm-actions}]
-
-        (f1 context {"value" 10} [] mock-handler)
-
-        (let [event (deref handler-result 5000 :timeout)]
-          (is (not= :timeout event))
-          ;; Should work (version doesn't affect behavior in this test)
-          (is (= 20 (get-in event ["result" "result"])))))
-
-      ;; Clean up
-      (swap! mock-fsm-store update "child-doubler" dissoc 2)))
+    ;; Add version 2 to mock store
+    (swap! mock-fsm-store assoc-in ["child-doubler" 2]
+           (assoc child-fsm "version" 2))
+    (try
+      (let [result (run-action-with-mock-store
+                    {:config {"fsm-id" "child-doubler" "success-to" "next"}
+                     :input {"value" 10}})]
+        (is (not= :timeout result))
+        (is (= 20 (get-in result [:event "result" "result"]))))
+      (finally
+        ;; Clean up
+        (swap! mock-fsm-store update "child-doubler" dissoc 2))))
 
   (testing "loads specific version when specified"
-    (with-redefs [store/fsm-latest-version mock-fsm-latest-version
-                  store/fsm-load-version mock-fsm-load-version]
-      (let [config {"fsm-id" "child-doubler"
-                    "fsm-version" 1
-                    "success-to" "next"}
-            f1 (fsm-action-factory config {} {} {"id" "test"})
-            handler-result (promise)
-            mock-handler (fn [_ctx event] (deliver handler-result event))
-            context {:store :mock-store :id->action child-fsm-actions}]
-
-        (f1 context {"value" 4} [] mock-handler)
-
-        (let [event (deref handler-result 5000 :timeout)]
-          (is (not= :timeout event))
-          (is (= 8 (get-in event ["result" "result"]))))))))
+    (let [result (run-action-with-mock-store
+                  {:config {"fsm-id" "child-doubler"
+                            "fsm-version" 1
+                            "success-to" "next"}
+                   :input {"value" 4}})]
+      (is (not= :timeout result))
+      (is (= 8 (get-in result [:event "result" "result"]))))))
 
 (deftest fsm-action-output-event-structure-test
   (testing "output event has correct structure"
-    (with-redefs [store/fsm-latest-version mock-fsm-latest-version
-                  store/fsm-load-version mock-fsm-load-version]
-      (let [config {"fsm-id" "child-doubler"
-                    "success-to" "next-state"
-                    "trail-mode" :summary}
-            ;; State id comes from config-time state parameter
-            f1 (fsm-action-factory config {} {} {"id" "current-state"})
-            handler-result (promise)
-            mock-handler (fn [_ctx event] (deliver handler-result event))
-            context {:store :mock-store :id->action child-fsm-actions}]
-
-        (f1 context {"value" 100} [] mock-handler)
-
-        (let [event (deref handler-result 5000 :timeout)]
-          (is (not= :timeout event))
-          ;; id should be [current-state, success-to]
-          (is (= ["current-state" "next-state"] (get event "id")))
-          ;; result contains child's final event
-          (is (= 200 (get-in event ["result" "result"])))
-          ;; child-trail present in summary mode
-          (is (some? (get event "child-trail"))))))))
+    (let [result (run-action-with-mock-store
+                  {:config {"fsm-id" "child-doubler"
+                            "success-to" "next-state"
+                            "trail-mode" :summary}
+                   :state-id "current-state"
+                   :input {"value" 100}})]
+      (is (not= :timeout result))
+      (let [event (:event result)]
+        ;; id should be [current-state, success-to]
+        (is (= ["current-state" "next-state"] (get event "id")))
+        ;; result contains child's final event
+        (is (= 200 (get-in event ["result" "result"])))
+        ;; child-trail present in summary mode
+        (is (some? (get event "child-trail")))))))
 
 ;;==============================================================================
 ;; Integration Test - Parent FSM using fsm-action
