@@ -518,6 +518,145 @@
          (stop))))))
 
 ;;------------------------------------------------------------------------------
+;; Action Lifting
+;;------------------------------------------------------------------------------
+
+(defn lift
+  "Lift a pure function into an FSM action.
+   
+   The function f receives the event and returns the output event.
+   The output event must include an \"id\" field for transition routing.
+   
+   Usage in FSM state definition:
+     {\"id\" \"processor\" \"action\" \"my-action\"}
+   
+   With context:
+     {:id->action {\"my-action\" (lift inc-value)}}
+   
+   Where inc-value might be:
+     (defn inc-value [event]
+       (-> event
+           (update \"value\" inc)
+           (assoc \"id\" [\"processor\" \"end\"])))
+   
+   Options (optional second arg):
+     :name - Action name for logging/debugging (default: \"lifted\")
+   
+   The lifted action:
+   - Passes context through unchanged
+   - Calls (f event) to compute output
+   - Calls (handler context output)"
+  ([f] (lift f {}))
+  ([f {:keys [name] :or {name "lifted"}}]
+   (with-meta
+     (fn [_config _fsm _ix _state]
+       (fn [context event _trail handler]
+         (log/debug (str "lift[" name "]: processing event"))
+         (let [output (f event)]
+           (handler context output))))
+     {:action/name name
+      :action/config-schema :any
+      :action/input-schema :any
+      :action/output-schema :any})))
+
+;;------------------------------------------------------------------------------
+;; FSM Chaining
+;;------------------------------------------------------------------------------
+
+(defn chain
+  "Chain multiple FSMs together in sequence.
+   
+   Output of FSM-n feeds into input of FSM-n+1.
+   Returns control functions for the entire chain.
+   
+   Args:
+     context - Shared context for all FSMs (with :id->action etc)
+     fsm1, fsm2, ... - Two or more FSM definitions
+   
+   Returns:
+     {:start  - fn [] starts all FSMs, returns chain handle
+      :stop   - fn [] stops all FSMs in reverse order
+      :submit - fn [input] submits to first FSM
+      :await  - fn [& [timeout-ms]] waits for final FSM completion}
+   
+   The chain automatically wires FSM outputs to next FSM inputs:
+   - FSM-1 completes → extracts last-event → submits to FSM-2
+   - FSM-2 completes → extracts last-event → submits to FSM-3
+   - ... and so on
+   
+   Example - chain three increment FSMs:
+     (let [inc-fsm (make-inc-fsm)
+           {:keys [start stop submit await]} (chain ctx inc-fsm inc-fsm inc-fsm)]
+       (start)
+       (submit {\"id\" [\"start\" \"process\"] \"value\" 0})
+       (let [[_ trail] (await 5000)]
+         (println (last-event trail)))  ; => {\"value\" 3 ...}
+       (stop))
+   
+   Note: Each FSM in the chain must have compatible schemas:
+   - FSM-n output-schema should be compatible with FSM-n+1 input-schema
+   - Use fsm-schemas to check compatibility at design time"
+  [context & fsms]
+  (when (< (count fsms) 2)
+    (throw (ex-info "chain requires at least 2 FSMs" {:count (count fsms)})))
+
+  (let [;; State to hold started FSM handles
+        fsm-handles (atom [])
+        started? (atom false)]
+
+    ;; Return interface - using letfn would cause issues, so we define simple fns
+    {:start
+     (fn start-chain []
+       (when @started?
+         (throw (ex-info "Chain already started" {})))
+
+       (let [n (count fsms)
+             handles (vec (for [fsm fsms]
+                            (start-fsm context fsm)))]
+
+         ;; Wire FSM-i completion to FSM-i+1 submit
+         ;; We do this by wrapping the await in a thread that forwards
+         (doseq [i (range (dec n))]
+           (let [current-handle (nth handles i)
+                 next-handle (nth handles (inc i))]
+             (future
+               (let [result ((:await current-handle))]
+                 (when (and result (not= result :timeout))
+                   (let [[_ctx trail] result
+                         output (last-event trail)]
+                     (when output
+                       ((:submit next-handle) output))))))))
+
+         (reset! fsm-handles handles)
+         (reset! started? true)
+         handles))
+
+     :stop
+     (fn stop-chain []
+       (when @started?
+         (doseq [handle (reverse @fsm-handles)]
+           ((:stop handle)))
+         (reset! started? false)
+         (reset! fsm-handles [])))
+
+     :submit
+     (fn submit-chain [input]
+       (when-not @started?
+         (throw (ex-info "Chain not started - call start first" {})))
+       ((:submit (first @fsm-handles)) input))
+
+     :await
+     (fn await-chain
+       ([]
+        (when-not @started?
+          (throw (ex-info "Chain not started - call start first" {})))
+        ((:await (last @fsm-handles))))
+       ([timeout-ms]
+        (when-not @started?
+          (throw (ex-info "Chain not started - call start first" {})))
+        ((:await (last @fsm-handles)) timeout-ms)))}))
+
+;;------------------------------------------------------------------------------
 ;; LLM Action Support
 ;;------------------------------------------------------------------------------
 
