@@ -5,6 +5,7 @@
    [claij.action :refer [def-action action? action-name action-config-schema]]
    [claij.llm :refer [call]]
    [claij.fsm :refer [start-fsm llm-action]]
+   [claij.fsm.triage-fsm :refer [triage-action]]
    [claij.store :as store]))
 
 ;;------------------------------------------------------------------------------
@@ -54,46 +55,6 @@
     (handler context {"id" ["generate" "end"]
                       "success" false
                       "output" "FSM generation is not yet implemented"})))
-
-(def-action triage-action
-  "Loads all FSMs from store and asks LLM to choose the best one.
-   
-   Queries the store for FSM metadata and presents them to the LLM for selection."
-  [:map]
-  [_config _fsm ix _state]
-  (fn [context event _trail handler]
-    ;; Extract user's problem description from the event
-    (let [{:keys [store provider model]} context
-          user-text (get event "document")
-
-          ;; Query store for all FSM [id, version, description] triples
-          available-fsms (store/fsm-list-all store)
-
-          _ (log/info (str "   Triage: " (count available-fsms) " FSMs available"))
-
-          ;; Format FSM list for LLM
-          fsm-list (if (empty? available-fsms)
-                     "No FSMs currently available in the store."
-                     (clojure.string/join "\n"
-                                          (map (fn [{id "id" version "version" description "description"}]
-                                                 (str "- FSM: " id " (v" version "): " description))
-                                               available-fsms)))
-
-          ;; Build prompt for LLM
-          prompts [{"role" "user"
-                    "content" (str "User's request: " user-text "\n\n"
-                                   "Available FSMs:\n" fsm-list "\n\n"
-                                   "Choose the best FSM to handle this request. "
-                                   "For now, only 'reuse' is supported - select an existing FSM that matches the request.")}]]
-
-      (if (empty? available-fsms)
-        ;; No FSMs available - fail gracefully
-        (do
-          (log/error "   Triage: No FSMs in store")
-          (handler context {"id" ["triage" "generate"]
-                            "requirements" (str "No existing FSMs found. Need to implement: " user-text)}))
-        ;; Query LLM for selection
-        (call provider model prompts (partial handler context) {:schema (get ix "schema")})))))
 
 (def-action reuse-action
   "Loads the chosen FSM, starts it, delegates the user's text, waits for result.

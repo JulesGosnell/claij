@@ -1,10 +1,12 @@
-(ns claij.fsm.triage-test
+(ns claij.fsm.triage-fsm-test
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
+   [clojure.string :as str]
    [clojure.tools.logging :as log]
    [clojure.data.json :as json]
    [claij.actions :as actions]
-   [claij.fsm.triage :refer [start-triage]]
+   [claij.llm :as llm]
+   [claij.fsm.triage-fsm :refer [start-triage triage-action]]
    [claij.store :as store]
    [claij.fsm.code-review-fsm :refer [code-review-fsm]]
    [next.jdbc :as jdbc])
@@ -57,7 +59,78 @@
 (use-fixtures :each db-fixture)
 
 ;;------------------------------------------------------------------------------
-;; Tests
+;; Unit Tests - triage-action (no database needed, uses mocks)
+;;------------------------------------------------------------------------------
+
+(deftest triage-action-empty-store-test
+  (testing "routes to generate when store is empty"
+    (let [result (atom nil)
+          handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
+          f2 (triage-action {} {} {"schema" [:map]} {})
+          context {:store nil :provider "test" :model "test"}
+          event {"document" "Please review my code"}]
+      (with-redefs [store/fsm-list-all (fn [_] [])]
+        (f2 context event [] handler))
+
+      (is (= ["triage" "generate"] (get-in @result [:event "id"])))
+      (is (string? (get-in @result [:event "requirements"])))
+      (is (str/includes?
+           (get-in @result [:event "requirements"])
+           "Please review my code")))))
+
+(deftest triage-action-with-fsms-test
+  (testing "calls LLM when FSMs are available"
+    (let [result (atom nil)
+          llm-called (atom nil)
+          handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
+          f2 (triage-action {} {} {"schema" [:map ["fsm-id" :string]]} {})
+          context {:store nil :provider "openai" :model "gpt-4o"}
+          event {"document" "Please review my code"}
+          mock-fsms [{"id" "code-review" "version" 1 "description" "Reviews code"}
+                     {"id" "test-gen" "version" 2 "description" "Generates tests"}]]
+      (with-redefs [store/fsm-list-all (fn [_] mock-fsms)
+                    llm/call (fn [provider model prompts handler & _]
+                               (reset! llm-called {:provider provider
+                                                   :model model
+                                                   :prompts prompts})
+                               (handler {"id" ["triage" "reuse"]
+                                         "fsm-id" "code-review"
+                                         "fsm-version" 1
+                                         "rationale" "Best match"}))]
+        (f2 context event [] handler))
+
+      (is (some? @llm-called))
+      (is (= "openai" (:provider @llm-called)))
+      (is (= "gpt-4o" (:model @llm-called)))
+
+      (let [prompt-content (get-in @llm-called [:prompts 0 "content"])]
+        (is (str/includes? prompt-content "code-review"))
+        (is (str/includes? prompt-content "test-gen"))
+        (is (str/includes? prompt-content "Please review my code")))
+
+      (is (= ["triage" "reuse"] (get-in @result [:event "id"])))
+      (is (= "code-review" (get-in @result [:event "fsm-id"]))))))
+
+(deftest triage-action-prompt-formatting-test
+  (testing "formats FSM list correctly in prompt"
+    (let [llm-prompts (atom nil)
+          f2 (triage-action {} {} {"schema" [:map]} {})
+          context {:store nil :provider "p" :model "m"}
+          event {"document" "user request"}
+          mock-fsms [{"id" "fsm-a" "version" 3 "description" "Does A things"}
+                     {"id" "fsm-b" "version" 7 "description" "Does B things"}]]
+      (with-redefs [store/fsm-list-all (fn [_] mock-fsms)
+                    llm/call (fn [_ _ prompts _ & _]
+                               (reset! llm-prompts prompts))]
+        (f2 context event [] (fn [_ _])))
+
+      (let [content (get-in @llm-prompts [0 "content"])]
+        (is (str/includes? content "- FSM: fsm-a (v3): Does A things"))
+        (is (str/includes? content "- FSM: fsm-b (v7): Does B things"))
+        (is (str/includes? content "User's request: user request"))))))
+
+;;------------------------------------------------------------------------------
+;; Integration Tests - Full FSM (requires database)
 ;;------------------------------------------------------------------------------
 
 (deftest ^:long-running triage-fsm-delegation-test
