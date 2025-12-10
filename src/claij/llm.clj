@@ -143,10 +143,6 @@
       (str/replace #"^```(?:json|edn|clojure)?\s*" "")
       (str/replace #"\s*```$" "")))
 
-;; Debug capture atoms for REPL inspection
-(defonce llm-call-capture (atom nil))
-(defonce llm-response-capture (atom nil))
-
 (defn call
   "Call LLM API asynchronously via provider-specific transforms.
    
@@ -172,8 +168,6 @@
 
   ;; Use transforms to build provider-specific request
   (let [{:keys [url headers body]} (openrouter->provider provider model prompts)]
-    (reset! llm-call-capture {:provider provider :model model :prompts prompts
-                              :url url :body body :timestamp (java.time.Instant/now)})
     (post
      url
      {:async? true
@@ -185,11 +179,9 @@
          (let [parsed-response (json->clj (:body r))
                raw-content (provider->openrouter provider parsed-response)
                d (strip-md-json raw-content)]
-           (reset! llm-response-capture {:raw d :status :received :timestamp (java.time.Instant/now)})
            (try
              (let [j (edn/read-string (str/trim d))]
                (log/info "      [OK] LLM Response: Valid EDN received")
-               (swap! llm-response-capture assoc :parsed j :status :success)
                (handler j))
              (catch Exception e
                (let [retrier (make-retrier max-retries)]
@@ -218,11 +210,9 @@
          (catch Throwable t
            (log/error t "Error processing LLM response"))))
      (fn [exception]
-       (reset! llm-response-capture {:exception exception :status :error :timestamp (java.time.Instant/now)})
        (try
          (let [m (json/parse-string (:body (.getData exception)) true)]
            (log/error (str "      [X] LLM Request Failed: " (get m "error")))
-           (swap! llm-response-capture assoc :error-body m)
            (when error (error m)))
          (catch Throwable t
            (log/error t "Error handling LLM failure")))))))
