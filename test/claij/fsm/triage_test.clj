@@ -1,10 +1,10 @@
-(ns claij.triage-test
+(ns claij.fsm.triage-test
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
    [clojure.tools.logging :as log]
    [clojure.data.json :as json]
    [claij.actions :as actions]
-   [claij.triage :refer [start-triage]]
+   [claij.fsm.triage :refer [start-triage]]
    [claij.store :as store]
    [claij.fsm.code-review-fsm :refer [code-review-fsm]]
    [next.jdbc :as jdbc])
