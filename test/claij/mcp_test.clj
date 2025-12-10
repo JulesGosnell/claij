@@ -428,24 +428,45 @@
 ;;------------------------------------------------------------------------------
 
 (deftest ^:integration mcp-walk-through-test
-  (let [n 100
-        config {"command" "bash", "args" ["-c", "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"], "transport" "stdio"}
-        ic (chan n (map write-str))
-        oc (chan n (comp (remove list-changed?) (map read-str)))
-        stop (start-mcp-bridge config ic oc)]
+  (testing "MCP bridge can send requests and receive responses"
+    (let [n 100
+          config {"command" "bash" "args" ["-c" "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"] "transport" "stdio"}
+          ic (chan n (map write-str))
+          oc (chan n (comp (remove list-changed?) (map read-str)))
+          stop (start-mcp-bridge config ic oc)]
 
-    (try
-      (>!! ic initialise-request)
-      (>!! ic initialised-notification)
-      (>!! ic list-tools-request)
-      (>!! ic list-prompts-request)
-      (>!! ic list-resources-request)
+      (try
+        ;; Send initialize request
+        (>!! ic initialise-request)
+        (let [init-response (<!! oc)]
+          (is (some? init-response) "Should receive initialize response")
+          (is (contains? init-response "result") "Response should have result")
+          (is (string? (get-in init-response ["result" "protocolVersion"]))
+              "Response should include protocol version"))
 
-      (catch Throwable t (log/error "should not have happened:" t))
+        ;; Send initialized notification (no response expected)
+        (>!! ic initialised-notification)
 
-      (finally
-        (log/info "stopping bridge...")
-        (Thread/sleep 1000)
-        (stop)
-        (log/info "bridge stopped")
-        (is true)))))
+        ;; Send list-tools request
+        (>!! ic list-tools-request)
+        (let [tools-response (<!! oc)]
+          (is (some? tools-response) "Should receive tools response")
+          (is (vector? (get-in tools-response ["result" "tools"]))
+              "Tools response should contain tools vector"))
+
+        ;; Send list-prompts request
+        (>!! ic list-prompts-request)
+        (let [prompts-response (<!! oc)]
+          (is (some? prompts-response) "Should receive prompts response")
+          (is (vector? (get-in prompts-response ["result" "prompts"]))
+              "Prompts response should contain prompts vector"))
+
+        ;; Send list-resources request
+        (>!! ic list-resources-request)
+        (let [resources-response (<!! oc)]
+          (is (some? resources-response) "Should receive resources response")
+          (is (vector? (get-in resources-response ["result" "resources"]))
+              "Resources response should contain resources vector"))
+
+        (finally
+          (stop))))))
