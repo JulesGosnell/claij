@@ -467,3 +467,155 @@
              clojure.lang.ExceptionInfo
              #"Child FSM not found"
              (f1 context {"value" 1} [] (fn [_ _]))))))))
+
+(deftest fsm-action-version-handling-test
+  (testing "loads latest version when no version specified"
+    (with-redefs [store/fsm-latest-version mock-fsm-latest-version
+                  store/fsm-load-version mock-fsm-load-version]
+      ;; Add version 2 to mock store
+      (swap! mock-fsm-store assoc-in ["child-doubler" 2]
+             (assoc child-fsm "version" 2))
+
+      (let [config {"fsm-id" "child-doubler"
+                    "success-to" "next"}
+            f1 (fsm-action-factory config {} {} {"id" "test"})
+            handler-result (promise)
+            mock-handler (fn [_ctx event] (deliver handler-result event))
+            context {:store :mock-store :id->action child-fsm-actions}]
+
+        (f1 context {"value" 10} [] mock-handler)
+
+        (let [event (deref handler-result 5000 :timeout)]
+          (is (not= :timeout event))
+          ;; Should work (version doesn't affect behavior in this test)
+          (is (= 20 (get-in event ["result" "result"])))))
+
+      ;; Clean up
+      (swap! mock-fsm-store update "child-doubler" dissoc 2)))
+
+  (testing "loads specific version when specified"
+    (with-redefs [store/fsm-latest-version mock-fsm-latest-version
+                  store/fsm-load-version mock-fsm-load-version]
+      (let [config {"fsm-id" "child-doubler"
+                    "fsm-version" 1
+                    "success-to" "next"}
+            f1 (fsm-action-factory config {} {} {"id" "test"})
+            handler-result (promise)
+            mock-handler (fn [_ctx event] (deliver handler-result event))
+            context {:store :mock-store :id->action child-fsm-actions}]
+
+        (f1 context {"value" 4} [] mock-handler)
+
+        (let [event (deref handler-result 5000 :timeout)]
+          (is (not= :timeout event))
+          (is (= 8 (get-in event ["result" "result"]))))))))
+
+(deftest fsm-action-output-event-structure-test
+  (testing "output event has correct structure"
+    (with-redefs [store/fsm-latest-version mock-fsm-latest-version
+                  store/fsm-load-version mock-fsm-load-version]
+      (let [config {"fsm-id" "child-doubler"
+                    "success-to" "next-state"
+                    "trail-mode" :summary}
+            ;; State id comes from config-time state parameter
+            f1 (fsm-action-factory config {} {} {"id" "current-state"})
+            handler-result (promise)
+            mock-handler (fn [_ctx event] (deliver handler-result event))
+            context {:store :mock-store :id->action child-fsm-actions}]
+
+        (f1 context {"value" 100} [] mock-handler)
+
+        (let [event (deref handler-result 5000 :timeout)]
+          (is (not= :timeout event))
+          ;; id should be [current-state, success-to]
+          (is (= ["current-state" "next-state"] (get event "id")))
+          ;; result contains child's final event
+          (is (= 200 (get-in event ["result" "result"])))
+          ;; child-trail present in summary mode
+          (is (some? (get event "child-trail"))))))))
+
+;;==============================================================================
+;; Integration Test - Parent FSM using fsm-action
+;;==============================================================================
+
+;; start -> delegate -> collect -> end
+
+(def-action parent-start-action
+  "Prepares data for child FSM."
+  {:config [:map]
+   :input :any
+   :output :any}
+  [_config _fsm _ix _state]
+  (fn [context event _trail handler]
+    ;; Pass through to delegate state with the value
+    (handler context {"id" ["prepare" "delegate"]
+                      "value" (get event "input")})))
+
+(def-action parent-collect-action
+  "Collects result from child FSM."
+  {:config [:map]
+   :input :any
+   :output :any}
+  [_config _fsm _ix _state]
+  (fn [context event _trail handler]
+    ;; Extract child result and format final output
+    (let [child-result (get-in event ["result" "result"])]
+      (handler context {"id" ["collect" "end"]
+                        "final-result" child-result
+                        "source" "child-fsm"}))))
+
+(def-fsm parent-fsm
+  {"id" "parent-orchestrator"
+   "description" "Parent FSM that delegates to child"
+   "states"
+   [{"id" "prepare" "action" "prepare"}
+    {"id" "delegate" "action" "fsm"
+     "config" {"fsm-id" "child-doubler"
+               "success-to" "collect"
+               "trail-mode" :summary}}
+    {"id" "collect" "action" "collect"}
+    {"id" "end" "action" "end"}]
+   "xitions"
+   [{"id" ["start" "prepare"]
+     "schema" [:map ["id" :any] ["input" :int]]}
+    {"id" ["prepare" "delegate"]
+     "schema" [:map ["id" :any] ["value" :int]]}
+    {"id" ["delegate" "collect"]
+     "schema" [:map ["id" :any] ["result" :any] ["child-trail" {:optional true} :any]]}
+    {"id" ["collect" "end"]
+     "schema" [:map ["id" :any] ["final-result" :int] ["source" :string]]}]})
+
+(deftest parent-child-fsm-integration-test
+  (testing "Parent FSM can delegate to child FSM via fsm-action"
+    (with-redefs [store/fsm-latest-version mock-fsm-latest-version
+                  store/fsm-load-version mock-fsm-load-version]
+      (let [;; Combined actions for parent and child FSMs
+            ;; Use end-action for both - it handles both on-complete and promise
+            parent-actions (merge child-fsm-actions
+                                  {"prepare" #'parent-start-action
+                                   "fsm" fsm-action-factory
+                                   "collect" #'parent-collect-action
+                                   "end" #'end-action})
+
+            context {:store :mock-store
+                     :id->action parent-actions}
+
+            {:keys [submit await stop]} (start-fsm context parent-fsm)]
+
+        (try
+          ;; Submit input to parent FSM
+          (submit {"id" ["start" "prepare"]
+                   "input" 50})
+
+          ;; Wait for completion
+          (let [result (await 10000)]
+            (is (not= :timeout result) "Parent FSM should complete")
+            (when (not= :timeout result)
+              (let [[_ctx trail] result
+                    final-event (last-event trail)]
+                ;; Parent should have processed child's result
+                ;; 50 -> child doubles to 100 -> parent formats
+                (is (= 100 (get final-event "final-result")))
+                (is (= "child-fsm" (get final-event "source"))))))
+          (finally
+            (stop)))))))

@@ -465,8 +465,6 @@
 
               (log/info "Trail transitions:" (count trail)))))))))
 
-
-
 ;;==============================================================================
 ;; Test Fixtures
 ;;==============================================================================
@@ -480,6 +478,26 @@
 ;;==============================================================================
 ;; Action Unit Tests (no FSM machinery needed)
 ;;==============================================================================
+
+(deftest wrap-test
+  (testing "3-arity creates map with id, document, message"
+    (let [result (wrap ["from" "to"] "doc" {"m" 1})]
+      (is (= ["from" "to"] (get result "id")))
+      (is (= "doc" (get result "document")))
+      (is (= {"m" 1} (get result "message")))))
+
+  (testing "2-arity creates map without document"
+    (let [result (wrap ["a" "b"] {"x" 2})]
+      (is (= ["a" "b"] (get result "id")))
+      (is (= {"x" 2} (get result "message")))
+      (is (not (contains? result "document"))))))
+
+(deftest unwrap-test
+  (testing "extracts message"
+    (is (= {"foo" "bar"} (unwrap {"message" {"foo" "bar"}}))))
+
+  (testing "returns nil for missing message"
+    (is (nil? (unwrap {"id" "test"})))))
 
 (deftest take!-test
   (testing "returns value from channel"
