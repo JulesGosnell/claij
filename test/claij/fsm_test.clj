@@ -30,19 +30,23 @@
 (deftest fsm-test
 
   (testing "build-fsm-registry"
-    (testing "returns a registry with base types"
+    (testing "returns a registry that can validate base types"
       (let [registry (build-fsm-registry {} {})]
-        (is (some? registry))))
+        (is (m/validate :string "hello" {:registry registry}))
+        (is (m/validate :int 42 {:registry registry}))
+        (is (not (m/validate :int "not-int" {:registry registry})))))
 
     (testing "includes FSM schemas when provided"
       (let [fsm {"schemas" {"custom-type" [:string {:min 1}]}}
             registry (build-fsm-registry fsm {})]
-        (is (some? registry))))
+        (is (m/validate [:ref "custom-type"] "valid" {:registry registry}))
+        (is (not (m/validate [:ref "custom-type"] "" {:registry registry})))))
 
     (testing "includes context registry when provided"
       (let [context {:malli/registry {"ctx-type" :int}}
             registry (build-fsm-registry {} context)]
-        (is (some? registry)))))
+        (is (m/validate [:ref "ctx-type"] 42 {:registry registry}))
+        (is (not (m/validate [:ref "ctx-type"] "not-int" {:registry registry}))))))
 
   (testing "validate-event"
     (testing "returns valid for matching schema"
@@ -75,22 +79,26 @@
       (is (nil? (last-event nil)))))
 
   (testing "llm-configs"
-    (testing "is a map of provider/model tuples to configs"
-      (is (map? llm-configs)))
+    (testing "keys are [provider model] tuples with map values"
+      (doseq [[provider-model config] llm-configs]
+        (is (vector? provider-model) (str "Key should be [provider model] tuple"))
+        (is (= 2 (count provider-model)) (str "Key should have exactly 2 elements"))
+        (is (string? (first provider-model)) (str "Provider should be string"))
+        (is (string? (second provider-model)) (str "Model should be string"))
+        (is (map? config) (str "Config for " provider-model " should be a map"))))
 
-    (testing "contains anthropic claude config"
-      (is (contains? llm-configs ["anthropic" "claude-sonnet-4.5"])))
+    (testing "anthropic config includes system prompts for EDN parsing"
+      (let [anthropic-config (get llm-configs ["anthropic" "claude-sonnet-4.5"])]
+        (is (some? anthropic-config) "Should have anthropic config")
+        (is (vector? (:prompts anthropic-config)) "Should have prompts vector")
+        (is (pos? (count (:prompts anthropic-config))) "Should have at least one prompt")))
 
-    (testing "contains openai configs"
-      (is (contains? llm-configs ["openai" "gpt-4o"]))
-      (is (contains? llm-configs ["openai" "gpt-5-codex"])))
-
-    (testing "contains xai configs"
-      (is (contains? llm-configs ["x-ai" "grok-code-fast-1"]))
-      (is (contains? llm-configs ["x-ai" "grok-4"])))
-
-    (testing "contains google config"
-      (is (contains? llm-configs ["google" "gemini-2.5-flash"])))))
+    (testing "covers expected providers"
+      (let [providers (set (map first (keys llm-configs)))]
+        (is (contains? providers "anthropic"))
+        (is (contains? providers "openai"))
+        (is (contains? providers "x-ai"))
+        (is (contains? providers "google"))))))
 
 ;;==============================================================================
 ;; Context Threading Tests
@@ -571,13 +579,17 @@
       (stop))))
 
 (deftest chain-stop-reverse-order-test
-  (testing "Stop is called without errors"
+  (testing "Stop cleans up resources and can be called safely"
     (let [fsm (make-inc-fsm)
           {:keys [start stop submit await]} (chain chain-test-context fsm fsm)]
       (start)
       (submit {"id" ["start" "process"] "value" 0})
-      (await 5000)
-      (is (do (stop) true) "Stop should complete cleanly"))))
+      (let [result (await 5000)]
+        (is (not= :timeout result) "Chain should complete before timeout"))
+      ;; Verify stop completes without throwing (may return empty vector or nil)
+      (let [stop-result (stop)]
+        (is (or (nil? stop-result) (coll? stop-result))
+            "Stop should return nil or collection on clean shutdown")))))
 
 (deftest chain-timeout-test
   (testing "Chain await respects timeout"

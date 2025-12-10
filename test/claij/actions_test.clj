@@ -102,20 +102,32 @@
     (is (not (action? #'mock-fsm)))))
 
 (deftest def-action-currying-test
-  (testing "Factory returns runtime function when config is valid"
+  (testing "Factory returns callable runtime function when config is valid"
     (let [config {"provider" "anthropic" "model" "claude-sonnet-4"}
-          f2 (test-llm-action config mock-fsm mock-ix mock-state)]
-      (is (fn? f2))))
+          f2 (test-llm-action config mock-fsm mock-ix mock-state)
+          result (atom nil)]
+      (is (fn? f2))
+      ;; Verify it's actually callable with correct arity
+      (f2 {} {} [] (fn [_ctx out] (reset! result out)))
+      (is (some? @result) "Runtime function should invoke handler")))
 
   (testing "Empty config works for actions that don't need config"
-    (let [f2 (test-end-action {} mock-fsm mock-ix mock-state)]
-      (is (fn? f2))))
+    (let [f2 (test-end-action {} mock-fsm mock-ix mock-state)
+          called (atom false)]
+      (is (fn? f2))
+      ;; Verify it's callable - end-action may return nil but shouldn't throw
+      (is (nil? (f2 {} {} [] (fn [_ _] (reset! called true)))))))
 
-  (testing "Optional config fields work"
+  (testing "Optional config fields work with defaults"
     (let [f2-default (test-timeout-action {} mock-fsm mock-ix mock-state)
-          f2-custom (test-timeout-action {"timeout-ms" 10000} mock-fsm mock-ix mock-state)]
-      (is (fn? f2-default))
-      (is (fn? f2-custom)))))
+          f2-custom (test-timeout-action {"timeout-ms" 10000} mock-fsm mock-ix mock-state)
+          result-default (atom nil)
+          result-custom (atom nil)]
+      ;; Both should be callable and produce output
+      (f2-default {} {} [] (fn [_ctx out] (reset! result-default out)))
+      (f2-custom {} {} [] (fn [_ctx out] (reset! result-custom out)))
+      (is (= 5000 (get @result-default "timeout-used")) "Default config value")
+      (is (= 10000 (get @result-custom "timeout-used")) "Custom config value"))))
 
 (deftest def-action-config-validation-test
   (testing "Invalid config throws at factory call time"
@@ -196,13 +208,17 @@
              (action-config-schema (get registry "llm"))))
       (is (= [:map] (action-config-schema (get registry "end"))))))
 
-  (testing "Can instantiate actions from registry"
+  (testing "Can instantiate and invoke actions from registry"
     (let [registry {"llm" test-llm-action
                     "end" test-end-action}
           llm-factory (get registry "llm")
           config {"provider" "xai" "model" "grok-4"}
-          f2 (llm-factory config mock-fsm mock-ix mock-state)]
-      (is (fn? f2)))))
+          f2 (llm-factory config mock-fsm mock-ix mock-state)
+          result (atom nil)]
+      (is (fn? f2))
+      ;; Actually invoke it to verify the registry pattern works end-to-end
+      (f2 {} {"document" "test"} [] (fn [_ctx out] (reset! result out)))
+      (is (= "xai" (get @result "provider"))))))
 
 ;;==============================================================================
 ;; claij.actions Module Tests
@@ -354,15 +370,29 @@
   (get-in @mock-fsm-store [fsm-id version]))
 
 (deftest fsm-action-factory-test
-  (testing "fsm-action-factory returns a factory function"
-    (is (fn? fsm-action-factory)))
+  (testing "fsm-action-factory returns a factory function with action metadata"
+    (is (fn? fsm-action-factory))
+    ;; Verify it has proper action metadata for introspection
+    (is (map? (meta fsm-action-factory)))
+    (is (= "fsm" (-> fsm-action-factory meta :action/name))))
 
-  (testing "factory returns config-time function"
+  (testing "factory returns config-time function that's callable"
     (let [config {"fsm-id" "child-doubler"
                   "success-to" "collect"}
           mock-state {"id" "delegate"}
           f1 (fsm-action-factory config {} {} mock-state)]
-      (is (fn? f1)))))
+      (is (fn? f1))
+      ;; Verify f1 has correct arity (4 args: context, event, trail, handler)
+      ;; by checking it doesn't throw on call - full behavior tested in fsm-action-loads-child-fsm-test
+      (with-redefs [store/fsm-latest-version mock-fsm-latest-version
+                    store/fsm-load-version mock-fsm-load-version]
+        (let [result (promise)]
+          (f1 {:store :mock :id->action child-fsm-actions}
+              {"id" ["x" "delegate"] "value" 1}
+              []
+              (fn [_ctx evt] (deliver result evt)))
+          (is (not= :timeout (deref result 3000 :timeout))
+              "Runtime function should complete"))))))
 
 (deftest fsm-action-loads-child-fsm-test
   (testing "fsm-action loads child FSM from store and runs it"
