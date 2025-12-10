@@ -1,4 +1,5 @@
-(ns claij.retry-test
+(ns claij.llm-test
+  "Tests for LLM integration including EDN parse retry."
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.tools.logging :as log]

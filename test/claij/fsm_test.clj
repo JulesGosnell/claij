@@ -1,37 +1,31 @@
 (ns claij.fsm-test
   (:require
-   [clojure.test :refer [deftest testing is]]
+   [clojure.test :refer [deftest testing is use-fixtures]]
+   [clojure.edn :as edn]
+   [clojure.tools.logging :as log]
+   [malli.core :as m]
+   [malli.registry :as mr]
    [claij.action :refer [def-action]]
+   [claij.actions :as actions]
    [claij.malli :refer [valid-fsm? base-registry]]
    [claij.fsm :refer [state-schema resolve-schema start-fsm llm-action trail->prompts
                       build-fsm-registry validate-event last-event llm-configs
-                      make-prompts]]
+                      make-prompts lift chain run-sync fsm-schemas]]
    [claij.llm :refer [call]]))
 
 ;;------------------------------------------------------------------------------
-;; how do we know when a trail is finished
-;; an action on the terminal state...
-;; can we define an fsm with e.g. start->meeting->stop
-;; can we define an fsm schema ?
-;; the fsm itself should be json and have a schema
-;; think about terminaology for states and transitions - very important to get it right - tense ?
-
-;; TODO:
-;; reintroduce roles as hats
-;; add [sub-]schemas to trail
-;; if [m2 m1] is returned by action and m2s are unique then we could just index-by and look up m2 without needing the oneOf validation... - yippee !
-;; no - an llm will return just the m1 and we will need to do the oneOf validation to know what they meant ? or do e just get them to return [m2 m1]
-;; we could just give them a list of schemas to choose from ...
-;; maybe stick with oneOf stuff for the moment - consider tomorrow
-;; should this be wired together with async channels and all just kick off asynchronously - yes - pass a handler to walk to put trail onto channel
-;; the above is useful for controlled testing but not production
-;; replace original with new impl
-;; integrate an llm
-;; integrate some sort of human postbox - email with a link ?
-;; integrate mcp
-;; integrate repl
-
+;; Test Fixtures
 ;;------------------------------------------------------------------------------
+
+(defn quiet-logging [f]
+  (with-redefs [log/log* (fn [& _])]
+    (f)))
+
+(use-fixtures :each quiet-logging)
+
+;;==============================================================================
+;; Basic FSM Tests
+;;==============================================================================
 
 (deftest fsm-test
 
@@ -98,19 +92,12 @@
     (testing "contains google config"
       (is (contains? llm-configs ["google" "gemini-2.5-flash"]))))
 
-  ;; xition-schema and expand-schema tests removed during Malli migration.
-  ;; These functions produced JSON Schema format and were never used in production.
-  ;; 
-  ;; state-schema now produces Malli :or schemas and is tested via:
-  ;; - string-schema-reference-test (dynamic schema resolution)
-  ;; - claij.fsm.state-schema-test (comprehensive state schema tests)
-  ;; - claij.mcp-test (MCP-specific xition schema tests)
   (testing "placeholder - see other test files for state-schema tests"
     (is true)))
 
-;;------------------------------------------------------------------------------
-;; Actions for context-threading-test
-;;------------------------------------------------------------------------------
+;;==============================================================================
+;; Context Threading Tests
+;;==============================================================================
 
 (def-action ctx-state-a-action
   "Action A - adds cache to context and transitions to state-b."
@@ -126,9 +113,7 @@
   :any
   [_config _fsm _ix _state]
   (fn [context _event _trail handler]
-    ;; Assert cache is present from previous state
     (assert (= {:tools []} (:cache context)) "Cache should be present from state-a")
-    ;; Add more to cache and transition to end
     (handler (assoc context :cache {:tools ["bash" "read_file"]})
              {"id" ["state-b" "end"]})))
 
@@ -137,21 +122,9 @@
   :any
   [_config _fsm _ix _state]
   (fn [context _event trail _handler]
-    ;; Verify final context has accumulated cache
     (assert (= {:tools ["bash" "read_file"]} (:cache context)) "Cache should have accumulated")
-    ;; Deliver [context trail] to promise
     (when-let [p (:fsm/completion-promise context)]
       (deliver p [context trail]))))
-
-;;------------------------------------------------------------------------------
-;; Weather Schema Integration Test
-
-;; weather-schema-test removed during Malli migration.
-;; JSON Schema integration tests with LLMs are superseded by Malli POC tests
-;; in claij.malli-poc-test which demonstrate LLMs understanding Malli schemas.
-
-;;------------------------------------------------------------------------------
-;; Context Threading Test
 
 (deftest context-threading-test
   (testing "Context flows through FSM transitions"
@@ -175,7 +148,6 @@
                                         "end" #'ctx-end-action}}
           {:keys [submit await stop]} (start-fsm initial-context test-fsm)]
 
-      ;; Submit and wait for completion
       (submit {"id" ["start" "state-a"] "input" "test-input"})
 
       (let [result (await 5000)]
@@ -185,13 +157,14 @@
                 final-event (last-event trail)]
             (is (= {"id" ["state-b" "end"]} final-event) "FSM should return final event"))))
 
-      ;; Clean up
       (stop))))
+
+;;==============================================================================
+;; String Schema Reference Tests
+;;==============================================================================
 
 (deftest string-schema-reference-test
   (testing "FSM definition accepts string as schema reference"
-    ;; Step 1: Confirm that string values are valid in schema fields at definition time.
-    ;; This enables dynamic schema lookup at runtime (Step 2).
     (let [fsm-with-string-schema
           {"id" "string-schema-test"
            "schema" {"$schema" "https://json-schema.org/draft/2020-12/schema"
@@ -202,26 +175,22 @@
                      {"id" "end"}]
            "xitions" [{"id" ["start" "llm"]
                        "schema" {:type :string}}
-                      ;; String schema references - to be resolved at runtime
                       {"id" ["llm" "servicing"]
                        "schema" "mcp-request"}
                       {"id" ["servicing" "llm"]
                        "schema" "mcp-response"}
                       {"id" ["llm" "end"]
                        "schema" [:map ["result" :string]]}]}]
-      ;; FSM definition should validate (string is accepted as schema value)
       (is (= "string-schema-test" (get fsm-with-string-schema "id")))
       (is (= "mcp-request" (get-in fsm-with-string-schema ["xitions" 1 "schema"])))
       (is (= "mcp-response" (get-in fsm-with-string-schema ["xitions" 2 "schema"])))
 
-      ;; Verify structure is correct for later runtime processing
       (let [xitions (get fsm-with-string-schema "xitions")
             string-schemas (filter #(string? (get % "schema")) xitions)]
         (is (= 2 (count string-schemas))
             "Should have 2 transitions with string schema references"))))
 
   (testing "valid-fsm? validates FSM with string schemas"
-    ;; Use Malli validation (FSM schema migrated from JSON Schema to Malli)
     (let [test-fsm {"id" "validation-test"
                     "states" [{"id" "a"} {"id" "b"}]
                     "xitions" [{"id" ["a" "b"]
@@ -236,8 +205,7 @@
       (is (= schema (resolve-schema context xition schema)))))
 
   (testing "resolve-schema with string key looks up and calls schema function"
-    (let [;; Schema function that returns a Malli schema based on context
-          my-schema-fn (fn [ctx xition]
+    (let [my-schema-fn (fn [ctx xition]
                          [:map {:closed true}
                           ["tool" [:= (get ctx :selected-tool)]]])
           context {:id->schema {"my-schema" my-schema-fn}
@@ -249,44 +217,36 @@
              resolved))))
 
   (testing "resolve-schema with missing key returns true and logs warning"
-    (let [context {:id->schema {}} ;; Empty - no schema functions
+    (let [context {:id->schema {}}
           xition {"id" ["a" "b"]}
           resolved (resolve-schema context xition "unknown-key")]
       (is (= true resolved)
           "Missing schema key should return true (permissive)")))
 
   (testing "state-schema resolves string schemas in transitions"
-    (let [;; Schema function returns Malli
-          request-schema-fn (fn [ctx xition]
+    (let [request-schema-fn (fn [ctx xition]
                               [:map {:closed true}
                                ["method" [:= "tools/call"]]])
           context {:id->schema {"mcp-request" request-schema-fn}}
           fsm {"id" "test" "version" 0}
           state {"id" "llm"}
-          ;; Mix of string and inline Malli schemas
           xitions [{"id" ["llm" "servicing"] "schema" "mcp-request"}
                    {"id" ["llm" "end"] "schema" :string}]
           result (state-schema context fsm state xitions)]
-      ;; Should be [:or ...] with resolved schemas
       (is (= :or (first result)) "state-schema should return [:or ...]")
       (is (= 2 (dec (count result))) "Should have 2 alternatives")
-      ;; First should be resolved from function
       (is (= [:map {:closed true} ["method" [:= "tools/call"]]]
              (second result)))
-      ;; Second should be passed through
       (is (= :string (nth result 2))))))
 
-;;------------------------------------------------------------------------------
+;;==============================================================================
 ;; Trail Infrastructure Tests
-;; 
-;; These test core FSM infrastructure (trail->prompts, llm-action) 
-;; and should not depend on specific FSMs like code-review-fsm.
+;;==============================================================================
 
-;; Minimal FSM for infrastructure tests
 (def ^:private infra-test-fsm
   "Test FSM using Malli schemas for transitions."
   {"id" "infra-test"
-   "schema" nil ;; No FSM-level schema needed for this test
+   "schema" nil
    "states" [{"id" "processor" "action" "llm"}
              {"id" "end" "action" "end"}]
    "xitions" [{"id" ["start" "processor"]
@@ -300,21 +260,15 @@
 
 (deftest trail->prompts-test
   (testing "trail->prompts assigns role based on source state"
-    (let [;; Audit-style entries - one event per transition
-          ;; Entry 0: from "start" (not LLM) → user
-          ;; Entry 1: from "processor" (LLM) → assistant
-          sample-trail [{:from "start" :to "processor"
+    (let [sample-trail [{:from "start" :to "processor"
                          :event {"id" ["start" "processor"] "input" "test1"}}
                         {:from "processor" :to "end"
                          :event {"id" ["processor" "end"] "result" "done1"}}]
           prompts (trail->prompts {} infra-test-fsm sample-trail)]
-      ;; Should have 2 messages
       (is (= 2 (count prompts)))
-      ;; First: from "start" (no action) → user
       (is (= "user" (get (nth prompts 0) "role")))
       (is (= {"id" ["start" "processor"] "input" "test1"}
              (get-in (nth prompts 0) ["content" 1])))
-      ;; Second: from "processor" (action="llm") → assistant
       (is (= "assistant" (get (nth prompts 1) "role")))
       (is (= {"id" ["processor" "end"] "result" "done1"}
              (get-in (nth prompts 1) ["content" 1])))))
@@ -326,9 +280,7 @@
                          :event {"id" ["processor" "end"] "result" "bad"}
                          :error {:message "Validation failed" :errors [] :attempt 1}}]
           prompts (trail->prompts {} infra-test-fsm sample-trail)]
-      ;; 2 messages: user (from start), user (error feedback)
       (is (= 2 (count prompts)))
-      ;; Error entry always becomes user message
       (is (= "user" (get (nth prompts 1) "role")))
       (is (= "Validation failed" (get-in (nth prompts 1) ["content" 1])))))
 
@@ -343,7 +295,6 @@
 (deftest llm-action-handler-arity-test
   (testing "llm-action calls handler with 2 args (context, event)"
     (let [handler-calls (atom [])
-          ;; Mock handler that records how it was called
           mock-handler (fn [& args]
                          (swap! handler-calls conj args)
                          nil)
@@ -354,16 +305,12 @@
                  "input" "test data"}
           trail []
           context {:test true}
-          ;; Create curried f2 by calling factory with empty config
           action-f2 (llm-action {} fsm ix state)]
-      ;; Call the real llm-action with mocked call
       (with-redefs [call (fn [_provider _model _prompts success-handler & _opts]
-                                        ;; Immediately call success with fake LLM response
-                                        (success-handler {"id" ["processor" "end"]
-                                                          "result" "processed"}))]
+                           (success-handler {"id" ["processor" "end"]
+                                             "result" "processed"}))]
         (try
           (action-f2 context event trail mock-handler)
-          ;; If we get here without exception, check handler was called with 2 args
           (is (= 1 (count @handler-calls)) "handler should be called once")
           (is (= 2 (count (first @handler-calls))) "handler should receive 2 args (context, event)")
           (catch clojure.lang.ArityException e
@@ -399,7 +346,6 @@
 
       (testing "includes trail messages"
         (is (>= (count prompts) 3))
-        ;; Trail messages should be pr-str'd
         (let [trail-prompts (rest prompts)]
           (is (= 2 (count trail-prompts)))))))
 
@@ -408,7 +354,6 @@
           ix {"prompts" []}
           state {"prompts" []}
           trail []
-          ;; Use a known provider/model from llm-configs
           prompts (make-prompts fsm ix state trail "anthropic" "claude-sonnet-4.5")]
 
       (testing "returns prompts"
@@ -424,3 +369,606 @@
       (testing "handles nil prompts gracefully"
         (is (seq prompts))
         (is (= "system" (get (first prompts) "role")))))))
+
+;;==============================================================================
+;; Lift and Chain Tests
+;;==============================================================================
+
+(deftest lift-test
+  (testing "lift creates action with proper metadata"
+    (let [action (lift identity)]
+      (is (fn? action))
+      (is (= "lifted" (-> action meta :action/name)))
+      (is (= :any (-> action meta :action/config-schema)))
+      (is (= :any (-> action meta :action/input-schema)))
+      (is (= :any (-> action meta :action/output-schema)))))
+
+  (testing "lift with custom name"
+    (let [action (lift identity {:name "my-processor"})]
+      (is (= "my-processor" (-> action meta :action/name)))))
+
+  (testing "lifted action transforms event"
+    (let [inc-fn (fn [event]
+                   (-> event
+                       (update "value" inc)
+                       (assoc "id" ["process" "end"])))
+          action (lift inc-fn)
+          f2 (action {} {} {} {})
+          results (atom nil)]
+      (f2 {:test true}
+          {"id" ["start" "process"] "value" 41}
+          []
+          (fn [ctx event] (reset! results {:ctx ctx :event event})))
+      (is (= 42 (get-in @results [:event "value"])))
+      (is (= ["process" "end"] (get-in @results [:event "id"])))
+      (is (= {:test true} (:ctx @results)) "Context should pass through")))
+
+  (testing "lifted action passes context unchanged"
+    (let [action (lift (fn [e] (assoc e "id" ["a" "b"])))
+          f2 (action {} {} {} {})
+          ctx {:foo "bar" :nested {:data 123}}
+          results (atom nil)]
+      (f2 ctx {"input" "data"} [] (fn [c e] (reset! results {:ctx c})))
+      (is (= ctx (:ctx @results))))))
+
+;;------------------------------------------------------------------------------
+;; FSMs for Chain Tests
+;;------------------------------------------------------------------------------
+
+(defn make-identity-fsm []
+  {"id" "identity"
+   "states" [{"id" "process" "action" "pass-through"}
+             {"id" "end" "action" "end"}]
+   "xitions" [{"id" ["start" "process"]
+               "schema" [:map
+                         ["id" [:= ["start" "process"]]]
+                         ["value" :any]]}
+              {"id" ["process" "end"]
+               "schema" [:map
+                         ["id" [:= ["process" "end"]]]
+                         ["value" :any]]}]})
+
+(def pass-through-action
+  (lift (fn [event]
+          (-> event
+              (assoc "id" ["process" "end"])))))
+
+(defn make-inc-fsm []
+  {"id" "increment"
+   "states" [{"id" "process" "action" "increment"}
+             {"id" "end" "action" "end"}]
+   "xitions" [{"id" ["start" "process"]
+               "schema" [:map
+                         ["id" [:= ["start" "process"]]]
+                         ["value" :int]]}
+              {"id" ["process" "end"]
+               "schema" [:map
+                         ["id" [:= ["process" "end"]]]
+                         ["value" :int]]}]})
+
+(def increment-action
+  (lift (fn [event]
+          (-> event
+              (update "value" inc)
+              (assoc "id" ["process" "end"])))
+        {:name "increment"}))
+
+(def-action chain-end-action
+  "End action - delivers completion to promise."
+  :any
+  [_config _fsm _ix _state]
+  (fn [context _event trail _handler]
+    (when-let [p (:fsm/completion-promise context)]
+      (deliver p [context trail]))))
+
+(def chain-test-context
+  {:id->action {"pass-through" pass-through-action
+                "increment" increment-action
+                "end" #'chain-end-action}})
+
+(deftest single-fsm-with-lift-test
+  (testing "Single FSM with lifted action works"
+    (let [fsm (make-identity-fsm)
+          result (run-sync fsm chain-test-context
+                           {"id" ["start" "process"] "value" 42}
+                           5000)]
+      (is (not= :timeout result))
+      (when (not= :timeout result)
+        (let [[_ctx trail] result
+              output (last-event trail)]
+          (is (= 42 (get output "value")))
+          (is (= ["process" "end"] (get output "id")))))))
+
+  (testing "Increment FSM increments value"
+    (let [fsm (make-inc-fsm)
+          result (run-sync fsm chain-test-context
+                           {"id" ["start" "process"] "value" 0}
+                           5000)]
+      (is (not= :timeout result))
+      (when (not= :timeout result)
+        (let [[_ctx trail] result
+              output (last-event trail)]
+          (is (= 1 (get output "value"))))))))
+
+(deftest chain-validation-test
+  (testing "chain requires at least 2 FSMs"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"chain requires at least 2 FSMs"
+                          (chain chain-test-context (make-inc-fsm))))))
+
+(deftest chain-lifecycle-test
+  (testing "chain returns expected interface"
+    (let [fsm (make-inc-fsm)
+          result (chain chain-test-context fsm fsm)]
+      (is (fn? (:start result)))
+      (is (fn? (:stop result)))
+      (is (fn? (:submit result)))
+      (is (fn? (:await result)))))
+
+  (testing "submit before start throws"
+    (let [fsm (make-inc-fsm)
+          {:keys [submit]} (chain chain-test-context fsm fsm)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Chain not started"
+                            (submit {"id" ["start" "process"] "value" 0})))))
+
+  (testing "await before start throws"
+    (let [fsm (make-inc-fsm)
+          {:keys [await]} (chain chain-test-context fsm fsm)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Chain not started"
+                            (await 1000)))))
+
+  (testing "double start throws"
+    (let [fsm (make-inc-fsm)
+          {:keys [start stop]} (chain chain-test-context fsm fsm)]
+      (start)
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Chain already started"
+                              (start)))
+        (finally
+          (stop))))))
+
+(deftest chain-two-fsms-test
+  (testing "Chain of 2 increment FSMs adds 2"
+    (let [fsm (make-inc-fsm)
+          {:keys [start stop submit await]} (chain chain-test-context fsm fsm)]
+      (start)
+      (submit {"id" ["start" "process"] "value" 0})
+      (let [result (await 5000)]
+        (is (not= :timeout result) "Chain should complete")
+        (when (not= :timeout result)
+          (let [[_ctx trail] result
+                output (last-event trail)]
+            (is (= 2 (get output "value")) "Two increments: 0 -> 1 -> 2"))))
+      (stop))))
+
+(deftest chain-three-fsms-test
+  (testing "Chain of 3 increment FSMs adds 3"
+    (let [fsm (make-inc-fsm)
+          {:keys [start stop submit await]} (chain chain-test-context fsm fsm fsm)]
+      (start)
+      (submit {"id" ["start" "process"] "value" 10})
+      (let [result (await 5000)]
+        (is (not= :timeout result) "Chain should complete")
+        (when (not= :timeout result)
+          (let [[_ctx trail] result
+                output (last-event trail)]
+            (is (= 13 (get output "value")) "Three increments: 10 -> 11 -> 12 -> 13"))))
+      (stop))))
+
+(deftest chain-mixed-fsms-test
+  (testing "Chain of identity + increment"
+    (let [id-fsm (make-identity-fsm)
+          inc-fsm (make-inc-fsm)
+          {:keys [start stop submit await]} (chain chain-test-context id-fsm inc-fsm)]
+      (start)
+      (submit {"id" ["start" "process"] "value" 5})
+      (let [result (await 5000)]
+        (is (not= :timeout result))
+        (when (not= :timeout result)
+          (let [[_ctx trail] result
+                output (last-event trail)]
+            (is (= 6 (get output "value")) "Identity preserves, increment adds 1"))))
+      (stop))))
+
+(deftest chain-stop-reverse-order-test
+  (testing "Stop is called without errors"
+    (let [fsm (make-inc-fsm)
+          {:keys [start stop submit await]} (chain chain-test-context fsm fsm)]
+      (start)
+      (submit {"id" ["start" "process"] "value" 0})
+      (await 5000)
+      (is (do (stop) true) "Stop should complete cleanly"))))
+
+(deftest chain-timeout-test
+  (testing "Chain await respects timeout"
+    (let [hanging-fsm {"id" "hanging"
+                       "states" [{"id" "process" "action" "hang"}]
+                       "xitions" [{"id" ["start" "process"]
+                                   "schema" [:map ["id" [:= ["start" "process"]]]]}]}
+          hang-action (lift (fn [_] nil) {:name "hang"})
+          ctx {:id->action {"hang" hang-action}}
+          {:keys [start stop submit await]} (chain ctx hanging-fsm hanging-fsm)]
+      (start)
+      (submit {"id" ["start" "process"]})
+      (let [result (await 100)]
+        (is (= :timeout result) "Should timeout waiting for completion"))
+      (stop))))
+
+;;==============================================================================
+;; Omit Flag Tests
+;;==============================================================================
+
+(def omit-test-fsm
+  {"states"
+   [{"id" "start" "action" "start-action"}
+    {"id" "middle" "action" "middle-action"}
+    {"id" "end" "action" "end-action"}
+    {"id" "final" "action" "final-action"}]
+   "xitions"
+   [{"id" ["start" "middle"]
+     "omit" true
+     "schema" [:map {:closed true}
+               ["id" [:= ["start" "middle"]]]
+               ["data" :string]]}
+    {"id" ["middle" "end"]
+     "schema" [:map {:closed true}
+               ["id" [:= ["middle" "end"]]]
+               ["result" :string]]}
+    {"id" ["end" "final"]
+     "schema" [:map {:closed true}
+               ["id" [:= ["end" "final"]]]
+               ["done" :boolean]]}]})
+
+(def captured-trail-at-middle (atom nil))
+(def captured-trail-at-end (atom nil))
+
+(def-action omit-start-action
+  "Start action - transitions to middle state."
+  :any
+  [_config _fsm _ix _state]
+  (fn [context _event _trail handler]
+    (handler context {"id" ["start" "middle"] "data" "going to middle"})))
+
+(def-action omit-middle-action
+  "Middle action - captures trail and transitions to end."
+  :any
+  [_config _fsm _ix _state]
+  (fn [context _event trail handler]
+    (reset! captured-trail-at-middle trail)
+    (handler context {"id" ["middle" "end"] "result" "finished"})))
+
+(def-action omit-end-action
+  "End action - captures trail and transitions to final."
+  :any
+  [_config _fsm _ix _state]
+  (fn [context _event trail handler]
+    (reset! captured-trail-at-end trail)
+    (handler context {"id" ["end" "final"] "done" true})))
+
+(def-action omit-final-action
+  "Final action - delivers completion promise."
+  :any
+  [_config _fsm _ix _state]
+  (fn [context _event trail _handler]
+    (when-let [p (:fsm/completion-promise context)]
+      (deliver p [context trail]))))
+
+(def omit-test-actions
+  {"start-action" #'omit-start-action
+   "middle-action" #'omit-middle-action
+   "end-action" #'omit-end-action
+   "final-action" #'omit-final-action})
+
+(defn trail-contains-event-id? [trail event-id]
+  (some (fn [{:keys [event]}]
+          (= event-id (get event "id")))
+        trail))
+
+(deftest omit-test
+  (testing "omit=true transition excluded from trail"
+    (reset! captured-trail-at-middle nil)
+    (reset! captured-trail-at-end nil)
+    (let [{:keys [submit await]} (start-fsm {:id->action omit-test-actions} omit-test-fsm)]
+      (submit {"id" ["start" "middle"] "data" "initial"})
+      (let [[_ctx final-trail] (await 5000)]
+        (is (not (trail-contains-event-id? @captured-trail-at-middle ["start" "middle"]))
+            "Trail at middle should NOT contain omitted [start middle]")
+        (is (not (trail-contains-event-id? @captured-trail-at-end ["start" "middle"]))
+            "Trail at end should NOT contain omitted [start middle]")
+        (is (not (trail-contains-event-id? final-trail ["start" "middle"]))
+            "Final trail should NOT contain omitted [start middle]"))))
+
+  (testing "non-omit transition appears when it becomes input to subsequent step"
+    (reset! captured-trail-at-middle nil)
+    (reset! captured-trail-at-end nil)
+    (let [{:keys [submit await]} (start-fsm {:id->action omit-test-actions} omit-test-fsm)]
+      (submit {"id" ["start" "middle"] "data" "initial"})
+      (let [[_ctx final-trail] (await 5000)]
+        (is (not (trail-contains-event-id? @captured-trail-at-middle ["middle" "end"]))
+            "Trail at middle should not yet contain [middle end]")
+        (is (trail-contains-event-id? final-trail ["middle" "end"])
+            "Final trail should contain [middle end] as input to end->final step")
+        (is (trail-contains-event-id? final-trail ["end" "final"])
+            "Final trail should contain [end final]")))))
+
+;;==============================================================================
+;; State Schema Tests
+;;==============================================================================
+
+(def static-schema-fsm
+  {"schema" {"$$id" "static-test-fsm" "type" "object"}
+   "states"
+   [{"id" "choice" "action" "choice-action"}
+    {"id" "option-a" "action" "a-action"}
+    {"id" "option-b" "action" "b-action"}
+    {"id" "option-c" "action" "c-action"}]
+   "xitions"
+   [{"id" ["choice" "option-a"]
+     "schema" [:map {:closed true}
+               ["id" [:= ["choice" "option-a"]]]
+               ["value" :string]]}
+    {"id" ["choice" "option-b"]
+     "schema" [:map {:closed true}
+               ["id" [:= ["choice" "option-b"]]]
+               ["count" :int]]}
+    {"id" ["choice" "option-c"]
+     "schema" [:map {:closed true}
+               ["id" [:= ["choice" "option-c"]]]
+               ["flag" :boolean]]}]})
+
+(def dynamic-schema-fsm
+  {"schema" {"$$id" "dynamic-test-fsm" "type" "object"}
+   "states"
+   [{"id" "router" "action" "router-action"}
+    {"id" "handler-x" "action" "x-action"}
+    {"id" "handler-y" "action" "y-action"}]
+   "xitions"
+   [{"id" ["router" "handler-x"]
+     "schema" "dynamic-schema-x"}
+    {"id" ["router" "handler-y"]
+     "schema" "dynamic-schema-y"}]})
+
+(defn resolve-dynamic-x [_context _xition]
+  [:map {:closed true}
+   ["id" [:= ["router" "handler-x"]]]
+   ["x-data" [:vector :any]]])
+
+(defn resolve-dynamic-y [_context _xition]
+  [:map {:closed true}
+   ["id" [:= ["router" "handler-y"]]]
+   ["y-data" :double]])
+
+(def dynamic-context
+  {:id->schema {"dynamic-schema-x" resolve-dynamic-x
+                "dynamic-schema-y" resolve-dynamic-y}})
+
+(def input-output-schema-fsm
+  {"id" "io-schema-test"
+   "states"
+   [{"id" "processor" "action" "process-action"}
+    {"id" "validator" "action" "validate-action"}
+    {"id" "end" "action" "end"}]
+   "xitions"
+   [{"id" ["start" "processor"]
+     "schema" [:map {:closed true}
+               ["id" [:= ["start" "processor"]]]
+               ["data" :string]]}
+    {"id" ["start" "validator"]
+     "schema" [:map {:closed true}
+               ["id" [:= ["start" "validator"]]]
+               ["payload" :int]]}
+    {"id" ["processor" "validator"]
+     "schema" [:map {:closed true}
+               ["id" [:= ["processor" "validator"]]]
+               ["processed" :boolean]]}
+    {"id" ["processor" "end"]
+     "schema" [:map {:closed true}
+               ["id" [:= ["processor" "end"]]]
+               ["result" :string]]}
+    {"id" ["validator" "end"]
+     "schema" [:map {:closed true}
+               ["id" [:= ["validator" "end"]]]
+               ["valid" :boolean]
+               ["errors" {:optional true} [:vector :string]]]}]})
+
+(deftest state-schema-test
+  (testing "static schemas produce :or with all output transitions"
+    (let [choice-state {"id" "choice" "action" "choice-action"}
+          output-xitions (get static-schema-fsm "xitions")
+          result (state-schema {} static-schema-fsm choice-state output-xitions)]
+
+      (is (= :or (first result)) "Result should be [:or ...]")
+      (is (= 3 (dec (count result))) ":or should have 3 alternatives")
+
+      (let [schemas (rest result)
+            extract-id (fn [schema]
+                         (->> schema
+                              (filter vector?)
+                              (filter #(= "id" (first %)))
+                              first
+                              second
+                              second))
+            ids (map extract-id schemas)]
+        (is (some #(= ["choice" "option-a"] %) ids) "Should include option-a schema")
+        (is (some #(= ["choice" "option-b"] %) ids) "Should include option-b schema")
+        (is (some #(= ["choice" "option-c"] %) ids) "Should include option-c schema"))))
+
+  (testing "dynamic schemas produce :or with resolved schemas"
+    (let [router-state {"id" "router" "action" "router-action"}
+          output-xitions (get dynamic-schema-fsm "xitions")
+          result (state-schema dynamic-context dynamic-schema-fsm router-state output-xitions)]
+
+      (is (= :or (first result)) "Result should be [:or ...]")
+      (is (= 2 (dec (count result))) ":or should have 2 alternatives")
+
+      (let [schemas (rest result)]
+        (is (every? vector? schemas) "All schemas should be resolved vectors, not strings")
+
+        (let [extract-id (fn [schema]
+                           (->> schema
+                                (filter vector?)
+                                (filter #(= "id" (first %)))
+                                first
+                                second
+                                second))
+              ids (map extract-id schemas)]
+          (is (some #(= ["router" "handler-x"] %) ids) "Should include handler-x schema")
+          (is (some #(= ["router" "handler-y"] %) ids) "Should include handler-y schema"))
+
+        (let [has-field? (fn [schema field-name]
+                           (some #(and (vector? %) (= field-name (first %))) schema))
+              x-schema (first (filter #(has-field? % "x-data") schemas))
+              y-schema (first (filter #(has-field? % "y-data") schemas))]
+          (is (some? x-schema) "x schema should have x-data field")
+          (is (some? y-schema) "y schema should have y-data field")))))
+
+  (testing "empty output transitions produce empty :or"
+    (let [result (state-schema {} static-schema-fsm {"id" "terminal"} [])]
+      (is (= [:or] result) "Empty transitions should produce [:or]"))))
+
+(deftest start-fsm-schema-test
+  (testing "start-fsm returns map with :input-schema and :output-schema"
+    (let [pass-action (fn [_config _fsm _ix _state]
+                        (fn [context event _trail handler]
+                          (handler context event)))
+          end-action (fn [_config _fsm _ix _state]
+                       (fn [context _event trail _handler]
+                         (when-let [p (:fsm/completion-promise context)]
+                           (deliver p [context trail]))))
+          context {:id->action {"process-action" pass-action
+                                "validate-action" pass-action
+                                "end" end-action}}
+          result (start-fsm context input-output-schema-fsm)]
+
+      (testing "returns a map"
+        (is (map? result) "start-fsm should return a map"))
+
+      (testing "map contains expected keys"
+        (is (contains? result :submit) "should have :submit")
+        (is (contains? result :await) "should have :await")
+        (is (contains? result :stop) "should have :stop")
+        (is (contains? result :input-schema) "should have :input-schema")
+        (is (contains? result :output-schema) "should have :output-schema"))
+
+      (testing ":input-schema is :or of all transitions FROM start"
+        (let [input-schema (:input-schema result)]
+          (is (= :or (first input-schema)) "input-schema should be [:or ...]")
+          (is (= 2 (dec (count input-schema))) "should have 2 entry transitions")
+
+          (let [extract-id (fn [schema]
+                             (->> schema
+                                  (filter vector?)
+                                  (filter #(= "id" (first %)))
+                                  first
+                                  second
+                                  second))
+                ids (set (map extract-id (rest input-schema)))]
+            (is (contains? ids ["start" "processor"]) "should include start->processor")
+            (is (contains? ids ["start" "validator"]) "should include start->validator"))))
+
+      (testing ":output-schema is :or of all transitions TO end"
+        (let [output-schema (:output-schema result)]
+          (is (= :or (first output-schema)) "output-schema should be [:or ...]")
+          (is (= 2 (dec (count output-schema))) "should have 2 exit transitions")
+
+          (let [extract-id (fn [schema]
+                             (->> schema
+                                  (filter vector?)
+                                  (filter #(= "id" (first %)))
+                                  first
+                                  second
+                                  second))
+                ids (set (map extract-id (rest output-schema)))]
+            (is (contains? ids ["processor" "end"]) "should include processor->end")
+            (is (contains? ids ["validator" "end"]) "should include validator->end"))))
+
+      ((:stop result)))))
+
+(deftest fsm-schemas-test
+  (testing "fsm-schemas extracts schemas without starting FSM"
+    (let [result (fsm-schemas {} input-output-schema-fsm)]
+
+      (testing "returns a map with expected keys"
+        (is (map? result))
+        (is (contains? result :input-schema))
+        (is (contains? result :output-schema)))
+
+      (testing "does NOT contain runtime keys"
+        (is (not (contains? result :submit)) "should not have :submit")
+        (is (not (contains? result :await)) "should not have :await")
+        (is (not (contains? result :stop)) "should not have :stop"))))
+
+  (testing "fsm-schemas with single-arity call (no context)"
+    (let [simple-fsm {"id" "simple"
+                      "states" [{"id" "work" "action" "work-action"}
+                                {"id" "end" "action" "end"}]
+                      "xitions" [{"id" ["start" "work"]
+                                  "schema" [:map ["id" [:= ["start" "work"]]]
+                                            ["input" :string]]}
+                                 {"id" ["work" "end"]
+                                  "schema" [:map ["id" [:= ["work" "end"]]]
+                                            ["output" :int]]}]}
+          result (fsm-schemas simple-fsm)]
+
+      (testing "works without explicit context"
+        (is (= :or (first (:input-schema result))))
+        (is (= :or (first (:output-schema result))))))))
+
+;;==============================================================================
+;; Minimal FSM Integration Test (Long-Running)
+;;==============================================================================
+
+(def minimal-schemas
+  {"input" [:map {:closed true}
+            ["question" :string]]
+   "output" [:map {:closed true}
+             ["id" [:= ["responder" "end"]]]
+             ["answer" :string]
+             ["agree" :boolean]]})
+
+(def minimal-registry
+  (mr/composite-registry base-registry minimal-schemas))
+
+(def minimal-fsm
+  {"id" "minimal-test"
+   "schemas" minimal-schemas
+   "prompts" []
+   "states"
+   [{"id" "responder"
+     "action" "llm"
+     "prompts" []}
+    {"id" "end"
+     "action" "end"}]
+   "xitions"
+   [{"id" ["start" "responder"]
+     "schema" [:ref "input"]}
+    {"id" ["responder" "end"]
+     "schema" [:ref "output"]}]})
+
+(defn test-minimal-fsm []
+  (let [actions {"llm" #'claij.fsm/llm-action "end" #'actions/end-action}
+        context {:id->action actions
+                 :llm/provider "anthropic"
+                 :llm/model "claude-sonnet-4.5"}
+        input {"question" "Is 2 + 2 = 4?"}
+        result (run-sync minimal-fsm context input 60000)]
+    (if (= result :timeout)
+      {:success false :error "Timeout"}
+      (let [[_ctx trail] result
+            last-evt (last-event trail)]
+        (if (m/validate [:ref "output"] last-evt {:registry minimal-registry})
+          {:success true :response last-evt}
+          {:success false :response last-evt :error "Validation failed"})))))
+
+(deftest ^:long-running minimal-fsm-test
+  (testing "Minimal FSM works with POC-identical schemas"
+    (let [{:keys [success response error]} (test-minimal-fsm)]
+      (is success (str "Should succeed. Error: " error " Response: " response))
+      (when success
+        (is (= ["responder" "end"] (get response "id"))
+            "Should have correct transition id")
+        (is (true? (get response "agree"))
+            "Should agree that 2+2=4")))))
