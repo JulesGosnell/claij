@@ -196,7 +196,7 @@
           code "(defn fib [n] (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))"
 
           ;; Use just one LLM for faster test
-          llms [{"provider" "anthropic" "model" "claude-sonnet-4"}]
+          llms [{"provider" "anthropic" "model" "claude-opus-4.5"}]
 
           ;; Minimal concerns for focused review
           concerns ["Performance: Consider algorithmic efficiency"

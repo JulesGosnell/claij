@@ -103,7 +103,7 @@
 
 (deftest def-action-currying-test
   (testing "Factory returns callable runtime function when config is valid"
-    (let [config {"provider" "anthropic" "model" "claude-sonnet-4"}
+    (let [config {"provider" "anthropic" "model" "claude-opus-4.5"}
           f2 (test-llm-action config mock-fsm mock-ix mock-state)
           result (atom nil)]
       (is (fn? f2))
@@ -313,10 +313,10 @@
     (testing "creates context with defaults"
       (let [ctx (make-context {:store :mock-store
                                :provider "anthropic"
-                               :model "claude-sonnet-4"})]
+                               :model "claude-opus-4.5"})]
         (is (= :mock-store (:store ctx)))
         (is (= "anthropic" (:provider ctx)))
-        (is (= "claude-sonnet-4" (:model ctx)))
+        (is (= "claude-opus-4.5" (:model ctx)))
         (is (= default-actions (:id->action ctx)))))
 
     (testing "allows overriding id->action"

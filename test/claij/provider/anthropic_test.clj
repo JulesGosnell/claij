@@ -30,7 +30,7 @@
 
   (testing "System messages are extracted to top-level field"
     (let [result (anthropic/openrouter->anthropic
-                  "claude-sonnet-4"
+                  "claude-opus-4.5"
                   [{"role" "system" "content" "You are helpful"}
                    {"role" "user" "content" "hello"}]
                   "key")]
@@ -39,7 +39,7 @@
 
   (testing "Multiple system messages are combined"
     (let [result (anthropic/openrouter->anthropic
-                  "claude-sonnet-4"
+                  "claude-opus-4.5"
                   [{"role" "system" "content" "First instruction"}
                    {"role" "system" "content" "Second instruction"}
                    {"role" "user" "content" "hello"}]
@@ -48,7 +48,7 @@
 
   (testing "No system field when no system messages"
     (let [result (anthropic/openrouter->anthropic
-                  "claude-sonnet-4"
+                  "claude-opus-4.5"
                   [{"role" "user" "content" "hello"}]
                   "key")]
       (is (nil? (get-in result [:body :system]))))))
