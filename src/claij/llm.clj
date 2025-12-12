@@ -177,36 +177,46 @@
        (try
          ;; Use transform to extract content from provider response
          (let [parsed-response (json->clj (:body r))
-               raw-content (provider->openrouter provider parsed-response)
-               d (strip-md-json raw-content)]
-           (try
-             (let [j (edn/read-string (str/trim d))]
-               (log/info "      [OK] LLM Response: Valid EDN received")
-               (handler j))
-             (catch Exception e
-               (let [retrier (make-retrier max-retries)]
-                 (retrier
-                  retry-count
-                  ;; Retry operation: send error feedback and try again
-                  (fn []
-                    (let [error-msg (str "We could not unmarshal your EDN - it must be badly formed.\n\n"
-                                         "Here is the exception:\n"
-                                         (.getMessage e) "\n\n"
-                                         "Here is your malformed response:\n" d "\n\n"
-                                         "Please try again. Your response should only contain the relevant EDN document.")
-                          retry-prompts (conj (vec prompts) {"role" "user" "content" error-msg})]
-                      (log/warn (str "      [X] EDN Parse Error: " (.getMessage e)))
-                      (log/info (str "      [>>] Sending error feedback to LLM"))
-                      (call provider model retry-prompts handler
-                            {:error error
-                             :retry-count (inc retry-count)
-                             :max-retries max-retries})))
-                  ;; Max retries handler
-                  (fn []
-                    (log/debug (str "Final malformed response: " d))
-                    (when error (error {:error "max-retries-exceeded"
-                                        :raw-response d
-                                        :exception (.getMessage e)}))))))))
+               raw-content (provider->openrouter provider parsed-response)]
+           (if (nil? raw-content)
+             ;; Handle nil content - likely an error response from the provider
+             (do
+               (log/error (str "      [X] LLM returned nil content. Full response: "
+                               (pr-str parsed-response)))
+               (when error
+                 (error {:error "nil-content"
+                         :message "LLM provider returned nil content"
+                         :raw-response parsed-response})))
+             ;; Normal flow - process the content
+             (let [d (strip-md-json raw-content)]
+               (try
+                 (let [j (edn/read-string (str/trim d))]
+                   (log/info "      [OK] LLM Response: Valid EDN received")
+                   (handler j))
+                 (catch Exception e
+                   (let [retrier (make-retrier max-retries)]
+                     (retrier
+                      retry-count
+                      ;; Retry operation: send error feedback and try again
+                      (fn []
+                        (let [error-msg (str "We could not unmarshal your EDN - it must be badly formed.\n\n"
+                                             "Here is the exception:\n"
+                                             (.getMessage e) "\n\n"
+                                             "Here is your malformed response:\n" d "\n\n"
+                                             "Please try again. Your response should only contain the relevant EDN document.")
+                              retry-prompts (conj (vec prompts) {"role" "user" "content" error-msg})]
+                          (log/warn (str "      [X] EDN Parse Error: " (.getMessage e)))
+                          (log/info (str "      [>>] Sending error feedback to LLM"))
+                          (call provider model retry-prompts handler
+                                {:error error
+                                 :retry-count (inc retry-count)
+                                 :max-retries max-retries})))
+                      ;; Max retries handler
+                      (fn []
+                        (log/debug (str "Final malformed response: " d))
+                        (when error (error {:error "max-retries-exceeded"
+                                            :raw-response d
+                                            :exception (.getMessage e)}))))))))))
          (catch Throwable t
            (log/error t "Error processing LLM response"))))
      (fn [exception]
