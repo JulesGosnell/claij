@@ -33,8 +33,9 @@
     (when-let [on-complete (:fsm/on-complete context)]
       (on-complete context trail))
     ;; Deliver to promise if present (for sync/await patterns)
+    ;; Remove the promise from context to avoid circular reference
     (when-let [p (:fsm/completion-promise context)]
-      (deliver p [context trail]))))
+      (deliver p [(dissoc context :fsm/completion-promise) trail]))))
 
 (def-action fork-action
   "Placeholder for FSM forking (NOT IMPLEMENTED)"
