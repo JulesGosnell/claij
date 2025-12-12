@@ -31,7 +31,7 @@
   [["anthropic" "claude-opus-4.5"]
    ["google" "gemini-3-pro-preview"]
    ["openai" "gpt-5.2-pro"]
-   ["x-ai" "grok-3-beta"]
+   ["x-ai" "grok-code-fast-1"]
    ["meta-llama" "llama-4-scout"]])
 
 (def test-timeout-ms

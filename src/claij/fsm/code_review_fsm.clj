@@ -39,7 +39,7 @@
           ["provider" {:description "The LLM provider"}
            [:enum "anthropic" "google" "openai" "x-ai"]]
           ["model" {:description "The specific model to use"}
-           [:enum "claude-opus-4.5" "gemini-3-pro-preview" "gpt-5.2-pro" "grok-3-beta"]]]
+           [:enum "claude-opus-4.5" "gemini-3-pro-preview" "gpt-5.2-pro" "grok-code-fast-1"]]]
 
    ;; List of available LLMs (min 1)
    "llms" [:vector {:min 1 :description "List of available LLMs to choose from"}
@@ -203,7 +203,7 @@
            llms# [{"provider" "anthropic" "model" "claude-opus-4.5"}
                   {"provider" "google" "model" "gemini-3-pro-preview"}
                   {"provider" "openai" "model" "gpt-5.2-pro"}
-                  {"provider" "x-ai" "model" "grok-3-beta"}]
+                  {"provider" "x-ai" "model" "grok-code-fast-1"}]
            ;; Construct entry message with document and llms
            entry-msg# {"id" ["start" "mc"]
                        "document" (str "Please review this code: " ~code-str)
