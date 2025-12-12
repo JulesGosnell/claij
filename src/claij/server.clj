@@ -80,9 +80,9 @@
 
 (def llms
   {"grok" (partial open-router "grok" "x-ai" "grok-code-fast-1" state)
-   "gpt" (partial open-router "gpt" "openai" "gpt-5-codex" state)
+   "gpt" (partial open-router "gpt" "openai" "gpt-5.2-pro" state)
    "claude" (partial open-router "claude" "anthropic" "claude-sonnet-4.5" state)
-   "gemini" (partial open-router "gemini" "google" "gemini-2.5-flash" state)})
+   "gemini" (partial open-router "gemini" "google" "gemini-3-pro-preview" state)})
 
 ;;------------------------------------------------------------------------------
 ;; FSM Registry
