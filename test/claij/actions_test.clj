@@ -160,7 +160,7 @@
 
 (deftest def-action-runtime-execution-test
   (testing "Runtime function executes with closed-over config"
-    (let [config {"provider" "google" "model" "gemini-2.5-flash"}
+    (let [config {"provider" "google" "model" "gemini-3-pro-preview"}
           f2 (test-llm-action config mock-fsm mock-ix mock-state)
           result (atom nil)
           mock-handler (fn [ctx out] (reset! result out))
@@ -169,7 +169,7 @@
           mock-trail []]
       (f2 mock-context mock-event mock-trail mock-handler)
       (is (= "google" (get @result "provider")))
-      (is (= "gemini-2.5-flash" (get @result "model")))
+      (is (= "gemini-3-pro-preview" (get @result "model")))
       (is (= mock-event (get @result "input")))))
 
   (testing "Config-time params are available in runtime function"

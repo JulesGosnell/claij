@@ -674,15 +674,14 @@
                :content "CRITICAL: Be concise in your response to avoid hitting token limits."}]}
 
    ;; OpenAI models - generally work well with standard prompts
-   ["openai" "gpt-4o"] {}
-   ["openai" "gpt-5-codex"] {}
+   ["openai" "gpt-5.2-pro"] {}
 
    ;; xAI models
    ["x-ai" "grok-code-fast-1"] {}
    ["x-ai" "grok-4"] {}
 
    ;; Google models
-   ["google" "gemini-2.5-flash"] {}})
+   ["google" "gemini-3-pro-preview"] {}})
 
 (defn trail->prompts
   "Convert audit trail to LLM conversation prompts.
@@ -816,7 +815,7 @@
           {config-provider "provider" config-model "model"} config
           ;; Precedence: config → event → context → defaults
           provider (or config-provider event-provider (:llm/provider context) "google")
-          model (or config-model event-model (:llm/model context) "gemini-2.5-flash")
+          model (or config-model event-model (:llm/model context) "gemini-3-pro-preview")
 
           ;; Compute output transitions from current state
           output-xitions (filter (fn [{[from _to] "id"}] (= from sid)) xs)
