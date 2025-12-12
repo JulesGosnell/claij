@@ -674,7 +674,7 @@
                :content "CRITICAL: Be concise in your response to avoid hitting token limits."}]}
 
    ;; OpenAI models - generally work well with standard prompts
-   ["openai" "gpt-5.2-pro"] {}
+   ["openai" "gpt-5.1-codex"] {}
 
    ;; xAI models
    ["x-ai" "grok-code-fast-1"] {}
