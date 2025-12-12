@@ -8,13 +8,13 @@
   (testing "Request transform produces correct structure"
     (let [result (openrouter/openrouter->openrouter
                   "anthropic"
-                  "claude-sonnet-4"
+                  "claude-opus-4.5"
                   [{"role" "user" "content" "hello"}]
                   "test-api-key")]
       (is (= "https://openrouter.ai/api/v1/chat/completions" (:url result)))
       (is (= "Bearer test-api-key" (get-in result [:headers "Authorization"])))
       (is (= "application/json" (get-in result [:headers "content-type"])))
-      (is (= "anthropic/claude-sonnet-4" (get-in result [:body :model])))
+      (is (= "anthropic/claude-opus-4.5" (get-in result [:body :model])))
       (is (= [{"role" "user" "content" "hello"}] (get-in result [:body :messages])))))
 
   (testing "Model string combines provider and model"

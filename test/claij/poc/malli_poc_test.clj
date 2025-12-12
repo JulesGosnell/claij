@@ -28,7 +28,7 @@
 
 (def test-providers
   "LLM providers to test. Each must understand Malli schema format."
-  [["anthropic" "claude-sonnet-4"]
+  [["anthropic" "claude-opus-4.5"]
    ["google" "gemini-3-pro-preview"]
    ["openai" "gpt-5.2-pro"]
    ["x-ai" "grok-3-beta"]
@@ -896,7 +896,7 @@ Apply the instruction to modify the FSM and return the modified FSM conforming t
   (run-poc1-all-providers)
 
   ;; Run PoC 1 with single provider
-  (test-poc1-with-provider ["anthropic" "claude-sonnet-4"])
+  (test-poc1-with-provider ["anthropic" "claude-opus-4.5"])
   (test-poc1-with-provider ["google" "gemini-3-pro-preview"])
   (test-poc1-with-provider ["openai" "gpt-5.2-pro"])
 
@@ -904,7 +904,7 @@ Apply the instruction to modify the FSM and return the modified FSM conforming t
   (run-poc2-all-providers)
 
   ;; Run PoC 2 with single provider  
-  (test-poc2-with-provider ["anthropic" "claude-sonnet-4"])
+  (test-poc2-with-provider ["anthropic" "claude-opus-4.5"])
 
   ;; Test schema validation directly
   (m/validate poc1-output-schema
