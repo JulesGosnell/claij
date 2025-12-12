@@ -39,7 +39,7 @@
           ["provider" {:description "The LLM provider"}
            [:enum "anthropic" "google" "openai" "x-ai"]]
           ["model" {:description "The specific model to use"}
-           [:enum "claude-opus-4.5" "gemini-3-pro-preview" "gpt-5.2-pro" "grok-code-fast-1"]]]
+           [:enum "claude-opus-4.5" "gemini-3-pro-preview" "gpt-5.1-codex" "grok-code-fast-1"]]]
 
    ;; List of available LLMs (min 1)
    "llms" [:vector {:min 1 :description "List of available LLMs to choose from"}
@@ -202,7 +202,7 @@
            ;; Available LLMs - must match schema enum exactly
            llms# [{"provider" "anthropic" "model" "claude-opus-4.5"}
                   {"provider" "google" "model" "gemini-3-pro-preview"}
-                  {"provider" "openai" "model" "gpt-5.2-pro"}
+                  {"provider" "openai" "model" "gpt-5.1-codex"}
                   {"provider" "x-ai" "model" "grok-code-fast-1"}]
            ;; Construct entry message with document and llms
            entry-msg# {"id" ["start" "mc"]

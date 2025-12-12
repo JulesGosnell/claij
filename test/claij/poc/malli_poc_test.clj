@@ -30,7 +30,7 @@
   "LLM providers to test. Each must understand Malli schema format."
   [["anthropic" "claude-opus-4.5"]
    ["google" "gemini-3-pro-preview"]
-   ["openai" "gpt-5.2-pro"]
+   ["openai" "gpt-5.1-codex"]
    ["x-ai" "grok-code-fast-1"]
    ["meta-llama" "llama-4-scout"]])
 
@@ -898,7 +898,7 @@ Apply the instruction to modify the FSM and return the modified FSM conforming t
   ;; Run PoC 1 with single provider
   (test-poc1-with-provider ["anthropic" "claude-opus-4.5"])
   (test-poc1-with-provider ["google" "gemini-3-pro-preview"])
-  (test-poc1-with-provider ["openai" "gpt-5.2-pro"])
+  (test-poc1-with-provider ["openai" "gpt-5.1-codex"])
 
   ;; Run PoC 2 with all providers
   (run-poc2-all-providers)

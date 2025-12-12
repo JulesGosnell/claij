@@ -80,7 +80,7 @@
 
 (def llms
   {"grok" (partial open-router "grok" "x-ai" "grok-code-fast-1" state)
-   "gpt" (partial open-router "gpt" "openai" "gpt-5.2-pro" state)
+   "gpt" (partial open-router "gpt" "openai" "gpt-5.1-codex" state)
    "claude" (partial open-router "claude" "anthropic" "claude-sonnet-4.5" state)
    "gemini" (partial open-router "gemini" "google" "gemini-3-pro-preview" state)})
 
