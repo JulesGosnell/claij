@@ -118,6 +118,46 @@ CLAIJ integrates with the Model Context Protocol, allowing LLMs to access extern
 
 ---
 
+## Agentic AI Terminology
+
+CLAIJ implements core concepts from the emerging agentic AI landscape:
+
+### Guardrails
+
+*Safety mechanisms (filters, prompts, fine-tuning, or external checks) that prevent harmful, biased, or off-topic outputs.*
+
+In CLAIJ, guardrails are structural rather than bolted-on:
+
+| Industry Concept | CLAIJ Implementation |
+|-----------------|---------------------|
+| Output filtering | **Malli schemas** constrain LLM responses to valid structure |
+| Conversation boundaries | **FSM transitions** enforce valid conversation flows |
+| Self-correction | **Validation with retry** gives LLMs feedback to fix their own errors |
+| Role constraints | **State-specific prompts** focus each LLM on a single concern |
+
+The philosophy: rather than filtering bad outputs, make bad outputs *structurally impossible*. An LLM that must produce valid EDN matching a schema has far less room to hallucinate.
+
+### Evals
+
+*Benchmarks and tests that measure LLM performance on capabilities (e.g., reasoning, knowledge) and risks (e.g., safety, bias).*
+
+CLAIJ's trail system captures the raw data for comprehensive evals:
+
+| Metric | Source |
+|--------|--------|
+| Validation success rate | First-attempt schema compliance per model |
+| Retry distribution | How many attempts needed for valid output |
+| Token efficiency | Input/output tokens per task type |
+| Latency | Response time per provider/model |
+| Error classification | Schema violations, nil content, API failures |
+| Task-specific quality | For code review: comment relevance, improvement delta |
+
+The vision: a feedback loop where eval data drives model selection. The triage action routes tasks to the model with the best track record for that task type. The system learns which models excel at what.
+
+See [Issue #50](https://github.com/JulesGosnell/claij/issues/50) for the Evals roadmap.
+
+---
+
 ## Working Examples
 
 ### Multi-LLM Code Review
