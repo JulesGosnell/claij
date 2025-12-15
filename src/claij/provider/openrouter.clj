@@ -28,8 +28,8 @@
    This is essentially identity - we're already in the right format.
    
    Args:
-     provider - provider string (e.g., \"anthropic\")
-     model    - model string (e.g., \"claude-sonnet-4\")
+     provider - provider string (e.g., \"anthropic\") or \"openrouter\" for pass-through
+     model    - model string (e.g., \"claude-sonnet-4\" or \"openai/gpt-5.2-chat\" for pass-through)
      messages - [{\"role\" \"user\" \"content\" \"...\"}]
      api-key  - OpenRouter API key
    
@@ -41,7 +41,11 @@
   {:url "https://openrouter.ai/api/v1/chat/completions"
    :headers {"Authorization" (str "Bearer " api-key)
              "content-type" "application/json"}
-   :body {:model (str provider "/" (translate-model model))
+   ;; When provider is "openrouter", model already has provider prefix (e.g., "openai/gpt-5.2-chat")
+   ;; Otherwise, combine provider/model (e.g., "anthropic" + "claude-opus-4.5")
+   :body {:model (if (= provider "openrouter")
+                   (translate-model model)
+                   (str provider "/" (translate-model model)))
           :messages messages}})
 
 ;;------------------------------------------------------------------------------
