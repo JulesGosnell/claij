@@ -84,7 +84,7 @@
           llm-called (atom nil)
           handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
           f2 (triage-action {} {} {"schema" [:map ["fsm-id" :string]]} {})
-          context {:store nil :provider "openai" :model "gpt-5.1-chat"}
+          context {:store nil :provider "openai" :model "gpt-5.2-chat"}
           event {"document" "Please review my code"}
           mock-fsms [{"id" "code-review" "version" 1 "description" "Reviews code"}
                      {"id" "test-gen" "version" 2 "description" "Generates tests"}]]
@@ -101,7 +101,7 @@
 
       (is (some? @llm-called))
       (is (= "openai" (:provider @llm-called)))
-      (is (= "gpt-5.1-chat" (:model @llm-called)))
+      (is (= "gpt-5.2-chat" (:model @llm-called)))
 
       (let [prompt-content (get-in @llm-called [:prompts 0 "content"])]
         (is (str/includes? prompt-content "code-review"))
@@ -162,7 +162,7 @@
                                   "notes" "Please review this fibonacci implementation"
                                   "concerns" ["Performance: Consider algorithmic efficiency"
                                               "Functional style: Use pure functions"]
-                                  "llm" {"provider" "openai" "model" "gpt-5.1-chat"}})
+                                  "llm" {"provider" "openai" "model" "gpt-5.2-chat"}})
 
                 ;; Reviewer responds
                 (= xid ["mc" "reviewer"])

@@ -44,7 +44,7 @@
     (testing "entry validates"
       (let [entry {"id" ["start" "mc"]
                    "document" "test code"
-                   "llms" [{"provider" "openai" "model" "gpt-5.1-chat"}]
+                   "llms" [{"provider" "openai" "model" "gpt-5.2-chat"}]
                    "concerns" ["Simplicity"]}]
         (is (m/validate [:ref "entry"] entry {:registry code-review-registry}))))
 
@@ -53,7 +53,7 @@
                      "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
                      "notes" "Please review"
                      "concerns" ["Simplicity"]
-                     "llm" {"provider" "openai" "model" "gpt-5.1-chat"}}]
+                     "llm" {"provider" "openai" "model" "gpt-5.2-chat"}}]
         (is (m/validate [:ref "request"] request {:registry code-review-registry}))))
 
     (testing "response validates"
@@ -104,7 +104,7 @@
           "Please review this fibonacci code: (defn fib [n] (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))"
 
           llms
-          [{"provider" "openai" "model" "gpt-5.1-chat"}]
+          [{"provider" "openai" "model" "gpt-5.2-chat"}]
 
           ;; Sample concerns for this review
           concerns
@@ -126,7 +126,7 @@
            "notes" "Here's a recursive fibonacci. Please review for improvements."
            "concerns" ["Performance: Avoid reflection, consider algorithmic efficiency"
                        "Functional style: Use pure functions and immutable data"]
-           "llm" {"provider" "openai" "model" "gpt-5.1-chat"}}
+           "llm" {"provider" "openai" "model" "gpt-5.2-chat"}}
 
           response1-data
           {"id" ["reviewer" "mc"]
@@ -142,7 +142,7 @@
                    "text" "(def fib\n  (memoize\n    (fn [n]\n      (if (<= n 1)\n        n\n        (+ (fib (- n 1)) (fib (- n 2)))))))"}
            "notes" "Incorporated memoization. Please review again."
            "concerns" ["Simplicity: Can this be simpler?"]
-           "llm" {"provider" "openai" "model" "gpt-5.1-chat"}}
+           "llm" {"provider" "openai" "model" "gpt-5.2-chat"}}
 
           response2-data
           {"id" ["reviewer" "mc"]
