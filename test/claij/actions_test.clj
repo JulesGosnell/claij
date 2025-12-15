@@ -258,7 +258,8 @@
         (f2 context {"id" ["test" "end"]} trail nil)
         (let [[ctx tr] (deref completion-promise 100 :timeout)]
           (is (not= :timeout ctx))
-          (is (= context ctx))
+          ;; Promise is dissoc'd from delivered context to avoid circular reference
+          (is (= {} ctx))
           (is (= trail tr)))))
 
     (testing "does nothing when no promise in context"
