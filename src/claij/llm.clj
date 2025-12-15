@@ -106,17 +106,11 @@
     (google/google->openrouter response)))
 
 ;;------------------------------------------------------------------------------
-;; OpenAI - only if OPENAI_API_KEY is set
+;; OpenAI - disabled, using OpenRouter fallback for gpt-5.2-chat access
 ;;------------------------------------------------------------------------------
 
-(when-let [api-key (System/getenv "OPENAI_API_KEY")]
-  (defmethod openrouter->provider "openai"
-    [_provider model messages]
-    (openai/openrouter->openai model messages api-key))
-
-  (defmethod provider->openrouter "openai"
-    [_provider response]
-    (openai/openai->openrouter response)))
+;; Direct OpenAI API disabled - gpt-5.2-chat not available on current API tier.
+;; All openai/* calls now route through OpenRouter's :default handler.
 
 ;;------------------------------------------------------------------------------
 ;; xAI (Grok) - only if XAI_API_KEY is set
