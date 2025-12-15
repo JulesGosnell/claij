@@ -22,11 +22,15 @@ YOUR REQUEST:
 
 YOUR RESPONSE - the OUTPUT-DOCUMENT:
 - Must be ONLY valid EDN (no markdown, no backticks, no explanation)
-- Must use string keys like \"id\" not keyword keys like :id
+- Must use STRING KEYS like \"id\" NOT keyword keys like :id
 - The OUTPUT-SCHEMA will offer you a set (possibly only one) of choices/sub-schemas
 - Your OUTPUT-DOCUMENT must conform strictly to one of these - it is a document NOT a schema itself
 - Each sub-schema will contain a discriminator called \"id\". You must include this
 - You must include all non-optional fields with a valid value
+
+STRING KEYS ARE REQUIRED:
+  CORRECT: {\"id\" \"tool_calls\" \"calls\" [...]}
+  WRONG:   {:id \"tool_calls\" :calls [...]}
 
 CRITICAL: Your entire response must be ONLY the EDN data structure. No prose, no explanation, no markdown fences.")
 
