@@ -415,17 +415,26 @@
 (deftest ^:integration mcp-fsm-real-server-test
   (testing "MCP FSM with real MCP server"
     (binding [*use-real-mcp* true]
+      (log/info "=== MCP FSM Real Server Test Starting ===")
+      (log/info "Using real MCP actions:" (keys mcp-actions))
       (let [context {:id->action (get-test-actions)
                      "state" {}}
+            _ (log/info "Context prepared, starting FSM...")
+            start-time (System/currentTimeMillis)
             result (fsm/run-sync mcp-fsm context
                                  {"id" ["start" "starting"]
                                   "document" "integration test"}
-                                 120000)]
+                                 120000)
+            elapsed (- (System/currentTimeMillis) start-time)]
 
+        (log/info "FSM returned after" elapsed "ms with result type:" (type result))
         (is (not= result :timeout) "FSM should complete within timeout")
         (when (not= result :timeout)
           (let [[final-context trail] result]
-            (log/info "Integration test completed with" (count trail) "transitions")))))))
+            (log/info "=== Integration test completed ===")
+            (log/info "Transitions:" (count trail))
+            (log/info "States visited:" (distinct (map #(or (:to %) (get % "to")) trail)))
+            (log/info "Final context keys:" (keys final-context))))))))
 
 (deftest ^:integration mcp-fsm-tool-call-test
   (testing "MCP FSM can make tool calls via llm↔servicing loop"
