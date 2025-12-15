@@ -117,9 +117,9 @@ Respond ONLY with an EDN data structure containing your tool calls. No prose. Ex
     (let [response (call-llm-sync "google" "gemini-3-pro-preview")]
       (validate-tool-calls response))))
 
-(deftest ^:integration ^:flaky test-openai-tool-calling
-  (testing "OpenAI (via OpenRouter) emits valid tool calls from MCP schema (flaky - sometimes returns prose)"
-    (let [response (call-llm-sync "openai" "gpt-5.2-chat")]
+(deftest ^:integration test-openai-tool-calling
+  (testing "OpenAI (via OpenRouter) emits valid tool calls from MCP schema"
+    (let [response (call-llm-sync "openai" "gpt-5.2")]
       (validate-tool-calls response))))
 
 (deftest ^:integration test-grok-tool-calling
@@ -127,11 +127,11 @@ Respond ONLY with an EDN data structure containing your tool calls. No prose. Ex
     (let [response (call-llm-sync "x-ai" "grok-code-fast-1")]
       (validate-tool-calls response))))
 
-(deftest ^:integration ^:flaky test-all-providers-consistent
-  (testing "All providers produce structurally identical responses (flaky - OpenAI sometimes returns prose)"
+(deftest ^:integration test-all-providers-consistent
+  (testing "All providers produce structurally identical responses"
     (let [claude (call-llm-sync "anthropic" "claude-opus-4.5")
           gemini (call-llm-sync "google" "gemini-3-pro-preview")
-          openai (call-llm-sync "openai" "gpt-5.2-chat")
+          openai (call-llm-sync "openai" "gpt-5.2")
           grok (call-llm-sync "x-ai" "grok-code-fast-1")]
 
       ;; All should have same structure

@@ -178,8 +178,8 @@ CRITICAL: Your entire response must be ONLY the EDN data structure. No prose, no
       (is (>= (count (get response "calls")) 3)
           "Should request at least 3 tool calls"))))
 
-(deftest ^:integration ^:flaky test-tuple3-tool-calls-openai
-  (testing "OpenAI emits tool_calls via tuple-3 protocol (flaky - sometimes returns prose)"
+(deftest ^:integration test-tuple3-tool-calls-openai
+  (testing "OpenAI emits tool_calls via tuple-3 protocol"
     (let [input-doc {"task" "Calculate: 42+17, 6*7, 100+23. Then sum all results."
                      "available_tools" [calculator-mcp-tool]}
           messages (make-tuple3-messages
@@ -191,7 +191,7 @@ CRITICAL: Your entire response must be ONLY the EDN data structure. No prose, no
                     TaskInput
                     input-doc
                     OutputSchema)
-          response (call-llm-sync "openai" "gpt-5.2-chat" messages)]
+          response (call-llm-sync "openai" "gpt-5.2" messages)]
       (is (m/validate OutputSchema response)
           (str "Response should match OutputSchema: " (pr-str response)))
       (is (= "tool_calls" (get response "id"))
