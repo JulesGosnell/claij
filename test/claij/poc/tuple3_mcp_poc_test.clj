@@ -22,17 +22,23 @@ YOUR REQUEST:
 
 YOUR RESPONSE - the OUTPUT-DOCUMENT:
 - Must be ONLY valid EDN (no markdown, no backticks, no explanation)
-- Must use STRING KEYS like \"id\" NOT keyword keys like :id
 - The OUTPUT-SCHEMA will offer you a set (possibly only one) of choices/sub-schemas
 - Your OUTPUT-DOCUMENT must conform strictly to one of these - it is a document NOT a schema itself
 - Each sub-schema will contain a discriminator called \"id\". You must include this
 - You must include all non-optional fields with a valid value
 
-STRING KEYS ARE REQUIRED:
-  CORRECT: {\"id\" \"tool_calls\" \"calls\" [...]}
-  WRONG:   {:id \"tool_calls\" :calls [...]}
+STRING KEYS ONLY - KEYWORD KEYS ARE FORBIDDEN:
+- Every map key MUST be a quoted string (begins with \")
+- No key may start with a colon character
+- CORRECT: {\"id\" \"tool_calls\" \"calls\" [...]}
+- WRONG:   {:id \"tool_calls\" :calls [...]}
 
-CRITICAL: Your entire response must be ONLY the EDN data structure. No prose, no explanation, no markdown fences.")
+SELF-CHECK BEFORE RESPONDING:
+- All map keys are strings (every key begins with a quote character)
+- Zero keyword keys (no key starts with a colon)
+- Output matches OUTPUT-SCHEMA and includes \"id\"
+
+CRITICAL: Your entire response must be ONLY the EDN data structure.")
 
 ;;------------------------------------------------------------------------------
 ;; MCP Tool Definition (JSON Schema format, as MCP provides)
