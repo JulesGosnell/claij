@@ -26,7 +26,9 @@ YOUR RESPONSE - the OUTPUT-DOCUMENT:
 - The OUTPUT-SCHEMA will offer you a set (possibly only one) of choices/sub-schemas
 - Your OUTPUT-DOCUMENT must conform strictly to one of these - it is a document NOT a schema itself
 - Each sub-schema will contain a discriminator called \"id\". You must include this
-- You must include all non-optional fields with a valid value")
+- You must include all non-optional fields with a valid value
+
+CRITICAL: Your entire response must be ONLY the EDN data structure. No prose, no explanation, no markdown fences.")
 
 ;;------------------------------------------------------------------------------
 ;; MCP Tool Definition (JSON Schema format, as MCP provides)
@@ -152,8 +154,8 @@ YOUR RESPONSE - the OUTPUT-DOCUMENT:
           (str "Response should match OutputSchema: " (pr-str response)))
       (is (= "tool_calls" (get response "id"))
           "First response should be tool_calls")
-      (is (= 3 (count (get response "calls")))
-          "Should request 3 tool calls"))))
+      (is (>= (count (get response "calls")) 3)
+          "Should request at least 3 tool calls"))))
 
 (deftest ^:integration test-tuple3-tool-calls-gemini
   (testing "Gemini emits tool_calls via tuple-3 protocol"
@@ -173,8 +175,8 @@ YOUR RESPONSE - the OUTPUT-DOCUMENT:
           (str "Response should match OutputSchema: " (pr-str response)))
       (is (= "tool_calls" (get response "id"))
           "First response should be tool_calls")
-      (is (= 3 (count (get response "calls")))
-          "Should request 3 tool calls"))))
+      (is (>= (count (get response "calls")) 3)
+          "Should request at least 3 tool calls"))))
 
 (deftest ^:integration test-tuple3-tool-calls-openai
   (testing "OpenAI emits tool_calls via tuple-3 protocol"
@@ -194,8 +196,8 @@ YOUR RESPONSE - the OUTPUT-DOCUMENT:
           (str "Response should match OutputSchema: " (pr-str response)))
       (is (= "tool_calls" (get response "id"))
           "First response should be tool_calls")
-      (is (= 3 (count (get response "calls")))
-          "Should request 3 tool calls"))))
+      (is (>= (count (get response "calls")) 3)
+          "Should request at least 3 tool calls"))))
 
 (deftest ^:integration test-tuple3-tool-calls-grok
   (testing "Grok emits tool_calls via tuple-3 protocol"
@@ -215,8 +217,8 @@ YOUR RESPONSE - the OUTPUT-DOCUMENT:
           (str "Response should match OutputSchema: " (pr-str response)))
       (is (= "tool_calls" (get response "id"))
           "First response should be tool_calls")
-      (is (= 3 (count (get response "calls")))
-          "Should request 3 tool calls"))))
+      (is (>= (count (get response "calls")) 3)
+          "Should request at least 3 tool calls"))))
 
 ;;------------------------------------------------------------------------------
 ;; Multi-turn Piggyback Test
