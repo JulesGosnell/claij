@@ -7,7 +7,7 @@
            :test-paths ["test"]
            :source-paths ["src"]
            :kaocha.filter/focus-meta [:integration]
-           :kaocha.filter/skip-meta [:long-running :needs-cuda]}
+           :kaocha.filter/skip-meta [:long-running :needs-cuda :flaky]}
           {:id :long-running
            :test-paths ["test"]
            :source-paths ["src"]

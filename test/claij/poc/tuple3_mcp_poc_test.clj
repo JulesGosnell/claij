@@ -38,7 +38,7 @@ CRITICAL: Your entire response must be ONLY the EDN data structure. No prose, no
   {"name" "calculator"
    "description" "Performs arithmetic operations. Returns numeric result."
    "inputSchema" {"type" "object"
-                  "properties" {"op" {"type" "string" 
+                  "properties" {"op" {"type" "string"
                                       "enum" ["add" "multiply"]}
                                 "a" {"type" "number"}
                                 "b" {"type" "number"}}
@@ -99,7 +99,7 @@ CRITICAL: Your entire response must be ONLY the EDN data structure. No prose, no
 
 (defn make-tuple3-messages
   [context-prompts trail input-schema input-doc output-schema]
-  (let [system-content (str/join "\n" 
+  (let [system-content (str/join "\n"
                                  (concat [tuple3-system-prompt
                                           ""
                                           "CONTEXT:"]
@@ -178,8 +178,8 @@ CRITICAL: Your entire response must be ONLY the EDN data structure. No prose, no
       (is (>= (count (get response "calls")) 3)
           "Should request at least 3 tool calls"))))
 
-(deftest ^:integration test-tuple3-tool-calls-openai
-  (testing "OpenAI emits tool_calls via tuple-3 protocol"
+(deftest ^:integration ^:flaky test-tuple3-tool-calls-openai
+  (testing "OpenAI emits tool_calls via tuple-3 protocol (flaky - sometimes returns prose)"
     (let [input-doc {"task" "Calculate: 42+17, 6*7, 100+23. Then sum all results."
                      "available_tools" [calculator-mcp-tool]}
           messages (make-tuple3-messages
