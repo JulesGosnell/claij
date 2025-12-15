@@ -421,10 +421,11 @@
                      "state" {}}
             _ (log/info "Context prepared, starting FSM...")
             start-time (System/currentTimeMillis)
+            ;; Simple task that completes in one LLM turn without tool calls
             result (fsm/run-sync mcp-fsm context
                                  {"id" ["start" "starting"]
-                                  "document" "integration test"}
-                                 120000)
+                                  "document" "Reply with just the number 42. Do not use any tools."}
+                                 90000) ; 90s should be plenty for one LLM call
             elapsed (- (System/currentTimeMillis) start-time)]
 
         (log/info "FSM returned after" elapsed "ms with result type:" (type result))
