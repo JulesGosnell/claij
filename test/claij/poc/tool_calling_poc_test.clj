@@ -27,8 +27,8 @@
   "Schema for calculator tool arguments"
   [:map
    [:op [:enum "add" "multiply"]]
-   [:a :number]
-   [:b :number]])
+   [:a [:or :int :double]]
+   [:b [:or :int :double]]])
 
 (def ToolCall
   "Schema for a single tool call"
