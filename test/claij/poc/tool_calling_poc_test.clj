@@ -7,7 +7,13 @@
    3. Produce output that validates against Malli schema
    
    This demonstrates LLMs have 'muscle memory' for tool calling -
-   no native tool API needed, just schema in prompt."
+   no native tool API needed, just schema in prompt.
+   
+   Tested providers:
+   - Anthropic Claude (native tool API available)
+   - Google Gemini (native tool API available)
+   - OpenAI GPT-5.2 (native tool API available, via OpenRouter)
+   - xAI Grok (NO native tool API - proves schema-in-prompt works!)"
   (:require
    [clojure.test :refer [deftest testing is]]
    [malli.core :as m]
@@ -116,21 +122,29 @@ Respond ONLY with an EDN data structure containing your tool calls. No prose. Ex
     (let [response (call-llm-sync "openai" "gpt-5.2-chat")]
       (validate-tool-calls response))))
 
+(deftest ^:integration test-grok-tool-calling
+  (testing "Grok emits valid tool calls from MCP schema (no native tool API!)"
+    (let [response (call-llm-sync "x-ai" "grok-code-fast-1")]
+      (validate-tool-calls response))))
+
 (deftest ^:integration test-all-providers-consistent
   (testing "All providers produce structurally identical responses"
     (let [claude (call-llm-sync "anthropic" "claude-opus-4.5")
           gemini (call-llm-sync "google" "gemini-3-pro-preview")
-          openai (call-llm-sync "openai" "gpt-5.2-chat")]
+          openai (call-llm-sync "openai" "gpt-5.2-chat")
+          grok (call-llm-sync "x-ai" "grok-code-fast-1")]
 
       ;; All should have same structure
       (is (= (count (:tool_calls claude))
              (count (:tool_calls gemini))
-             (count (:tool_calls openai)))
+             (count (:tool_calls openai))
+             (count (:tool_calls grok)))
           "All providers should return same number of tool calls")
 
       ;; All should use same tool
       (is (every? #(= "calculator" (:name %))
                   (concat (:tool_calls claude)
                           (:tool_calls gemini)
-                          (:tool_calls openai)))
+                          (:tool_calls openai)
+                          (:tool_calls grok)))
           "All tool calls should reference 'calculator' tool"))))
