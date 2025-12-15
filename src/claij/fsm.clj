@@ -810,7 +810,7 @@
    ["model" {:optional true} :string]]
   [config {xs "xitions" :as fsm} ix {sid "id" :as state}]
   (fn [context event trail handler]
-    (log/info ">>> llm-action: entry, trail-count:" (count trail))
+    (log/info "llm-action entry, trail-count:" (count trail))
     (let [{event-provider "provider" event-model "model"} (get event "llm")
           {config-provider "provider" config-model "model"} config
           ;; Precedence: config → event → context → defaults
@@ -843,22 +843,19 @@
                        initial-message
                        prompt-trail)
 
-          prompts (make-prompts fsm ix state full-trail provider model)
-          start-time (System/currentTimeMillis)]
-      (log/info (str ">>> llm-action: calling " provider "/" model " with " (count prompts) " prompts..."))
+          prompts (make-prompts fsm ix state full-trail provider model)]
+      (log/info (str "   Using LLM: " provider "/" model " with " (count prompts) " prompts"))
       (call
        provider model
        prompts
        (fn [output]
-         (let [elapsed (- (System/currentTimeMillis) start-time)]
-           (log/info ">>> llm-action: got output after" elapsed "ms, id:" (get output "id"))
-           (handler context output)))
+         (log/info "llm-action got output, id:" (get output "id") ":" (pr-str output))
+         (handler context output))
        {:schema output-schema
         :error (fn [error-info]
-                 (let [elapsed (- (System/currentTimeMillis) start-time)]
-                   (log/error ">>> llm-action: FAILED after" elapsed "ms:" (pr-str error-info))
-                   ;; Return error to handler so FSM can see it
-                   (handler context {"id" "error" "error" error-info})))}))))
+                 (log/error "LLM action failed:" (pr-str error-info))
+                 ;; Return error to handler so FSM can see it
+                 (handler context {"id" "error" "error" error-info}))}))))
 
 ;; a correlation id threaded through the data
 ;; a monitor or callback on each state
