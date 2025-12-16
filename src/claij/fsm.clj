@@ -8,7 +8,7 @@
    [malli.registry :as mr]
    [claij.util :refer [index-by ->key map-values make-retrier]]
    [claij.malli :refer [def-fsm fsm-registry base-registry expand-refs-for-llm]]
-   [claij.action :refer [def-action]]
+   [claij.action :refer [def-action action-input-schema action-output-schema]]
    [claij.llm :refer [call]]))
 
 ;;------------------------------------------------------------------------------
@@ -152,6 +152,53 @@
         (log/warn "No schema function found for key:" schema)
         true))
     schema))
+
+;;------------------------------------------------------------------------------
+;; State→Action Schema Bridge (Story #62)
+;;------------------------------------------------------------------------------
+;;
+;; These functions bridge from FSM states to action schemas, enabling
+;; schema propagation from action metadata up to transition validation.
+;;
+;; Flow: state["action"] → context[:id->action] → action-var → metadata
+;;------------------------------------------------------------------------------
+
+(defn state-action
+  "Get the action var/fn for a state from context.
+   Returns nil if action not found."
+  [context {action-name "action" :as _state}]
+  (when action-name
+    (get-in context [:id->action action-name])))
+
+(defn state-action-input-schema
+  "Get the input schema for a state's action.
+   
+   Looks up the action in context and extracts :action/input-schema from metadata.
+   Returns :any if:
+   - State has no action
+   - Action not found in context
+   - Action has no input schema declared
+   
+   Works at all three times (config/start/runtime) - same code path."
+  [context state]
+  (if-let [action (state-action context state)]
+    (action-input-schema action)
+    :any))
+
+(defn state-action-output-schema
+  "Get the output schema for a state's action.
+   
+   Looks up the action in context and extracts :action/output-schema from metadata.
+   Returns :any if:
+   - State has no action  
+   - Action not found in context
+   - Action has no output schema declared
+   
+   Works at all three times (config/start/runtime) - same code path."
+  [context state]
+  (if-let [action (state-action context state)]
+    (action-output-schema action)
+    :any))
 
 (defn state-schema
   "Make the schema for a state - to be valid for a state, you must be valid for one (only) of its output xitions.

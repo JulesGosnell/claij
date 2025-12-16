@@ -5,12 +5,14 @@
    [clojure.tools.logging :as log]
    [malli.core :as m]
    [malli.registry :as mr]
-   [claij.action :refer [def-action]]
+   [claij.action :refer [def-action action-input-schema action-output-schema]]
    [claij.actions :as actions]
    [claij.malli :refer [valid-fsm? base-registry]]
    [claij.fsm :refer [state-schema resolve-schema start-fsm llm-action trail->prompts
                       build-fsm-registry validate-event last-event llm-configs
-                      make-prompts lift chain run-sync fsm-schemas]]
+                      make-prompts lift chain run-sync fsm-schemas
+                      ;; Story #62: state→action schema bridge
+                      state-action state-action-input-schema state-action-output-schema]]
    [claij.llm :refer [call]]))
 
 ;;------------------------------------------------------------------------------
@@ -995,3 +997,104 @@
             "Should have correct transition id")
         (is (true? (get response "agree"))
             "Should agree that 2+2=4")))))
+
+;;------------------------------------------------------------------------------
+;; Story #62 Phase 1: State→Action Schema Bridge Tests
+;;------------------------------------------------------------------------------
+
+;; Define test actions with explicit input/output schemas
+(def-action typed-processor-action
+  "Action with explicit input/output schemas"
+  {:config :any
+   :input [:map ["value" :int]]
+   :output [:map ["result" :int] ["id" [:tuple :string :string]]]}
+  [_config _fsm _ix _state]
+  (fn [context event _trail handler]
+    (let [result {:result (* 2 (get event "value"))
+                  :id ["processor" "end"]}]
+      (handler context result))))
+
+(def-action untyped-action
+  "Action with no input/output schemas (legacy form)"
+  [:map] ; config-only schema
+  [_config _fsm _ix _state]
+  (fn [context event _trail handler]
+    (handler context event)))
+
+(deftest state-action-schema-bridge-test
+  (testing "state-action returns action from context"
+    (let [context {:id->action {"typed" #'typed-processor-action
+                                "untyped" #'untyped-action}}
+          state-with-action {"id" "processor" "action" "typed"}
+          state-no-action {"id" "passthrough"}]
+
+      (is (= #'typed-processor-action (state-action context state-with-action))
+          "Should return the action var")
+      (is (nil? (state-action context state-no-action))
+          "Should return nil when state has no action")
+      (is (nil? (state-action context {"id" "x" "action" "missing"}))
+          "Should return nil when action not in context")))
+
+  (testing "state-action-input-schema extracts input schema"
+    (let [context {:id->action {"typed" #'typed-processor-action
+                                "untyped" #'untyped-action}}]
+
+      ;; Typed action has explicit input schema
+      (is (= [:map ["value" :int]]
+             (state-action-input-schema context {"id" "x" "action" "typed"}))
+          "Should return declared input schema")
+
+      ;; Untyped action defaults to :any
+      (is (= :any
+             (state-action-input-schema context {"id" "x" "action" "untyped"}))
+          "Should return :any for legacy actions")
+
+      ;; Missing action returns :any
+      (is (= :any
+             (state-action-input-schema context {"id" "x" "action" "missing"}))
+          "Should return :any when action not found")
+
+      ;; No action key returns :any
+      (is (= :any
+             (state-action-input-schema context {"id" "x"}))
+          "Should return :any when state has no action")))
+
+  (testing "state-action-output-schema extracts output schema"
+    (let [context {:id->action {"typed" #'typed-processor-action
+                                "untyped" #'untyped-action}}]
+
+      ;; Typed action has explicit output schema
+      (is (= [:map ["result" :int] ["id" [:tuple :string :string]]]
+             (state-action-output-schema context {"id" "x" "action" "typed"}))
+          "Should return declared output schema")
+
+      ;; Untyped action defaults to :any
+      (is (= :any
+             (state-action-output-schema context {"id" "x" "action" "untyped"}))
+          "Should return :any for legacy actions")
+
+      ;; Missing action returns :any
+      (is (= :any
+             (state-action-output-schema context {"id" "x" "action" "missing"}))
+          "Should return :any when action not found")))
+
+  (testing "same code path works at all three times"
+    ;; The functions work identically regardless of when called
+    ;; because they only depend on what's in context
+    (let [config-ctx {} ; Empty context at config time
+          start-ctx {:id->action {"typed" #'typed-processor-action}} ; Populated at start
+          runtime-ctx {:id->action {"typed" #'typed-processor-action}
+                       :extra "runtime-data"} ; Additional runtime state
+          state {"id" "x" "action" "typed"}]
+
+      ;; Config time: no actions yet
+      (is (= :any (state-action-input-schema config-ctx state))
+          "Config time returns :any (no actions)")
+
+      ;; Start time: actions available
+      (is (= [:map ["value" :int]] (state-action-input-schema start-ctx state))
+          "Start time returns declared schema")
+
+      ;; Runtime: same result (extra context doesn't affect lookup)
+      (is (= [:map ["value" :int]] (state-action-input-schema runtime-ctx state))
+          "Runtime returns declared schema"))))
