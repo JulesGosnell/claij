@@ -8,7 +8,7 @@
    The correlated bridge tracks in-flight requests and matches responses
    by their 'id' field, supporting out-of-order responses per MCP spec."
   (:require
-   [clojure.core.async :refer [go-loop <! >! >!! close! chan]]
+   [clojure.core.async :refer [go-loop <! >! >!! close! chan sliding-buffer]]
    [clojure.java.process :refer [start stdin stdout]]
    [clojure.java.io :refer [reader writer]]
    [clojure.data.json :refer [write-str read-str]]))
@@ -78,10 +78,13 @@
   [config]
   (let [pending (atom {})
         ;; Internal channels to the actual process
+        ;; Use sliding buffer for raw-output to handle notification floods
+        ;; MCP servers emit many list_changed notifications at startup
         raw-input (chan 100)
-        raw-output (chan 100)
+        raw-output (chan (sliding-buffer 1000))
         ;; External channel for uncorrelated messages (notifications)
-        notification-chan (chan 100)
+        ;; Use sliding buffer to prevent blocking on notification floods
+        notification-chan (chan (sliding-buffer 100))
         ;; Start the underlying bridge
         stop-fn (start-mcp-bridge config raw-input raw-output)
 

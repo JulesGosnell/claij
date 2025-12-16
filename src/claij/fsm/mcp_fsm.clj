@@ -97,8 +97,9 @@
                                  :id->schema {"mcp-request-xition" mcp-request-xition-schema-fn
                                               "mcp-response-xition" mcp-response-xition-schema-fn})
           ;; Send initialize request and wait for response
+          ;; MCP servers can take time to start (JVM warmup, notifications flood)
           init-request (assoc initialise-request "id" 0)
-          response (send-and-wait mcp-bridge init-request 5000)]
+          response (send-and-wait mcp-bridge init-request 30000)]
       ;; Drain any notifications that arrived during init
       (drain-notifications mcp-bridge)
       (handler
@@ -179,11 +180,16 @@
               ;; Normal response
               (handler context {"id" ["servicing" "caching"] "message" response}))))
 
-        ;; From initing - send initialized notification
+        ;; From initing - send initialized notification (fire and forget)
         (= from "initing")
-        (let [response (send-and-wait bridge m 5000)]
+        (do
+          ;; Send notification (no response expected)
+          (client/send-notification bridge
+                                    (get m :method)
+                                    (get m :params {}))
           (drain-notifications bridge)
-          (handler context {"id" ["servicing" "caching"] "message" response}))
+          ;; Go directly to caching
+          (handler context {"id" ["servicing" "caching"] "message" {}}))
 
         ;; Other - timeout/go to llm
         :else
