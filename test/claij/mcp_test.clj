@@ -48,6 +48,8 @@
                                         make-response-envelope-schema
                                         ;; Story #64 Phase 2: runtime resolution
                                         find-tool-in-cache
+                                        mcp-tool-request-schema-fn
+                                        mcp-tool-response-schema-fn
                                         resolve-mcp-tool-input-schema
                                         resolve-mcp-tool-output-schema
                                         resolve-mcp-request-schema
@@ -662,6 +664,93 @@
           schema (resolve-mcp-response-schema context "any_tool")]
       ;; Should still produce valid envelope
       (is (= :map (first schema))))))
+
+;;------------------------------------------------------------------------------
+;; Story #64 Phase 3: FSM integration tests
+;;------------------------------------------------------------------------------
+;; These tests verify that schema functions work when called via FSM's
+;; resolve-schema mechanism (string key -> :id->schema lookup -> (fn context xition))
+
+(deftest mcp-tool-schema-fn-integration-test
+  (testing "mcp-tool-request-schema-fn works at config time (no cache)"
+    ;; Config time: No cache, no tool-name - returns envelope + :any
+    (let [context {} ; No "state" with cache
+          xition {"id" ["state-a" "state-b"]} ; No tool-name
+          schema (mcp-tool-request-schema-fn context xition)]
+      (is (= :map (first schema)) "Should return a map schema")
+      ;; Should accept any valid JSON-RPC request
+      (is (malli-valid? schema
+                        {"jsonrpc" "2.0" "id" 1 "method" "tools/call" "params" {"anything" "goes"}})
+          "Config-time schema should accept any params")))
+
+  (testing "mcp-tool-request-schema-fn works at runtime (with cache + tool-name)"
+    ;; Runtime: Cache available, tool-name in xition - returns typed schema
+    (let [context {"state" test-tool-cache}
+          xition {"id" ["state-a" "state-b"] "tool-name" "clojure_eval"}
+          schema (mcp-tool-request-schema-fn context xition)]
+      (is (= :map (first schema)) "Should return a map schema")
+      ;; Should validate tool-specific params
+      (is (malli-valid? schema
+                        {"jsonrpc" "2.0" "id" 1 "method" "tools/call"
+                         "params" {"name" "clojure_eval" "arguments" {"code" "(+ 1 1)"}}})
+          "Runtime schema should accept valid tool call")
+      ;; Wrong tool should fail (if schema is specific enough)
+      (is (not (malli-valid? schema
+                             {"jsonrpc" "2.0" "id" 1 "method" "tools/call"
+                              "params" {"name" "wrong_tool" "arguments" {"code" "x"}}}))
+          "Runtime schema should reject wrong tool name")))
+
+  (testing "mcp-tool-response-schema-fn always validates tool-response format"
+    ;; Response schema always uses tool-response format per MCP spec
+    ;; (not :any, because MCP defines the response structure)
+    (let [context {}
+          xition {"id" ["state-a" "state-b"]}
+          schema (mcp-tool-response-schema-fn context xition)]
+      (is (= :map (first schema)) "Should return a map schema")
+      ;; Must match tool-response format
+      (is (malli-valid? schema
+                        {"jsonrpc" "2.0" "id" 1
+                         "result" {"content" [{"type" "text" "text" "output"}]}})
+          "Schema should accept valid tool-response format")))
+
+  (testing "mcp-tool-response-schema-fn works at runtime (same behavior)"
+    ;; Response schema is the same regardless of cache (MCP defines it)
+    (let [context {"state" test-tool-cache}
+          xition {"id" ["state-a" "state-b"] "tool-name" "clojure_eval"}
+          schema (mcp-tool-response-schema-fn context xition)]
+      (is (= :map (first schema)) "Should return a map schema")
+      ;; Should validate tool-response format
+      (is (malli-valid? schema
+                        {"jsonrpc" "2.0" "id" 1
+                         "result" {"content" [{"type" "text" "text" "result"}]}})
+          "Runtime schema should accept valid tool response")))
+
+  (testing "same code path at all three times"
+    ;; The key insight: these functions work identically regardless of when called
+    ;; The difference is only what data is available in context/xition
+    (let [config-ctx {}
+          start-ctx {"state" {}} ; Empty cache
+          runtime-ctx {"state" test-tool-cache}
+
+          xition-no-tool {"id" ["a" "b"]}
+          xition-with-tool {"id" ["a" "b"] "tool-name" "bash"}
+
+          ;; All should return valid schemas
+          s1 (mcp-tool-request-schema-fn config-ctx xition-no-tool)
+          s2 (mcp-tool-request-schema-fn start-ctx xition-no-tool)
+          s3 (mcp-tool-request-schema-fn runtime-ctx xition-with-tool)]
+
+      ;; All produce map schemas
+      (is (every? #(= :map (first %)) [s1 s2 s3])
+          "All contexts should produce map schemas")
+
+      ;; The runtime schema should be more specific (closed with tool name)
+      ;; s1 and s2 should be equivalent (both have :any params)
+      ;; s3 should be specific to "bash" tool
+      (is (malli-valid? s3
+                        {"jsonrpc" "2.0" "id" 1 "method" "tools/call"
+                         "params" {"name" "bash" "arguments" {"command" "ls"}}})
+          "Runtime schema specific to bash tool"))))
 
 ;;------------------------------------------------------------------------------
 ;; Integration test
