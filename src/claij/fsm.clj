@@ -132,27 +132,6 @@
 ;; Schema Utilities
 ;;------------------------------------------------------------------------------
 
-(defn resolve-schema
-  "Resolve a transition schema, supporting dynamic schema generation.
-   
-   If schema is a string, looks up (get-in context [:id->schema schema-key])
-   to get a schema function, then calls (schema-fn context xition).
-   
-   If schema is a map (or other), returns it unchanged.
-   
-   NOTE: Future optimization opportunity - when we have the event and the
-   resolved schema is a Malli :or, we could narrow it further based on
-   event content. Currently we only narrow to the selected transition,
-   not within a transition's schema."
-  [context xition schema]
-  (if (string? schema)
-    (if-let [schema-fn (get-in context [:id->schema schema])]
-      (schema-fn context xition)
-      (do
-        (log/warn "No schema function found for key:" schema)
-        true))
-    schema))
-
 ;;------------------------------------------------------------------------------
 ;; State→Action Schema Bridge (Story #62)
 ;;------------------------------------------------------------------------------
@@ -161,6 +140,8 @@
 ;; schema propagation from action metadata up to transition validation.
 ;;
 ;; Flow: state["action"] → context[:id->action] → action-var → metadata
+;;
+;; NOTE: These must be defined BEFORE resolve-schema since it uses them.
 ;;------------------------------------------------------------------------------
 
 (defn state-action
@@ -200,33 +181,52 @@
     (action-output-schema action)
     :any))
 
-(defn resolve-schema-with-fallback
-  "Resolve a transition schema with fallback to action schema.
+(defn resolve-schema
+  "Resolve a transition schema, supporting dynamic schema generation and fallback.
    
-   If the transition has an explicit schema, resolves it via resolve-schema.
-   If the transition has no schema (nil), falls back to the state's action schema
-   based on direction:
-   - :input  → state-action-input-schema
-   - :output → state-action-output-schema
+   Resolution order:
+   1. If schema is a string, looks up (get-in context [:id->schema schema-key])
+      to get a schema function, then calls (schema-fn context xition).
+   2. If schema is nil and state+direction provided, falls back to action schema.
+   3. Otherwise returns schema unchanged (or true if nil with no fallback).
    
    Parameters:
-   - context: FSM context (with :id->action, :id->schema)
-   - xition: The transition map
-   - schema: The transition's raw schema (may be nil)
-   - direction: :input or :output
-   - state: The state map (for action schema lookup)
+   - context: FSM context with :id->schema and :id->action
+   - xition: The transition being resolved
+   - schema: The schema to resolve (string, nil, or Malli schema)
+   - state: (optional) State for action schema fallback
+   - direction: (optional) :input or :output for fallback direction
    
-   Returns resolved Malli schema, or :any if nothing found."
-  [context xition schema direction state]
-  (if (some? schema)
-    ;; Explicit schema - resolve it normally
-    (resolve-schema context xition schema)
-    ;; No schema - fall back to action schema based on direction
-    (case direction
-      :input (state-action-input-schema context state)
-      :output (state-action-output-schema context state)
-      ;; Unknown direction - return :any
-      :any)))
+   NOTE: Future optimization opportunity - when we have the event and the
+   resolved schema is a Malli :or, we could narrow it further based on
+   event content. Currently we only narrow to the selected transition,
+   not within a transition's schema."
+  ([context xition schema]
+   (resolve-schema context xition schema nil nil))
+  ([context xition schema state direction]
+   (cond
+     ;; String schema -> dynamic lookup
+     (string? schema)
+     (if-let [schema-fn (get-in context [:id->schema schema])]
+       (schema-fn context xition)
+       (do
+         (log/warn "No schema function found for key:" schema)
+         true))
+
+     ;; Nil schema with state+direction -> fallback to action schema
+     (and (nil? schema) state direction)
+     (case direction
+       :input (state-action-input-schema context state)
+       :output (state-action-output-schema context state)
+       :any)
+
+     ;; Nil schema without fallback -> permissive
+     (nil? schema)
+     true
+
+     ;; Everything else (Malli schema) -> return as-is
+     :else
+     schema)))
 
 (defn state-schema
   "Make the schema for a state - to be valid for a state, you must be valid for one (only) of its output xitions.
