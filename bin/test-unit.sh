@@ -25,6 +25,7 @@ ARGS=""
 for arg in "$@"; do
     if [ "$arg" = "--debug" ]; then
         DEBUG_OPTS="--no-capture-output"
+        export DEBUG=1
     else
         ARGS="$ARGS $arg"
     fi

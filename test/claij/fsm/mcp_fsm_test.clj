@@ -472,9 +472,13 @@
 ;; Test Fixtures
 ;;==============================================================================
 
-(defn quiet-logging [f]
-  (with-redefs [log/log* (fn [& _])]
-    (f)))
+(defn quiet-logging
+  "Suppress logging during tests unless DEBUG env var is set."
+  [f]
+  (if (System/getenv "DEBUG")
+    (f)
+    (with-redefs [log/log* (fn [& _])]
+      (f))))
 
 (use-fixtures :each quiet-logging)
 
