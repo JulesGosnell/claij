@@ -1,8 +1,9 @@
 (ns claij.mcp.bridge-test
   (:require
    [clojure.test :refer [deftest is testing]]
-   [clojure.core.async :refer [chan go-loop <! >!! <!! timeout]]
-   [claij.mcp.bridge :refer [start-process-bridge json-string? start-mcp-bridge]]))
+   [clojure.core.async :refer [chan go-loop <! >!! <!! timeout alts!!]]
+   [clojure.data.json :as json]
+   [claij.mcp.bridge :as bridge :refer [start-process-bridge json-string? start-mcp-bridge]]))
 
 (deftest bridge-test
 
@@ -104,3 +105,151 @@
       (is (thrown? IllegalArgumentException
                    (start-mcp-bridge {"command" "bash" "args" [] "transport" "http"} (chan) (chan)))
           "Unsupported transport should throw"))))
+
+;; =============================================================================
+;; ID Correlation Tests
+;; =============================================================================
+
+(defn mock-bridge
+  "Creates a mock bridge for testing correlation logic."
+  []
+  {:pending (atom {})
+   :input-chan (chan 100)
+   :output-chan (chan 100)
+   :stop (fn [] nil)})
+
+(deftest pending-count-test
+  (testing "pending-count returns correct count"
+    (let [bridge (mock-bridge)]
+      (is (= 0 (bridge/pending-count bridge)))
+
+      ;; Manually add to pending
+      (swap! (:pending bridge) assoc 1 {:promise (promise) :timestamp 0})
+      (is (= 1 (bridge/pending-count bridge)))
+
+      (swap! (:pending bridge) assoc 2 {:promise (promise) :timestamp 0})
+      (is (= 2 (bridge/pending-count bridge)))
+
+      (swap! (:pending bridge) dissoc 1)
+      (is (= 1 (bridge/pending-count bridge))))))
+
+(deftest send-request-tracking-test
+  (testing "send-request adds to pending"
+    (let [bridge (mock-bridge)
+          request {"id" "test-123" "method" "tools/call"}]
+      (is (= 0 (bridge/pending-count bridge)))
+
+      (bridge/send-request bridge request)
+
+      (is (= 1 (bridge/pending-count bridge)))
+      (is (contains? @(:pending bridge) "test-123"))
+      (is (= request (get-in @(:pending bridge) ["test-123" :request])))))
+
+  (testing "send-request throws without id"
+    (let [bridge (mock-bridge)
+          request {"method" "tools/call"}]
+      (is (thrown? IllegalArgumentException
+                   (bridge/send-request bridge request))))))
+
+(deftest send-batch-tracking-test
+  (testing "send-batch tracks all requests"
+    (let [bridge (mock-bridge)
+          requests [{"id" "req-1" "method" "tools/call"}
+                    {"id" "req-2" "method" "tools/call"}
+                    {"id" "req-3" "method" "tools/call"}]]
+      (is (= 0 (bridge/pending-count bridge)))
+
+      (let [promises (bridge/send-batch bridge requests)]
+        (is (= 3 (count promises)))
+        (is (= 3 (bridge/pending-count bridge)))
+        (is (every? #(contains? promises %) ["req-1" "req-2" "req-3"]))))))
+
+(deftest await-response-timeout-test
+  (testing "await-response returns timeout error on timeout"
+    (let [p (promise)
+          result (bridge/await-response p "test-id" 50)]
+      (is (= "test-id" (get result "id")))
+      (is (= "timeout" (get-in result ["error" "message"])))))
+
+  (testing "await-response returns value when delivered"
+    (let [p (promise)
+          response {"id" "test-id" "result" {"value" 42}}
+          _ (future (Thread/sleep 10) (deliver p response))
+          result (bridge/await-response p "test-id" 1000)]
+      (is (= response result)))))
+
+(deftest await-responses-test
+  (testing "await-responses waits for all with shared deadline"
+    (let [p1 (promise)
+          p2 (promise)
+          p3 (promise)
+          promises {"id-1" p1 "id-2" p2 "id-3" p3}
+
+          ;; Deliver some responses
+          _ (deliver p1 {"id" "id-1" "result" "one"})
+          _ (deliver p2 {"id" "id-2" "result" "two"})
+          ;; p3 will timeout
+
+          results (bridge/await-responses promises 100)]
+
+      (is (= {"id" "id-1" "result" "one"} (get results "id-1")))
+      (is (= {"id" "id-2" "result" "two"} (get results "id-2")))
+      (is (= "timeout" (get-in results ["id-3" "error" "message"])))))
+
+  (testing "await-responses handles all delivered"
+    (let [p1 (promise)
+          p2 (promise)
+          promises {"a" p1 "b" p2}
+          _ (deliver p1 {"id" "a" "result" 1})
+          _ (deliver p2 {"id" "b" "result" 2})
+          results (bridge/await-responses promises 1000)]
+      (is (= {"id" "a" "result" 1} (get results "a")))
+      (is (= {"id" "b" "result" 2} (get results "b"))))))
+
+(deftest clear-stale-requests-test
+  (testing "clear-stale-requests removes old requests"
+    (let [bridge (mock-bridge)
+          now (System/currentTimeMillis)
+          old-time (- now 10000)
+          new-time (- now 100)]
+
+      (swap! (:pending bridge) assoc
+             "old-1" {:promise (promise) :timestamp old-time :request {"id" "old-1"}}
+             "old-2" {:promise (promise) :timestamp old-time :request {"id" "old-2"}}
+             "new-1" {:promise (promise) :timestamp new-time :request {"id" "new-1"}})
+
+      (is (= 3 (bridge/pending-count bridge)))
+
+      (let [cleared (bridge/clear-stale-requests bridge 5000)]
+        (is (= 2 cleared))
+        (is (= 1 (bridge/pending-count bridge)))
+        (is (contains? @(:pending bridge) "new-1"))
+        (is (not (contains? @(:pending bridge) "old-1")))
+        (is (not (contains? @(:pending bridge) "old-2"))))))
+
+  (testing "clear-stale-requests delivers error to stale promises"
+    (let [bridge (mock-bridge)
+          old-promise (promise)
+          old-time (- (System/currentTimeMillis) 10000)]
+
+      (swap! (:pending bridge) assoc
+             "stale" {:promise old-promise :timestamp old-time :request {"id" "stale"}})
+
+      (bridge/clear-stale-requests bridge 5000)
+
+      (is (realized? old-promise))
+      (is (= "stale" (get-in @old-promise ["error" "message"]))))))
+
+(deftest send-request-writes-to-channel-test
+  (testing "send-request writes JSON to input channel"
+    (let [bridge (mock-bridge)
+          request {"id" "chan-test" "method" "test/method" "params" {"x" 1}}]
+
+      (bridge/send-request bridge request)
+
+      (let [[msg _] (alts!! [(:input-chan bridge) (timeout 100)])]
+        (is (some? msg))
+        (is (string? msg))
+        (let [parsed (json/read-str msg)]
+          (is (= "chan-test" (get parsed "id")))
+          (is (= "test/method" (get parsed "method"))))))))
