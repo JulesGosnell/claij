@@ -13,7 +13,49 @@ This skill defines the standard workflow for developing CLAIJ features using Git
 - Status labels: `status:todo`, `status:doing`, `status:done`
 - CI/CD pipeline configured (GitHub Actions)
 - DEV environment on Fly.io for sanity testing
-- Commit message convention: `#<issue> [<task>]: <description>`
+- Commit message convention: `#<issue> [Phase N]: <description>`
+
+---
+
+## Work Hierarchy
+
+Stories are decomposed into a two-level hierarchy:
+
+```
+Story #53: Batched MCP Tool Execution
+├── Phase 1: Reorganize (no behavior change)
+│   ├── Task 1.1: Create mcp/protocol.clj
+│   ├── Task 1.2: Create mcp/cache.clj
+│   ├── Task 1.3: Create mcp/schema.clj
+│   └── Task 1.4: Delete old files, update imports
+│
+├── Phase 2: Add ID correlation to bridge
+│   ├── Task 2.1: Add pending atom
+│   ├── Task 2.2: Implement send-batch
+│   └── Task 2.3: Implement await-responses
+│
+└── Phase 3: Create high-level client API
+    ├── Task 3.1: Create call-tools function
+    └── Task 3.2: Add protocol helpers
+```
+
+### Hierarchy Definitions
+
+| Level | Scope | Commit? | Test? |
+|-------|-------|---------|-------|
+| **Story** | Complete feature/fix | Final commit on completion | CI + DEV validation |
+| **Phase** | Logical grouping of related tasks | YES - after phase tests pass | Unit tests at end of phase |
+| **Task** | Single discrete change | NO - accumulate within phase | May test incrementally |
+
+### Commit Cadence
+
+1. Execute all tasks within a phase
+2. Run unit tests for the phase
+3. If tests pass → commit with `#<issue> [Phase N]: <description>`
+4. If tests fail → fix issues, re-run tests, then commit
+5. Move to next phase
+
+This gives meaningful atomic commits (one per phase) while avoiding excessive commit noise (one per task).
 
 ---
 
@@ -110,67 +152,64 @@ Phase.Task - e.g., 1.1, 1.2, 2.1, 3.1
 
 ---
 
-### Phase 4: Task Execution (Loop)
+### Workflow Step 4: Phase Execution (Loop)
 
 **Actor**: Claude
 
-**For each task in order**:
+**For each phase in order**:
 
-#### 4.1 Plan the Task
-1. Read task description from issue
-2. Identify files to create/modify/delete
-3. Identify tests needed (TDD approach)
+#### 4.1 Plan the Phase
+1. Read phase description and all its tasks from issue
+2. Identify files to create/modify/delete across all tasks
+3. Identify tests needed for the phase
 
-#### 4.2 Write Tests First (TDD)
-1. Write failing test(s) for the task
-2. Run tests to confirm they fail
-3. Commit test with message: `#<issue> [<task>]: Add test for <feature>`
+#### 4.2 Execute Tasks
+For each task in the phase:
+1. Implement the task
+2. Optionally verify with REPL or quick tests
+3. Check off task in issue: `- [ ]` → `- [x]`
 
-#### 4.3 Implement
-1. Write minimal code to pass tests
-2. Run tests to confirm they pass
-3. Refactor if needed (tests should still pass)
+Do NOT commit after each task - accumulate changes for phase commit.
 
-#### 4.4 Commit
+#### 4.3 Run Phase Unit Tests
+1. Run unit tests covering the phase's functionality
+2. Use REPL for quick verification when full test suite is slow
+3. If tests fail → fix issues → re-run tests
+
+#### 4.4 Commit Phase
+Only after tests pass:
+
 **Commit Message Format**:
 ```
-#<issue> [<task>]: <imperative description>
+#<issue> [Phase N]: <imperative description>
 
 <optional body with context>
 ```
 
 **Examples**:
 ```
-#53 [1.1]: Create mcp/protocol.clj with message construction
+#53 [Phase 1]: Reorganize MCP code into focused modules
 
-Extract initialise-request, list-tools-request, and related
-functions from mcp.clj into focused protocol module.
+Split mcp.clj (293 lines) into:
+- mcp/protocol.clj: JSON-RPC message construction
+- mcp/cache.clj: Cache management
+- mcp/schema.clj: Malli schema generation
+
+Deleted dead code, updated imports.
 ```
 
 ```
-#53 [2.3]: Implement response handler with ID correlation
+#53 [Phase 2]: Add ID correlation to bridge
 
-Delivers responses to correct promise based on JSON-RPC id field.
-Handles out-of-order responses per MCP spec.
+Implement promise-based tracking for JSON-RPC request/response
+correlation. Supports out-of-order responses per MCP spec.
 ```
 
 #### 4.5 Update Progress
-1. Check off task in issue body: `- [ ]` → `- [x]`
-2. Add entry to Progress Log table in issue
-3. If task revealed new subtasks, add them (don't change numbering of existing)
+1. Add entry to Progress Log table in issue
+2. If phase revealed new tasks, add them to appropriate phase
 
-**GitHub Operations**:
-```clojure
-;; Update issue body with checked task
-(update-issue {:issue-number N
-               :body (check-task-in-body current-body task-id)})
-
-;; Git operations
-(git-add files)
-(git-commit (format "#%d [%s]: %s" issue-number task-id description))
-```
-
-**Loop until**: All tasks checked off
+**Loop until**: All phases complete
 
 ---
 
@@ -275,7 +314,7 @@ closes #<issue>: Complete <story title>
 
 ### Format
 ```
-#<issue> [<task>]: <imperative description>
+#<issue> [Phase N]: <imperative description>
 
 <optional body>
 
@@ -287,31 +326,27 @@ closes #<issue>: Complete <story title>
 | Component | Required | Format | Example |
 |-----------|----------|--------|---------|
 | Issue ref | Yes | `#N` | `#53` |
-| Task ref | Yes (during task) | `[N.M]` | `[1.1]` |
-| Description | Yes | Imperative mood | `Add correlation tracking` |
+| Phase ref | Yes | `[Phase N]` | `[Phase 2]` |
+| Description | Yes | Imperative mood | `Add ID correlation to bridge` |
 | Body | No | Wrapped at 72 chars | Context, rationale |
 | Footer | No | `closes #N` etc | Auto-close on merge |
 
-### Special Task References
+### Special References
 
 | Reference | When to Use |
 |-----------|-------------|
-| `[N.M]` | Normal task completion |
+| `[Phase N]` | Normal phase completion (after tests pass) |
 | `[fix]` | Fixing CI or test failure |
-| `[refactor]` | Post-task refactoring |
-| `[docs]` | Documentation updates |
-| `[test]` | Adding tests (TDD red phase) |
+| `[docs]` | Documentation-only updates |
 
 ### Examples
 
-**Task completion**:
+**Phase completion** (the normal case):
 ```
-#53 [1.1]: Create mcp/protocol.clj with message construction
-```
+#53 [Phase 1]: Reorganize MCP code into focused modules
 
-**Test first (TDD)**:
-```
-#53 [2.1.test]: Add tests for ID correlation tracking
+Split mcp.clj into protocol/cache/schema modules.
+Deleted dead code. Updated imports. All tests pass.
 ```
 
 **CI fix**:
@@ -319,15 +354,20 @@ closes #<issue>: Complete <story title>
 #53 [fix]: Resolve namespace conflict in protocol.clj
 ```
 
-**Final commit**:
+**Documentation**:
+```
+#53 [docs]: Add GitHub development workflow skill
+```
+
+**Final commit** (closes the story):
 ```
 closes #53: Complete batched MCP tool execution
 
 All phases implemented:
-- File reorganization (protocol, cache, schema modules)
-- ID correlation in bridge
-- High-level client API
-- FSM integration with batched schemas
+- Phase 1: File reorganization
+- Phase 2: ID correlation in bridge
+- Phase 3: High-level client API
+- Phase 4: FSM integration
 ```
 
 ---
