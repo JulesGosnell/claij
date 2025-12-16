@@ -62,10 +62,11 @@
   (and m (starts-with? m "notifications/")))
 
 (defn list-changed?
-  "If message is a list_changed notification, returns the capability name.
+  "If method string is a list_changed notification, returns the capability name.
    Otherwise returns nil.
    
    Example: 'notifications/tools/list_changed' -> 'tools'"
-  [{m "method"}]
-  (when-let [[_ capability] (re-matches #"notifications/([^/]+)/list_changed" m)]
-    capability))
+  [m]
+  (when m
+    (when-let [[_ capability] (re-matches #"notifications/([^/]+)/list_changed" m)]
+      capability)))

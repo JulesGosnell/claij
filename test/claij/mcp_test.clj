@@ -10,35 +10,36 @@
    [clojure.core.async :refer [chan <!! >!!] :as async]
    [malli.core :as m]
    [claij.mcp.bridge :refer [start-mcp-bridge]]
-   [claij.mcp :refer [initialise-request
-                      initialised-notification
-                      list-tools-request
-                      list-prompts-request
-                      list-resources-request
-                      list-changed?
-                      initialize-mcp-cache
-                      invalidate-mcp-cache-item
-                      refresh-mcp-cache-item
-                      tool-response-schema
-                      tool-cache->request-schema
-                      tool-cache->response-schema
-                      tools-cache->request-schema
-                      tools-cache->response-schema
-                      resource-response-schema
-                      resources-cache->request-schema
-                      prompt-response-schema
-                      prompt-cache->request-schema
-                      prompts-cache->request-schema
-                      logging-levels
-                      logging-set-level-request-schema
-                      logging-notification-schema
-                      mcp-cache->request-schema
-                      mcp-cache->response-schema
-                      mcp-request-schema-fn
-                      mcp-response-schema-fn
-                      mcp-request-xition-schema-fn
-                      mcp-response-xition-schema-fn
-                      mcp-registry]]))
+   [claij.mcp.protocol :refer [initialise-request
+                               initialised-notification
+                               list-tools-request
+                               list-prompts-request
+                               list-resources-request
+                               list-changed?]]
+   [claij.mcp.cache :refer [initialize-mcp-cache
+                            invalidate-mcp-cache-item
+                            refresh-mcp-cache-item]]
+   [claij.mcp.schema :as schema :refer [tool-response-schema
+                                        tool-cache->request-schema
+                                        tool-cache->response-schema
+                                        tools-cache->request-schema
+                                        tools-cache->response-schema
+                                        resource-response-schema
+                                        resources-cache->request-schema
+                                        prompt-response-schema
+                                        prompt-cache->request-schema
+                                        prompts-cache->request-schema
+                                        logging-level-strings
+                                        logging-levels
+                                        logging-set-level-request-schema
+                                        logging-notification-schema
+                                        mcp-cache->request-schema
+                                        mcp-cache->response-schema
+                                        mcp-request-schema-fn
+                                        mcp-response-schema-fn
+                                        mcp-request-xition-schema-fn
+                                        mcp-response-xition-schema-fn
+                                        mcp-registry]]))
 
 ;;------------------------------------------------------------------------------
 ;; Helper for Malli validation with mcp-registry
@@ -295,9 +296,9 @@
           invalid-level {"level" "verbose"}]
 
       ;; Logging level strings constant
-      (is (= 8 (count claij.mcp/logging-level-strings)))
-      (is (contains? claij.mcp/logging-level-strings "debug"))
-      (is (contains? claij.mcp/logging-level-strings "emergency"))
+      (is (= 8 (count logging-level-strings)))
+      (is (contains? logging-level-strings "debug"))
+      (is (contains? logging-level-strings "emergency"))
 
       ;; Set-level requests - these are still refs to Malli schemas
       (is (malli-valid? [:ref "logging-set-level-request"] set-debug))
