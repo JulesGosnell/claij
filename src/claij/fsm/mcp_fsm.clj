@@ -15,15 +15,15 @@
    [claij.action :refer [def-action]]
    [claij.fsm :refer [llm-action]]
    [claij.mcp.bridge :refer [start-mcp-bridge]]
-   [claij.mcp :refer [initialise-request
-                      initialised-notification
-                      list-changed?
-                      initialize-mcp-cache
-                      invalidate-mcp-cache-item
-                      refresh-mcp-cache-item
-                      mcp-request-xition-schema-fn
-                      mcp-response-xition-schema-fn
-                      mcp-schemas]]))
+   [claij.mcp.protocol :refer [initialise-request
+                               initialised-notification
+                               list-changed?]]
+   [claij.mcp.cache :refer [initialize-mcp-cache
+                            invalidate-mcp-cache-item
+                            refresh-mcp-cache-item]]
+   [claij.mcp.schema :refer [mcp-request-xition-schema-fn
+                             mcp-response-xition-schema-fn
+                             mcp-schemas]]))
 
 ;;==============================================================================
 ;; Helper Functions
