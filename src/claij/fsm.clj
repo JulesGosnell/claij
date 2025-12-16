@@ -200,6 +200,34 @@
     (action-output-schema action)
     :any))
 
+(defn resolve-schema-with-fallback
+  "Resolve a transition schema with fallback to action schema.
+   
+   If the transition has an explicit schema, resolves it via resolve-schema.
+   If the transition has no schema (nil), falls back to the state's action schema
+   based on direction:
+   - :input  → state-action-input-schema
+   - :output → state-action-output-schema
+   
+   Parameters:
+   - context: FSM context (with :id->action, :id->schema)
+   - xition: The transition map
+   - schema: The transition's raw schema (may be nil)
+   - direction: :input or :output
+   - state: The state map (for action schema lookup)
+   
+   Returns resolved Malli schema, or :any if nothing found."
+  [context xition schema direction state]
+  (if (some? schema)
+    ;; Explicit schema - resolve it normally
+    (resolve-schema context xition schema)
+    ;; No schema - fall back to action schema based on direction
+    (case direction
+      :input (state-action-input-schema context state)
+      :output (state-action-output-schema context state)
+      ;; Unknown direction - return :any
+      :any)))
+
 (defn state-schema
   "Make the schema for a state - to be valid for a state, you must be valid for one (only) of its output xitions.
    Resolves dynamic schemas via context :id->schema lookup.

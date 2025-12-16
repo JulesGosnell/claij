@@ -12,7 +12,8 @@
                       build-fsm-registry validate-event last-event llm-configs
                       make-prompts lift chain run-sync fsm-schemas
                       ;; Story #62: state→action schema bridge
-                      state-action state-action-input-schema state-action-output-schema]]
+                      state-action state-action-input-schema state-action-output-schema
+                      resolve-schema-with-fallback]]
    [claij.llm :refer [call]]))
 
 ;;------------------------------------------------------------------------------
@@ -1098,3 +1099,95 @@
       ;; Runtime: same result (extra context doesn't affect lookup)
       (is (= [:map ["value" :int]] (state-action-input-schema runtime-ctx state))
           "Runtime returns declared schema"))))
+
+;;------------------------------------------------------------------------------
+;; Story #62 Phase 2: Xition Schema Fallback Tests
+;;------------------------------------------------------------------------------
+
+(deftest resolve-schema-with-fallback-test
+  (testing "explicit schema takes precedence"
+    (let [context {:id->action {"typed" #'typed-processor-action}}
+          xition {"id" ["a" "b"] "schema" [:map ["x" :string]]}
+          state {"id" "processor" "action" "typed"}]
+
+      ;; Explicit schema returned unchanged (direction doesn't matter)
+      (is (= [:map ["x" :string]]
+             (resolve-schema-with-fallback context xition [:map ["x" :string]] :input state))
+          "Input: explicit schema returned")
+      (is (= [:map ["x" :string]]
+             (resolve-schema-with-fallback context xition [:map ["x" :string]] :output state))
+          "Output: explicit schema returned")))
+
+  (testing "nil schema falls back to action schema based on direction"
+    (let [context {:id->action {"typed" #'typed-processor-action}}
+          xition {"id" ["a" "b"]} ; No "schema" key
+          state {"id" "processor" "action" "typed"}]
+
+      ;; Input direction → action input schema
+      (is (= [:map ["value" :int]]
+             (resolve-schema-with-fallback context xition nil :input state))
+          "Input: falls back to action input schema")
+
+      ;; Output direction → action output schema
+      (is (= [:map ["result" :int] ["id" [:tuple :string :string]]]
+             (resolve-schema-with-fallback context xition nil :output state))
+          "Output: falls back to action output schema")))
+
+  (testing "fallback returns :any when no action"
+    (let [context {:id->action {}} ; No actions
+          xition {"id" ["a" "b"]}
+          state {"id" "processor" "action" "missing"}]
+
+      (is (= :any (resolve-schema-with-fallback context xition nil :input state))
+          "Input: :any when action missing")
+      (is (= :any (resolve-schema-with-fallback context xition nil :output state))
+          "Output: :any when action missing")))
+
+  (testing "fallback returns :any for state without action"
+    (let [context {:id->action {"typed" #'typed-processor-action}}
+          xition {"id" ["a" "b"]}
+          state {"id" "passthrough"}] ; No "action" key
+
+      (is (= :any (resolve-schema-with-fallback context xition nil :input state))
+          "Input: :any when state has no action")
+      (is (= :any (resolve-schema-with-fallback context xition nil :output state))
+          "Output: :any when state has no action")))
+
+  (testing "works with dynamic schema references"
+    (let [dynamic-schema-fn (fn [_ctx _xition] [:map ["dynamic" :boolean]])
+          context {:id->action {"typed" #'typed-processor-action}
+                   :id->schema {"my-dynamic-schema" dynamic-schema-fn}}
+          xition {"id" ["a" "b"]}
+          state {"id" "processor" "action" "typed"}]
+
+      ;; String schema reference is resolved
+      (is (= [:map ["dynamic" :boolean]]
+             (resolve-schema-with-fallback context xition "my-dynamic-schema" :input state))
+          "Dynamic schema reference resolved")))
+
+  (testing "same code path at all three times"
+    (let [;; Config time: no actions yet
+          config-ctx {}
+          ;; Start time: actions populated
+          start-ctx {:id->action {"typed" #'typed-processor-action}}
+          ;; Runtime: same as start, with additional state
+          runtime-ctx {:id->action {"typed" #'typed-processor-action}
+                       :malli/registry base-registry}
+
+          xition {"id" ["a" "b"]}
+          state {"id" "x" "action" "typed"}]
+
+      ;; Config time: falls back to :any (no actions available)
+      (is (= :any
+             (resolve-schema-with-fallback config-ctx xition nil :input state))
+          "Config time: :any fallback")
+
+      ;; Start time: falls back to action schema
+      (is (= [:map ["value" :int]]
+             (resolve-schema-with-fallback start-ctx xition nil :input state))
+          "Start time: action input schema")
+
+      ;; Runtime: same as start time
+      (is (= [:map ["value" :int]]
+             (resolve-schema-with-fallback runtime-ctx xition nil :input state))
+          "Runtime: action input schema"))))
