@@ -120,11 +120,21 @@
 (defn mcp-request-schema-fn [context _xition] (mcp-cache->request-schema (get context "state")))
 (defn mcp-response-schema-fn [context _xition] (mcp-cache->response-schema (get context "state")))
 
-(defn mcp-request-xition-schema-fn [context {xid "id" :as _xition}]
-  [:map {:closed true} ["id" [:= xid]] ["message" (mcp-cache->request-schema (get context "state"))]])
+(defn mcp-request-xition-schema-fn
+  "Schema for LLM→servicing transition. Supports single or batch requests."
+  [context {xid "id" :as _xition}]
+  (let [single-request-schema (mcp-cache->request-schema (get context "state"))
+        batch-request-schema [:vector single-request-schema]]
+    [:map {:closed true}
+     ["id" [:= xid]]
+     ["message" [:or single-request-schema batch-request-schema]]]))
 
-(defn mcp-response-xition-schema-fn [context {xid "id" :as _xition}]
-  [:map {:closed true}
-   ["id" [:= xid]]
-   ["document" {:optional true} :string]
-   ["message" {:optional true} (mcp-cache->response-schema (get context "state"))]])
+(defn mcp-response-xition-schema-fn
+  "Schema for servicing→LLM transition. Supports single or batch responses."
+  [context {xid "id" :as _xition}]
+  (let [single-response-schema (mcp-cache->response-schema (get context "state"))
+        batch-response-schema [:vector single-response-schema]]
+    [:map {:closed true}
+     ["id" [:= xid]]
+     ["document" {:optional true} :string]
+     ["message" {:optional true} [:or single-response-schema batch-response-schema]]]))

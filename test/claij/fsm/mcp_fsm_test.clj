@@ -7,7 +7,9 @@
    [claij.action :refer [def-action action?]]
    [claij.fsm :as fsm :refer [start-fsm]]
    [claij.mcp.bridge :as bridge]
-   [claij.fsm.mcp-fsm :as mcp-fsm :refer [mcp-actions mcp-fsm wrap unwrap take! hack
+   [claij.mcp.client :as client]
+   [claij.fsm.mcp-fsm :as mcp-fsm :refer [mcp-actions mcp-fsm wrap unwrap take!
+                                          drain-notifications send-and-wait
                                           start-action shed-action init-action
                                           service-action cache-action mcp-end-action
                                           check-cache-and-continue]]))
@@ -510,35 +512,40 @@
     (let [c (chan)]
       (is (= :timed-out (take! c 10 :timed-out))))))
 
-(deftest hack-test
-  (testing "passes through normal messages"
-    (let [c (chan 1)]
-      (>!! c {"method" "tools/call"})
-      (is (= {"method" "tools/call"} (hack c)))))
+(deftest drain-notifications-test
+  (testing "drains all notifications from output channel"
+    (let [mock-bridge {:output-chan (chan 10)}]
+      ;; Put some notifications
+      (>!! (:output-chan mock-bridge) {"method" "notifications/tools/list_changed"})
+      (>!! (:output-chan mock-bridge) {"method" "notifications/prompts/list_changed"})
+      ;; Drain them
+      (drain-notifications mock-bridge)
+      ;; Channel should now be empty (take! returns default)
+      (is (nil? (take! (:output-chan mock-bridge) 10 nil)))))
 
-  (testing "sheds list_changed and returns next"
-    (let [c (chan 3)]
-      (>!! c {"method" "notifications/tools/list_changed"})
-      (>!! c {"method" "notifications/prompts/list_changed"})
-      (>!! c {"id" 1 "result" {}})
-      (is (= {"id" 1 "result" {}} (hack c))))))
+  (testing "handles empty channel gracefully"
+    (let [mock-bridge {:output-chan (chan 10)}]
+      ;; Should not block or throw
+      (drain-notifications mock-bridge)
+      (is true))))
 
 (deftest start-action-test
-  (testing "initializes bridge and transitions to shedding on init message"
+  (testing "initializes correlated bridge and transitions to initing"
     (let [result (atom nil)
           handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
-          mock-bridge (fn [_config _ic oc]
-                        (>!! oc "{\"method\":\"initialize\",\"id\":0}")
-                        (fn [] nil))
+          init-response {"jsonrpc" "2.0" "id" 0 "result" {"protocolVersion" "2025-06-18"}}
+          mock-bridge {:output-chan (chan 10) :pending (atom {}) :input-chan (chan 10) :stop (fn [])}
           f2 (start-action {} {} {} {})
           event {"document" "test-doc"}]
-      (with-redefs [bridge/start-mcp-bridge mock-bridge]
+      ;; Mock bridge creation and send-and-wait
+      (with-redefs [bridge/create-correlated-bridge (fn [_config] mock-bridge)
+                    send-and-wait (fn [_bridge _request _timeout] init-response)]
         (f2 {} event [] handler))
 
-      (is (= ["starting" "shedding"] (get-in @result [:event "id"])))
+      (is (= ["starting" "initing"] (get-in @result [:event "id"])))
       (is (= "test-doc" (get-in @result [:event "document"])))
-      (is (= "initialize" (get-in @result [:event "message" "method"])))
-      (is (some? (get-in @result [:ctx :mcp/bridge])))
+      (is (= init-response (get-in @result [:event "message"])))
+      (is (= mock-bridge (get-in @result [:ctx :mcp/bridge])))
       (is (= 0 (get-in @result [:ctx :mcp/request-id])))
       (is (= "test-doc" (get-in @result [:ctx :mcp/document]))))))
 
@@ -546,21 +553,19 @@
   (testing "sends message to bridge and transitions to initing"
     (let [result (atom nil)
           handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
-          ic (chan 10)
-          oc (chan 10)
-          _ (>!! oc {"id" 0 "result" {"protocolVersion" "2025-06-18"}})
+          response {"id" 0 "result" {"protocolVersion" "2025-06-18"}}
+          mock-bridge {:output-chan (chan 10) :pending (atom {}) :input-chan (chan 10)}
           f2 (shed-action {} {} {} {})
-          context {:mcp/bridge {:input ic :output oc}}
+          context {:mcp/bridge mock-bridge}
           event {"document" "doc"
                  "message" {"method" "initialize" "id" 0}}]
-      (f2 context event [] handler)
+      ;; Mock send-and-wait to return our response
+      (with-redefs [send-and-wait (fn [_bridge _request _timeout] response)]
+        (f2 context event [] handler))
 
-      (is (= {"method" "initialize" "id" 0} (<!! ic)))
       (is (= ["shedding" "initing"] (get-in @result [:event "id"])))
       (is (= "doc" (get-in @result [:event "document"])))
-
-      (close! ic)
-      (close! oc))))
+      (is (= response (get-in @result [:event "message"]))))))
 
 (deftest init-action-test
   (testing "extracts capabilities and transitions to servicing"
@@ -644,36 +649,56 @@
       (is (nil? (get-in @result [:ctx "state" "tools"])) "tools should be invalidated"))))
 
 (deftest service-action-test
-  (testing "routes llm response back to llm"
+  (testing "routes llm request through client and back to llm"
     (let [result (atom nil)
           handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
-          ic (chan 10)
-          oc (chan 10)
-          _ (>!! oc {"id" 1 "result" {"content" [{"type" "text" "text" "done"}]}})
+          mock-bridge {:output-chan (chan 10) :pending (atom {}) :input-chan (chan 10)}
+          response {"jsonrpc" "2.0" "id" 1 "result" {"content" [{"type" "text" "text" "done"}]}}
           f2 (service-action {} {} {"id" ["llm" "servicing"]} {})
-          context {:mcp/bridge {:input ic :output oc}}
-          event {"message" {"method" "tools/call"} "document" "doc"}]
-      (f2 context event [] handler)
+          context {:mcp/bridge mock-bridge}
+          event {"message" {"jsonrpc" "2.0" "id" 1 "method" "tools/call" "params" {"name" "test"}}
+                 "document" "doc"}]
+      ;; Mock client/call-batch to return our response
+      (with-redefs [client/call-batch (fn [_bridge _requests _opts] [response])]
+        (f2 context event [] handler))
 
       (is (= ["servicing" "llm"] (get-in @result [:event "id"])))
       (is (= "doc" (get-in @result [:event "document"])))
-      (close! ic)
-      (close! oc)))
+      (is (= response (get-in @result [:event "message"])))))
 
-  (testing "routes caching response back to caching"
+  (testing "routes batch llm requests and returns batch response"
     (let [result (atom nil)
           handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
-          ic (chan 10)
-          oc (chan 10)
-          _ (>!! oc {"id" 1 "result" {"tools" []}})
+          mock-bridge {:output-chan (chan 10) :pending (atom {}) :input-chan (chan 10)}
+          responses [{"jsonrpc" "2.0" "id" 1 "result" {"content" [{"type" "text" "text" "one"}]}}
+                     {"jsonrpc" "2.0" "id" 2 "result" {"content" [{"type" "text" "text" "two"}]}}]
+          f2 (service-action {} {} {"id" ["llm" "servicing"]} {})
+          context {:mcp/bridge mock-bridge}
+          ;; Batch request - vector of requests
+          event {"message" [{"jsonrpc" "2.0" "id" 1 "method" "tools/call" "params" {"name" "a"}}
+                            {"jsonrpc" "2.0" "id" 2 "method" "tools/call" "params" {"name" "b"}}]
+                 "document" "doc"}]
+      (with-redefs [client/call-batch (fn [_bridge _requests _opts] responses)]
+        (f2 context event [] handler))
+
+      (is (= ["servicing" "llm"] (get-in @result [:event "id"])))
+      ;; Batch response - vector of responses
+      (is (vector? (get-in @result [:event "message"])))
+      (is (= 2 (count (get-in @result [:event "message"]))))))
+
+  (testing "routes caching request and returns response"
+    (let [result (atom nil)
+          handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
+          mock-bridge {:output-chan (chan 10) :pending (atom {}) :input-chan (chan 10)}
+          response {"jsonrpc" "2.0" "id" 1 "result" {"tools" []}}
           f2 (service-action {} {} {"id" ["caching" "servicing"]} {})
-          context {:mcp/bridge {:input ic :output oc}}
-          event {"message" {"method" "tools/list"}}]
-      (f2 context event [] handler)
+          context {:mcp/bridge mock-bridge}
+          event {"message" {"jsonrpc" "2.0" "id" 1 "method" "tools/list"}}]
+      (with-redefs [send-and-wait (fn [_bridge _request _timeout] response)]
+        (f2 context event [] handler))
 
       (is (= ["servicing" "caching"] (get-in @result [:event "id"])))
-      (close! ic)
-      (close! oc))))
+      (is (= response (get-in @result [:event "message"]))))))
 
 (deftest mcp-end-action-test
   (testing "delivers to completion promise"

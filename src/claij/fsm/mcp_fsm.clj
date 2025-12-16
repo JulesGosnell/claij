@@ -14,7 +14,8 @@
    [claij.malli :refer [def-fsm base-registry]]
    [claij.action :refer [def-action]]
    [claij.fsm :refer [llm-action]]
-   [claij.mcp.bridge :refer [start-mcp-bridge]]
+   [claij.mcp.bridge :as bridge]
+   [claij.mcp.client :as client]
    [claij.mcp.protocol :refer [initialise-request
                                initialised-notification
                                list-changed?]]
@@ -41,13 +42,22 @@
 (defn take! [chan ms default]
   (alt!! chan ([v] v) (timeout ms) ([_] default)))
 
-(defn hack [oc]
-  (let [{method "method" :as message} (<!! oc)]
-    (if (and method (list-changed? method))
-      (do
-        (log/warn "shedding:" (pr-str message))
-        (hack oc))
-      message)))
+(defn drain-notifications
+  "Drain and discard notifications from output channel.
+   With correlated bridge, notifications go to :output-chan while
+   responses with IDs go to promises. This drains any pending notifications."
+  [bridge]
+  (loop []
+    (when-some [msg (take! (:output-chan bridge) 100 nil)]
+      (log/debug "drain-notifications: discarding" (pr-str msg))
+      (recur))))
+
+(defn send-and-wait
+  "Send a single request and wait for response.
+   Wrapper around bridge/send-request for init/cache flow."
+  [bridge request timeout-ms]
+  (let [p (bridge/send-request bridge request)]
+    (bridge/await-response p (get request "id") timeout-ms)))
 
 ;;==============================================================================
 ;; State Management
@@ -66,49 +76,48 @@
   [_config _fsm _ix _state]
   (fn [context {d "document" :as event} _trail handler]
     (log/info "start-action:" (pr-str d))
-    (let [n 100
-          config {"command" "bash", "args" ["-c", "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"], "transport" "stdio"}
-          ic (chan n (map write-str))
-          oc (chan n (map read-str))
-          stop (start-mcp-bridge config ic oc)
+    (let [config {"command" "bash"
+                  "args" ["-c" "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"]
+                  "transport" "stdio"}
+          ;; Create correlated bridge for request/response correlation
+          mcp-bridge (bridge/create-correlated-bridge config)
           ;; Build composite registry: base + FSM schemas + MCP schemas
-          ;; Preserve existing registry from context (built by start-fsm)
           existing-registry (get context :malli/registry)
           mcp-registry (mr/composite-registry
                         (or existing-registry base-registry)
                         mcp-schemas)
-          ;; Store MCP bridge in context instead of global atom
+          ;; Store MCP bridge in context
           ;; Register schema functions for dynamic schema resolution
           ;; Store document in context so it's available throughout the FSM
           updated-context (assoc context
-                                 :mcp/bridge {:input ic :output oc :stop stop}
+                                 :mcp/bridge mcp-bridge
                                  :mcp/request-id 0
                                  :mcp/document d
                                  :malli/registry mcp-registry
                                  :id->schema {"mcp-request-xition" mcp-request-xition-schema-fn
                                               "mcp-response-xition" mcp-response-xition-schema-fn})
-          init-request (assoc initialise-request "id" 0)]
+          ;; Send initialize request and wait for response
+          init-request (assoc initialise-request "id" 0)
+          response (send-and-wait mcp-bridge init-request 5000)]
+      ;; Drain any notifications that arrived during init
+      (drain-notifications mcp-bridge)
       (handler
        updated-context
-       (let [{m "method" :as message} (take! oc 5000 init-request)]
-         (cond
-           ;; Server sent initialize request, or we timed out (default is init-request)
-           (= m "initialize")
-           (wrap ["starting" "shedding"] d message)
-
-           ;; Server sent something else (notifications) - use our initialize request
-           :else
-           (wrap ["starting" "shedding"] d init-request)))))))
+       (wrap ["starting" "initing"] d response)))))
 
 (def-action shed-action
-  "Sheds unwanted list_changed messages during initialization."
+  "Sheds unwanted list_changed messages during initialization.
+   Note: With correlated bridge, this is largely handled automatically.
+   This action is retained for backward compatibility."
   [:map]
   [_config _fsm _ix _state]
   (fn [context {{im "method" :as message} "message" document "document" :as event} _trail handler]
     (log/info "shed-action:" (pr-str message))
-    (let [{{ic :input oc :output} :mcp/bridge} context]
-      (>!! ic message)
-      (handler context (wrap ["shedding" "initing"] document (hack oc))))))
+    (let [bridge (:mcp/bridge context)
+          response (send-and-wait bridge message 5000)]
+      ;; Drain any notifications
+      (drain-notifications bridge)
+      (handler context (wrap ["shedding" "initing"] document response)))))
 
 (def-action init-action
   "Extracts capabilities from initialization response and sets up cache."
@@ -125,40 +134,64 @@
 
 (def-action service-action
   "Routes messages to MCP bridge and handles responses.
-   Routing depends on where the message came from."
+   
+   Supports batched tool calls from LLM:
+   - Single request: {\"jsonrpc\" \"2.0\" \"id\" 1 \"method\" \"tools/call\" ...}
+   - Batch request: [{\"jsonrpc\" ... } {\"jsonrpc\" ...}]
+   
+   Responses preserve the same format:
+   - Single: single response map
+   - Batch: vector of response maps in request order"
   [:map]
   [_config _fsm ix _state]
   (fn [context {m "message" document "document" :as event} _trail handler]
-    (let [{id "id"} ix]
-      (log/info "service-action: from" id "message:" (pr-str m))
-      (let [{{ic :input oc :output} :mcp/bridge} context
-            [from _to] id]
-        (>!! ic m)
-        (let [{method "method" :as oe} (take! oc 2000 {})]
+    (let [{id "id"} ix
+          [from _to] id
+          bridge (:mcp/bridge context)]
+      (log/info "service-action: from" from "message:" (pr-str m))
+
+      (cond
+        ;; From LLM - use client API which supports batching
+        (= from "llm")
+        (let [;; Normalize to batch format
+              requests (if (vector? m) m [m])
+              ;; Execute batch
+              responses (client/call-batch bridge requests {:timeout-ms 30000})
+              ;; If single request, unwrap the response
+              result (if (vector? m) responses (first responses))]
+          ;; Check for notifications while waiting
+          (drain-notifications bridge)
           (handler
            context
-           (cond
-             ;; Notification received - route to caching
-             method
-             (wrap ["servicing" "caching"] document oe)
+           (cond-> {"id" ["servicing" "llm"] "message" result}
+             document (assoc "document" document))))
 
-             ;; Response to tool call from llm - route back to llm with result
-             (= from "llm")
-             (cond-> {"id" ["servicing" "llm"] "message" oe}
-               document (assoc "document" document))
+        ;; From cache - single request
+        (= from "caching")
+        (let [response (send-and-wait bridge m 5000)]
+          ;; Check for notifications
+          (let [notification (take! (:output-chan bridge) 100 nil)]
+            (if notification
+              ;; Got a notification - route to caching
+              (do
+                (log/info "service-action: notification during cache request" (pr-str notification))
+                (handler context (wrap ["servicing" "caching"] document notification)))
+              ;; Normal response
+              (handler context {"id" ["servicing" "caching"] "message" response}))))
 
-             ;; Response to cache request - route back to caching with result
-             (= from "caching")
-             {"id" ["servicing" "caching"] "message" oe}
+        ;; From initing - send initialized notification
+        (= from "initing")
+        (let [response (send-and-wait bridge m 5000)]
+          (drain-notifications bridge)
+          (handler context {"id" ["servicing" "caching"] "message" response}))
 
-             ;; Timeout/empty response during init phase - go to caching to populate
-             (= from "initing")
-             {"id" ["servicing" "caching"] "message" {}}
-
-             ;; Other timeout - go to llm
-             :else
-             (cond-> {"id" ["servicing" "llm"]}
-               document (assoc "document" document)))))))))
+        ;; Other - timeout/go to llm
+        :else
+        (do
+          (log/warn "service-action: unexpected source" from)
+          (handler context
+                   (cond-> {"id" ["servicing" "llm"]}
+                     document (assoc "document" document))))))))
 
 (defn check-cache-and-continue
   "Inspect cache for holes. Request missing data until cache is complete.
