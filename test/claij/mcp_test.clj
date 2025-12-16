@@ -39,7 +39,19 @@
                                         mcp-response-schema-fn
                                         mcp-request-xition-schema-fn
                                         mcp-response-xition-schema-fn
-                                        mcp-registry]]))
+                                        mcp-registry
+                                        ;; Story #64 Phase 1: envelope schemas
+                                        json-rpc-request-envelope
+                                        json-rpc-response-envelope
+                                        json-rpc-notification-envelope
+                                        make-request-envelope-schema
+                                        make-response-envelope-schema
+                                        ;; Story #64 Phase 2: runtime resolution
+                                        find-tool-in-cache
+                                        resolve-mcp-tool-input-schema
+                                        resolve-mcp-tool-output-schema
+                                        resolve-mcp-request-schema
+                                        resolve-mcp-response-schema]]))
 
 ;;------------------------------------------------------------------------------
 ;; Helper for Malli validation with mcp-registry
@@ -423,6 +435,233 @@
         (is (malli-valid? request-schema valid-request) "Valid tool call request should pass")
         (is (malli-valid? response-schema valid-response) "Valid tool response should pass")
         (is (not (malli-valid? request-schema invalid-request)) "Invalid method should fail")))))
+
+;;------------------------------------------------------------------------------
+;; Story #64: Static envelope schema tests
+;;------------------------------------------------------------------------------
+
+(deftest json-rpc-envelope-schemas-test
+  (testing "Static request envelope validates JSON-RPC 2.0 requests"
+    ;; Valid requests with various ID types
+    (is (malli-valid? json-rpc-request-envelope
+                      {"jsonrpc" "2.0" "id" 1 "method" "tools/call" "params" {"name" "foo"}})
+        "Integer ID should be valid")
+    (is (malli-valid? json-rpc-request-envelope
+                      {"jsonrpc" "2.0" "id" "abc-123" "method" "tools/call" "params" {}})
+        "String ID should be valid")
+    (is (malli-valid? json-rpc-request-envelope
+                      {"jsonrpc" "2.0" "id" 1 "method" "tools/call"})
+        "Params should be optional")
+
+    ;; Invalid requests
+    (is (not (malli-valid? json-rpc-request-envelope
+                           {"jsonrpc" "1.0" "id" 1 "method" "test"}))
+        "Wrong jsonrpc version should fail")
+    (is (not (malli-valid? json-rpc-request-envelope
+                           {"jsonrpc" "2.0" "method" "test"}))
+        "Missing id should fail"))
+
+  (testing "Static response envelope validates JSON-RPC 2.0 responses"
+    ;; Valid success response
+    (is (malli-valid? json-rpc-response-envelope
+                      {"jsonrpc" "2.0" "id" 1 "result" {"data" "anything"}})
+        "Success response should be valid")
+    (is (malli-valid? json-rpc-response-envelope
+                      {"jsonrpc" "2.0" "id" "req-42" "result" nil})
+        "Nil result should be valid")
+
+    ;; Valid error response
+    (is (malli-valid? json-rpc-response-envelope
+                      {"jsonrpc" "2.0" "id" 1 "error" {"code" -32600 "message" "Invalid Request"}})
+        "Error response should be valid")
+    (is (malli-valid? json-rpc-response-envelope
+                      {"jsonrpc" "2.0" "id" 1 "error" {"code" -32000 "message" "Server error" "data" {"details" "..."}}})
+        "Error with data should be valid"))
+
+  (testing "Static notification envelope validates JSON-RPC 2.0 notifications"
+    (is (malli-valid? json-rpc-notification-envelope
+                      {"jsonrpc" "2.0" "method" "notifications/initialized"})
+        "Notification without params should be valid")
+    (is (malli-valid? json-rpc-notification-envelope
+                      {"jsonrpc" "2.0" "method" "notifications/message" "params" {"level" "info"}})
+        "Notification with params should be valid")
+
+    ;; Notifications must NOT have id
+    (is (not (malli-valid? json-rpc-notification-envelope
+                           {"jsonrpc" "2.0" "id" 1 "method" "test"}))
+        "Notification with id should fail (that's a request)")))
+
+(deftest make-envelope-schema-test
+  (testing "make-request-envelope-schema builds typed envelopes"
+    (let [tools-call-schema (make-request-envelope-schema "tools/call" [:map ["name" :string]])]
+      ;; Valid tool call
+      (is (malli-valid? tools-call-schema
+                        {"jsonrpc" "2.0" "id" 1 "method" "tools/call" "params" {"name" "bash"}})
+          "Valid tool call should pass")
+      ;; Wrong method fails
+      (is (not (malli-valid? tools-call-schema
+                             {"jsonrpc" "2.0" "id" 1 "method" "resources/read" "params" {"name" "bash"}}))
+          "Wrong method should fail")
+      ;; Wrong params type fails
+      (is (not (malli-valid? tools-call-schema
+                             {"jsonrpc" "2.0" "id" 1 "method" "tools/call" "params" {"name" 123}}))
+          "Wrong params type should fail")))
+
+  (testing "make-request-envelope-schema with nil params uses :any"
+    (let [any-params-schema (make-request-envelope-schema "test/method" nil)]
+      (is (malli-valid? any-params-schema
+                        {"jsonrpc" "2.0" "id" 1 "method" "test/method" "params" "anything"})
+          "Any params should be valid when schema is nil")
+      (is (malli-valid? any-params-schema
+                        {"jsonrpc" "2.0" "id" 1 "method" "test/method" "params" [1 2 3]})
+          "Array params should be valid when schema is nil")))
+
+  (testing "make-response-envelope-schema builds typed envelopes"
+    (let [tool-result-schema (make-response-envelope-schema [:map ["content" [:vector :map]]])]
+      ;; Valid response
+      (is (malli-valid? tool-result-schema
+                        {"jsonrpc" "2.0" "id" 1 "result" {"content" [{"type" "text" "text" "hello"}]}})
+          "Valid tool result should pass")
+      ;; Wrong result type fails
+      (is (not (malli-valid? tool-result-schema
+                             {"jsonrpc" "2.0" "id" 1 "result" {"content" "not-a-vector"}}))
+          "Wrong result type should fail")))
+
+  (testing "make-response-envelope-schema with nil result uses :any"
+    (let [any-result-schema (make-response-envelope-schema nil)]
+      (is (malli-valid? any-result-schema
+                        {"jsonrpc" "2.0" "id" 1 "result" "anything"})
+          "Any result should be valid when schema is nil"))))
+
+;;------------------------------------------------------------------------------
+;; Story #64 Phase 2: Runtime schema resolution tests
+;;------------------------------------------------------------------------------
+
+(def test-tool-cache
+  "Sample cache with tools for testing"
+  {"tools" [{"name" "clojure_eval"
+             "description" "Evaluate Clojure code"
+             "inputSchema" {"type" "object"
+                            "properties" {"code" {"type" "string"}}
+                            "required" ["code"]}}
+            {"name" "bash"
+             "description" "Run bash commands"
+             "inputSchema" {"type" "object"
+                            "properties" {"command" {"type" "string"}}
+                            "required" ["command"]}}
+            {"name" "simple_tool"
+             "description" "Tool without inputSchema"}]})
+
+(deftest find-tool-in-cache-test
+  (testing "finds tool by name"
+    (let [tool (find-tool-in-cache test-tool-cache "clojure_eval")]
+      (is (some? tool))
+      (is (= "clojure_eval" (get tool "name")))))
+
+  (testing "returns nil for unknown tool"
+    (is (nil? (find-tool-in-cache test-tool-cache "unknown_tool"))))
+
+  (testing "returns nil when cache has no tools"
+    (is (nil? (find-tool-in-cache {} "clojure_eval")))
+    (is (nil? (find-tool-in-cache {"tools" nil} "clojure_eval")))))
+
+(deftest resolve-mcp-tool-input-schema-test
+  (testing "resolves tool with inputSchema"
+    (let [schema (resolve-mcp-tool-input-schema test-tool-cache "clojure_eval")]
+      (is (= :json-schema (first schema)) "Should be :json-schema type")
+      (is (= {"type" "object"
+              "properties" {"code" {"type" "string"}}
+              "required" ["code"]}
+             (:schema (second schema))))))
+
+  (testing "returns :any for tool without inputSchema"
+    (is (= :any (resolve-mcp-tool-input-schema test-tool-cache "simple_tool"))))
+
+  (testing "returns :any for unknown tool"
+    (is (= :any (resolve-mcp-tool-input-schema test-tool-cache "unknown"))))
+
+  (testing "returns :any for empty cache"
+    (is (= :any (resolve-mcp-tool-input-schema {} "any_tool")))))
+
+(deftest resolve-mcp-request-schema-test
+  (testing "resolves complete request schema with tool name"
+    (let [context {"state" test-tool-cache}
+          schema (resolve-mcp-request-schema context "clojure_eval")]
+      ;; Should be a complete JSON-RPC envelope
+      (is (= :map (first schema)))
+
+      ;; Valid request passes
+      (is (malli-valid? schema
+                        {"jsonrpc" "2.0"
+                         "id" 1
+                         "method" "tools/call"
+                         "params" {"name" "clojure_eval"
+                                   "arguments" {"code" "(+ 1 1)"}}})
+          "Valid clojure_eval request should pass")
+
+      ;; Wrong tool name fails
+      (is (not (malli-valid? schema
+                             {"jsonrpc" "2.0"
+                              "id" 1
+                              "method" "tools/call"
+                              "params" {"name" "wrong_tool"
+                                        "arguments" {"code" "(+ 1 1)"}}}))
+          "Wrong tool name should fail")
+
+      ;; Missing required argument fails
+      (is (not (malli-valid? schema
+                             {"jsonrpc" "2.0"
+                              "id" 1
+                              "method" "tools/call"
+                              "params" {"name" "clojure_eval"
+                                        "arguments" {}}}))
+          "Missing required 'code' argument should fail")))
+
+  (testing "returns generic envelope when tool-name is nil"
+    (let [context {"state" test-tool-cache}
+          schema (resolve-mcp-request-schema context nil)]
+      ;; Should accept any params
+      (is (malli-valid? schema
+                        {"jsonrpc" "2.0"
+                         "id" 1
+                         "method" "tools/call"
+                         "params" {"anything" "goes"}}))
+      (is (malli-valid? schema
+                        {"jsonrpc" "2.0"
+                         "id" 1
+                         "method" "tools/call"
+                         "params" "just a string"}))))
+
+  (testing "returns generic envelope when cache is empty"
+    (let [context {"state" {}}
+          schema (resolve-mcp-request-schema context "clojure_eval")]
+      ;; Tool not in cache, but should still produce valid envelope with :any args
+      (is (malli-valid? schema
+                        {"jsonrpc" "2.0"
+                         "id" 1
+                         "method" "tools/call"
+                         "params" {"name" "clojure_eval"
+                                   "arguments" {"anything" "allowed"}}})))))
+
+(deftest resolve-mcp-response-schema-test
+  (testing "resolves response schema"
+    (let [context {"state" test-tool-cache}
+          schema (resolve-mcp-response-schema context "clojure_eval")]
+      ;; Should be a complete JSON-RPC response envelope
+      (is (= :map (first schema)))
+
+      ;; Valid tool response passes
+      (is (malli-valid? schema
+                        {"jsonrpc" "2.0"
+                         "id" 1
+                         "result" {"content" [{"type" "text" "text" "2"}]}})
+          "Valid tool response should pass")))
+
+  (testing "response schema works without cache"
+    (let [context {"state" {}}
+          schema (resolve-mcp-response-schema context "any_tool")]
+      ;; Should still produce valid envelope
+      (is (= :map (first schema))))))
 
 ;;------------------------------------------------------------------------------
 ;; Integration test

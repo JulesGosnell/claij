@@ -67,6 +67,170 @@
 (def logging-set-level-request-schema [:ref "logging-set-level-request"])
 (def logging-notification-schema [:ref "logging-notification"])
 
+;;------------------------------------------------------------------------------
+;; Static Envelope Schemas (Story #64)
+;;------------------------------------------------------------------------------
+;;
+;; These schemas define the STRUCTURE of MCP messages without requiring
+;; runtime cache data. Payload fields use :any until resolved at runtime.
+;;
+;; Design principle: Same schema resolution API works at all three times:
+;; - Config time (def-action): envelope + :any payload
+;; - Start time (start-fsm): envelope + :any payload (could warm cache)
+;; - Runtime: envelope + full payload schema from cache
+;;------------------------------------------------------------------------------
+
+(def json-rpc-request-envelope
+  "Static JSON-RPC 2.0 request envelope. Payload in 'params' is :any until resolved."
+  [:map {:closed false :description "JSON-RPC 2.0 request"}
+   ["jsonrpc" [:= "2.0"]]
+   ["id" [:or :int :string]] ;; MCP allows string or int IDs
+   ["method" :string]
+   ["params" {:optional true} :any]])
+
+(def json-rpc-response-envelope
+  "Static JSON-RPC 2.0 response envelope. Payload in 'result' is :any until resolved."
+  [:map {:closed false :description "JSON-RPC 2.0 response"}
+   ["jsonrpc" [:= "2.0"]]
+   ["id" [:or :int :string]]
+   ["result" {:optional true} :any]
+   ["error" {:optional true}
+    [:map
+     ["code" :int]
+     ["message" :string]
+     ["data" {:optional true} :any]]]])
+
+(def json-rpc-notification-envelope
+  "Static JSON-RPC 2.0 notification envelope (no id field).
+   Closed map - rejects messages with 'id' field (those are requests, not notifications)."
+  [:map {:closed true :description "JSON-RPC 2.0 notification"}
+   ["jsonrpc" [:= "2.0"]]
+   ["method" :string]
+   ["params" {:optional true} :any]])
+
+(defn make-request-envelope-schema
+  "Build request envelope with specific method and params schema.
+   If params-schema is nil, uses :any."
+  [method params-schema]
+  [:map {:closed true}
+   ["jsonrpc" [:= "2.0"]]
+   ["id" [:or :int :string]]
+   ["method" [:= method]]
+   ["params" (or params-schema :any)]])
+
+(defn make-response-envelope-schema
+  "Build response envelope with specific result schema.
+   If result-schema is nil, uses :any."
+  [result-schema]
+  [:map {:closed true}
+   ["jsonrpc" [:= "2.0"]]
+   ["id" [:or :int :string]]
+   ["result" (or result-schema :any)]])
+
+;;------------------------------------------------------------------------------
+;; Phase 2: Runtime Schema Resolution (Story #64)
+;;------------------------------------------------------------------------------
+;;
+;; These functions resolve schemas at runtime by looking up the MCP cache.
+;; They work at all three times:
+;; - Config/start time: No cache or tool-name → returns envelope + :any
+;; - Runtime: Cache available → returns envelope + full tool schema
+;;------------------------------------------------------------------------------
+
+(defn find-tool-in-cache
+  "Find a tool definition by name in the cache.
+   Returns the tool map or nil if not found."
+  [cache tool-name]
+  (when-let [tools (get cache "tools")]
+    (some #(when (= tool-name (get % "name")) %) tools)))
+
+(defn resolve-mcp-tool-input-schema
+  "Resolve the input (params) schema for a specific tool.
+   Returns the Malli schema for tool arguments, or :any if tool not found."
+  [cache tool-name]
+  (if-let [tool (find-tool-in-cache cache tool-name)]
+    ;; Use existing tool-cache->request-schema but extract just the params part
+    (let [input-schema (get tool "inputSchema")]
+      (if input-schema
+        [:json-schema {:schema input-schema}]
+        :any))
+    :any))
+
+(defn resolve-mcp-tool-output-schema
+  "Resolve the output (result) schema for a specific tool.
+   MCP tools always return tool-response format."
+  [_cache _tool-name]
+  ;; All MCP tools return the same response structure
+  [:ref "tool-response"])
+
+(defn resolve-mcp-request-schema
+  "Build complete JSON-RPC request schema for a tool call.
+   
+   At runtime with cache: envelope + typed params for specific tool
+   At config/start without cache: envelope + :any params
+   
+   Parameters:
+   - context: FSM context containing cache at (get context \"state\")
+   - tool-name: Name of tool to resolve (nil for generic envelope)"
+  [context tool-name]
+  (let [cache (get context "state")
+        params-schema (if tool-name
+                        [:map {:closed true}
+                         ["name" [:= tool-name]]
+                         ["arguments" (resolve-mcp-tool-input-schema cache tool-name)]]
+                        :any)]
+    (make-request-envelope-schema "tools/call" params-schema)))
+
+(defn resolve-mcp-response-schema
+  "Build complete JSON-RPC response schema for a tool call.
+   
+   MCP tool responses always have the same structure (tool-response).
+   
+   Parameters:
+   - context: FSM context (currently unused, for API consistency)
+   - tool-name: Name of tool (currently unused, all tools have same response)"
+  [context tool-name]
+  (let [cache (get context "state")
+        result-schema (resolve-mcp-tool-output-schema cache tool-name)]
+    (make-response-envelope-schema result-schema)))
+
+;;------------------------------------------------------------------------------
+;; Phase 3: FSM Integration (Story #64)
+;;------------------------------------------------------------------------------
+;;
+;; Schema functions for use with FSM's :id->schema lookup.
+;; These follow the (context xition) -> schema signature.
+;;
+;; At config/start time: tool-name not yet known → generic envelope
+;; At runtime: tool-name can be extracted from xition metadata → specific schema
+;;------------------------------------------------------------------------------
+
+(defn mcp-tool-request-schema-fn
+  "Schema function for :id->schema registration.
+   
+   Works at all three times:
+   - Config/start: Returns envelope with :any params (tool unknown)
+   - Runtime: If xition has 'tool-name' metadata, resolves specific schema
+   
+   Usage in FSM:
+   {:id->schema {\"mcp-tool-request\" mcp-tool-request-schema-fn}}"
+  [context xition]
+  (let [tool-name (get xition "tool-name")]
+    (resolve-mcp-request-schema context tool-name)))
+
+(defn mcp-tool-response-schema-fn
+  "Schema function for :id->schema registration.
+   
+   Works at all three times:
+   - Config/start: Returns envelope with :any result
+   - Runtime: If xition has 'tool-name' metadata, resolves specific schema
+   
+   Usage in FSM:
+   {:id->schema {\"mcp-tool-response\" mcp-tool-response-schema-fn}}"
+  [context xition]
+  (let [tool-name (get xition "tool-name")]
+    (resolve-mcp-response-schema context tool-name)))
+
 (defn tool-cache->request-schema [tool-cache]
   (let [tool-name (get tool-cache "name")
         input-schema (get tool-cache "inputSchema")]
