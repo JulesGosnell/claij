@@ -162,18 +162,18 @@
 ;; cache them, and use for subsumption checking in FSM composition.
 ;;------------------------------------------------------------------------------
 
-(defn make-fsm-action
-  "Create an FSM action factory. Returns a function compatible with :id->action.
+(defn make-fsm-action*
+  "Create an FSM action factory with injected loader. Internal - use make-fsm-action.
    
-   Unlike def-action, this is a regular function because fsm-action needs
-   special handling - schemas are computed from child FSM at runtime.
+   fsm-loader: fn of [context fsm-id version] -> fsm-def (or nil if not found)
+               version may be nil, meaning 'latest'
    
    The returned action:
-   - Loads child FSM on first invocation (deferred loading)
+   - Loads child FSM via fsm-loader (deferred to runtime)
    - Runs child FSM asynchronously via :fsm/on-complete
    - Filters trail based on trail-mode config
    - Transforms child output to parent transition format"
-  []
+  [fsm-loader]
   ;; Return a factory function matching action protocol
   ;; Add :action/name metadata so curried-action? recognizes it
   (with-meta
@@ -184,24 +184,18 @@
             success-to (get config "success-to")
             failure-to (get config "failure-to" "end")
             timeout-ms (get config "timeout-ms" 60000)
-            trail-mode (get config "trail-mode" :summary)]
+            trail-mode (keyword (get config "trail-mode" "summary"))]
 
         ;; Return runtime function
         (fn [context event _parent-trail handler]
           (log/info (str "   fsm-action: loading " fsm-id
                          (when fsm-version (str " v" fsm-version))))
 
-          (let [{:keys [store]} context
-
-                ;; Load child FSM from store
-                ;; If no version specified, get latest version first
-                version-to-load (or fsm-version
-                                    (store/fsm-latest-version store fsm-id))
-                child-fsm (when version-to-load
-                            (store/fsm-load-version store fsm-id version-to-load))
+          (let [;; Load child FSM via injected loader
+                child-fsm (fsm-loader context fsm-id fsm-version)
 
                 _ (when (nil? child-fsm)
-                    (throw (ex-info "Child FSM not found in store"
+                    (throw (ex-info "Child FSM not found"
                                     {:fsm-id fsm-id :fsm-version fsm-version})))
 
                 ;; Create completion handler that calls parent handler
@@ -267,6 +261,26 @@
                             ["trail-mode" {:optional true} [:enum :omit :summary :full]]]
      :action/input-schema :any
      :action/output-schema :any}))
+
+;; Pre-built fsm-action for registration in :id->action
+(defn store-fsm-loader
+  "Production FSM loader - loads FSM from store in context.
+   
+   If version is nil, loads latest version.
+   Returns FSM definition or nil if not found."
+  [context fsm-id version]
+  (let [{:keys [store]} context
+        version-to-load (or version
+                            (store/fsm-latest-version store fsm-id))]
+    (when version-to-load
+      (store/fsm-load-version store fsm-id version-to-load))))
+
+(defn make-fsm-action
+  "Create an FSM action factory with production store loader.
+   
+   For testing, use make-fsm-action* directly with a stub loader."
+  []
+  (make-fsm-action* store-fsm-loader))
 
 ;; Pre-built fsm-action for registration in :id->action
 (def fsm-action-factory
