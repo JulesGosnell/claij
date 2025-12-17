@@ -14,6 +14,9 @@
    [claij.mcp.bridge :as bridge]
    [claij.mcp.schema :as mcp-schema]))
 
+;; Forward declaration for mcp-hat-maker to reference
+(declare mcp-service-action)
+
 ;;==============================================================================
 ;; Tool Prompt Generation
 ;;==============================================================================
@@ -72,6 +75,7 @@
    Creates a dynamic hat that:
    - Starts MCP bridge on first use (or reuses existing)
    - Generates service state for tool calls
+   - Registers mcp-service-action in :id->action
    - Adds stop-hook for bridge cleanup
    - Registers schema functions for request/response validation
    
@@ -93,10 +97,12 @@
           (log/info "MCP hat: reusing existing bridge for" state-id)
           (let [cache (get-in context [:hats :mcp :cache])
                 tools (get cache "tools" [])
-                ;; Register schema functions for this state
-                ctx' (update context :id->schema merge
-                             {request-schema-id hat-mcp-request-schema-fn
-                              response-schema-id hat-mcp-response-schema-fn})]
+                ;; Register schema functions and action for this state
+                ctx' (-> context
+                         (update :id->schema merge
+                                 {request-schema-id hat-mcp-request-schema-fn
+                                  response-schema-id hat-mcp-response-schema-fn})
+                         (update :id->action assoc "mcp-service" mcp-service-action))]
             [ctx'
              {"states" [{"id" service-id
                          "action" "mcp-service"}]
@@ -111,7 +117,7 @@
           (log/info "MCP hat: initializing bridge for" state-id)
           (let [{:keys [bridge cache]} (bridge/init-bridge mcp-config {:timeout-ms timeout-ms})
                 tools (get cache "tools" [])
-                ;; Add bridge, cache, and schema functions to context
+                ;; Add bridge, cache, action, and schema functions to context
                 ctx' (-> context
                          (assoc-in [:hats :mcp :bridge] bridge)
                          (assoc-in [:hats :mcp :cache] cache)
@@ -119,6 +125,8 @@
                          (update :id->schema merge
                                  {request-schema-id hat-mcp-request-schema-fn
                                   response-schema-id hat-mcp-response-schema-fn})
+                         ;; Register the mcp-service action
+                         (update :id->action assoc "mcp-service" mcp-service-action)
                          ;; Add stop hook for cleanup
                          (hat/add-stop-hook
                           (fn [ctx]
@@ -142,21 +150,30 @@
   "Action for MCP service state. Routes tool calls to bridge.
    
    Expects bridge at [:hats :mcp :bridge] in context.
-   Handles single or batched tool calls."
-  [_config _fsm _ix _state]
+   Handles single or batched tool calls.
+   
+   This is a curried action: call with config to get the action function."
+  [_config _fsm _ix {state-id "id" :as _state}]
   (fn [context event _trail handler]
     (let [bridge (get-in context [:hats :mcp :bridge])
-          message (get event "message")
-          ;; Normalize to batch format
-          requests (if (vector? message) message [message])
-          ;; Execute batch
-          responses (bridge/send-and-await bridge requests 30000)
-          ;; If single request, unwrap the response
-          result (if (vector? message) responses (first responses))]
-      ;; Drain notifications
-      (bridge/drain-notifications bridge)
-      ;; Return to calling state
-      (let [[from _to] (get-in event ["id"])
-            response-event {"id" [(get-in _state ["id"]) from]
-                            "message" result}]
-        (handler context response-event)))))
+          [from _to] (get event "id")
+          message (get event "message")]
+      (log/info "mcp-service-action:" state-id "from" from "message:" (pr-str message))
+      (if-not bridge
+        ;; No bridge - error
+        (do
+          (log/error "mcp-service-action: no bridge in context")
+          (handler context {"id" [state-id from]
+                            "message" {"error" "No MCP bridge"}}))
+        ;; Execute tool calls
+        (let [;; Normalize to batch format
+              requests (if (vector? message) message [message])
+              ;; Execute batch
+              responses (bridge/send-and-await bridge requests 30000)
+              ;; If single request, unwrap the response
+              result (if (vector? message) responses (first responses))]
+          ;; Drain notifications
+          (bridge/drain-notifications bridge)
+          ;; Return to calling state
+          (handler context {"id" [state-id from]
+                            "message" result}))))))

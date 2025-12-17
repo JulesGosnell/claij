@@ -51,6 +51,8 @@
       ;; Schema functions registered
       (is (fn? (get-in ctx' [:id->schema "mc-mcp-request"])))
       (is (fn? (get-in ctx' [:id->schema "mc-mcp-response"])))
+      ;; Action registered
+      (is (= mcp-service-action (get-in ctx' [:id->action "mcp-service"])))
       ;; Fragment has correct structure
       (is (= 1 (count (get fragment "states"))))
       (is (= "mc-mcp" (get-in fragment ["states" 0 "id"])))
