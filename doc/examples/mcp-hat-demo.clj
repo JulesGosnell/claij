@@ -1,28 +1,34 @@
-;; Minimal MCP Hat Demo for REPL
-;; 
-;; This demonstrates Grok (or any LLM) using MCP tools via the hat system.
-;; Copy and paste sections into your REPL.
-;;
-;; The FSM has a single LLM state with an MCP hat that provides tool access.
-;; When you ask a question requiring system info, the LLM will:
-;; 1. Call the bash tool via MCP
-;; 2. Get the result back
-;; 3. Return the final answer
+(ns mcp-hat-demo
+  "Demonstration of MCP Hat with Grok for tool calling.
+   
+   This example shows:
+   - Minimal FSM with LLM state wearing MCP hat
+   - Grok (x-ai) provider for tool-calling
+   - MCP bridge initialization and tool execution
+   
+   Usage: Evaluate forms in order in your REPL.")
 
-;;==============================================================================
-;; 1. Setup - Load namespaces
-;;==============================================================================
+;;------------------------------------------------------------------------------
+;; Setup - reload all relevant namespaces
+;;------------------------------------------------------------------------------
 
-(require '[claij.fsm :refer [start-fsm]]
-         '[claij.hat :as hat]
-         '[claij.hat.mcp :as mcp-hat])
+(comment
+  ;; Reload namespaces
+  (require '[claij.fsm :refer [start-fsm]] :reload-all)
+  (require '[claij.hat :as hat] :reload)
+  (require '[claij.hat.mcp :as mcp-hat] :reload)
+  (require '[claij.mcp.schema] :reload)
+  (require '[claij.actions :refer [end-action]]))
 
-;; Import the var (not the value) so metadata is preserved
+;;------------------------------------------------------------------------------
+;; Action vars (preserve metadata for curried action detection)
+;;------------------------------------------------------------------------------
+
 (def llm-action (var claij.fsm/llm-action))
 
-;;==============================================================================
-;; 2. Define a minimal FSM
-;;==============================================================================
+;;------------------------------------------------------------------------------
+;; FSM Definition
+;;------------------------------------------------------------------------------
 
 (def hostname-fsm
   {"id" "hostname-demo"
@@ -31,58 +37,43 @@
               "hats" ["mcp"]
               "prompts" ["You are a helpful assistant with access to MCP tools.
 When asked a question that requires system information, use the bash tool.
-When you have the final answer, respond with id=[\"ask\" \"end\"] and include your answer in the result field."]}
-             {"id" "end"}]
-   "xitions" [{"id" ["start" "ask"]
-               "omit" true}
+When you have the final answer, respond with id=[\"ask\", \"end\"] and include your answer in the result field."]}
+             {"id" "end"
+              "action" "end"}]
+   "xitions" [{"id" ["start" "ask"] "omit" true}
               {"id" ["ask" "end"]
                "schema" [:map
                          ["id" [:= ["ask" "end"]]]
                          ["result" :string]]}]})
 
-;;==============================================================================
-;; 3. Create context with hat registry
-;;
-;; Change :llm/provider and :llm/model to test different LLMs:
-;;   - "x-ai" / "grok-code-fast-1"
-;;   - "anthropic" / "claude-sonnet-4-20250514"
-;;   - "google" / "gemini-2.0-flash"
-;;   - "openai" / "gpt-4o-mini"
-;;==============================================================================
+;;------------------------------------------------------------------------------
+;; Context with Grok provider and MCP hat
+;;------------------------------------------------------------------------------
 
 (def context
-  {:id->action {"llm" llm-action}
+  {:id->action {"llm" llm-action
+                "end" (var claij.actions/end-action)}
    :llm/provider "x-ai"
    :llm/model "grok-code-fast-1"
-   :hats {:registry (-> (hat/make-hat-registry)
-                        (hat/register-hat "mcp" mcp-hat/mcp-hat-maker))}})
+   :hats {:registry (-> (claij.hat/make-hat-registry)
+                        (claij.hat/register-hat "mcp" claij.hat.mcp/mcp-hat-maker))}})
 
-;;==============================================================================
-;; 4. Run the FSM
-;;==============================================================================
+;;------------------------------------------------------------------------------
+;; Run the demo
+;;------------------------------------------------------------------------------
 
-(println "Starting FSM...")
-(def fsm-instance (start-fsm context hostname-fsm))
+(comment
+  ;; Start FSM
+  (def fsm (start-fsm context hostname-fsm))
 
-;; Submit a question
-((:submit fsm-instance) {"question" "What is my hostname?"})
+  ;; Submit question
+  ((:submit fsm) {"question" "What is my hostname?"})
 
-;; Wait for result (up to 120 seconds for tool calls)
-(println "Waiting for result...")
-(def result ((:await fsm-instance) 120000))
+  ;; Wait for result (2 minute timeout)
+  (def result ((:await fsm) 120000))
 
-(println "\n=== RESULT ===")
-(if (= result :timeout)
-  (println "FSM timed out")
-  (println result))
+  ;; Print result
+  (println "Result:" result)
 
-;; Clean up
-((:stop fsm-instance))
-(println "Done.")
-
-;;==============================================================================
-;; Alternative questions to try:
-;;   {"question" "What is today's date?"}
-;;   {"question" "List the files in /tmp"}
-;;   {"question" "What Clojure version is installed?"}
-;;==============================================================================
+  ;; Clean up
+  ((:stop fsm)))
