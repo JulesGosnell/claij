@@ -57,6 +57,55 @@
                            ["data" {:description "Log data"} :any]
                            ["logger" {:optional true :description "Logger name"} :string]]})
 
+;; Inlined schemas for validation without MCP registry
+;; These expand refs to avoid :malli.core/invalid-ref errors during validation
+
+(def inlined-content-item
+  "Content item schema fully inlined (no refs)."
+  [:or
+   [:map {:closed true} ["type" [:= "text"]] ["text" :string]]
+   [:map {:closed true} ["type" [:= "image"]] ["data" :string] ["mimeType" :string]]
+   [:map {:closed true} ["type" [:= "audio"]] ["data" :string] ["mimeType" :string]]
+   [:map {:closed true} ["type" [:= "resource_link"]] ["uri" :string]]
+   [:map {:closed true} ["type" [:= "resource"]] ["resource" :map]]])
+
+(def inlined-tool-response-schema
+  "Tool response schema fully inlined (no refs)."
+  [:map
+   ["content" [:vector inlined-content-item]]
+   ["isError" {:optional true} :boolean]
+   ["structuredContent" {:optional true} :map]])
+
+(def inlined-resource-content
+  "Resource content schema fully inlined."
+  [:or
+   [:map {:closed true} ["uri" :string] ["text" :string] ["mimeType" {:optional true} :string]]
+   [:map {:closed true} ["uri" :string] ["blob" :string] ["mimeType" {:optional true} :string]]])
+
+(def inlined-resource-response-schema
+  "Resource response schema fully inlined."
+  [:map {:closed true}
+   ["contents" [:vector inlined-resource-content]]])
+
+(def inlined-prompt-message
+  "Prompt message schema fully inlined."
+  [:map {:closed true}
+   ["role" [:enum "user" "assistant"]]
+   ["content" inlined-content-item]])
+
+(def inlined-prompt-response-schema
+  "Prompt response schema fully inlined."
+  [:map
+   ["description" {:optional true} :string]
+   ["messages" [:vector inlined-prompt-message]]])
+
+(def inlined-logging-notification-schema
+  "Logging notification schema fully inlined."
+  [:map {:closed true}
+   ["level" [:enum "debug" "info" "notice" "warning" "error" "critical" "alert" "emergency"]]
+   ["data" :any]
+   ["logger" {:optional true} :string]])
+
 (def mcp-registry (mr/composite-registry base-registry mcp-schemas))
 
 (def tool-response-schema [:ref "tool-response"])
@@ -243,7 +292,10 @@
 
 (defn tool-cache->response-schema [_] [:ref "tool-response"])
 (defn tools-cache->request-schema [tools-cache] (into [:or] (mapv tool-cache->request-schema tools-cache)))
-(defn tools-cache->response-schema [_] [:ref "tool-response"])
+(defn tools-cache->response-schema
+  "Response schema for tool calls - uses inlined schema to avoid ref resolution issues."
+  [_]
+  inlined-tool-response-schema)
 
 (defn resources-cache->request-schema [resources-cache]
   [:map {:closed true} ["uri" (into [:enum] (mapv #(get % "uri") resources-cache))]])
@@ -272,15 +324,17 @@
                   true (conj (wrap-jsonrpc "logging/setLevel" logging-set-level-request-schema)))]
     (into [:or] schemas)))
 
-(defn mcp-cache->response-schema [{tools "tools" :as _cache}]
+(defn mcp-cache->response-schema
+  "Generate response schema for all MCP methods. Uses inlined schemas to avoid ref resolution issues."
+  [{tools "tools" :as _cache}]
   (let [wrap-response (fn [result-schema]
                         [:map {:closed true} ["jsonrpc" [:= "2.0"]] ["id" :int] ["result" result-schema]])
         wrap-notification (fn [method params-schema]
                             [:map {:closed true} ["jsonrpc" [:= "2.0"]] ["method" [:= method]] ["params" params-schema]])
         tool-response (when (seq tools) (wrap-response (tools-cache->response-schema tools)))
-        schemas (cond-> [(wrap-response resource-response-schema)
-                         (wrap-response prompt-response-schema)
-                         (wrap-notification "notifications/message" logging-notification-schema)]
+        schemas (cond-> [(wrap-response inlined-resource-response-schema)
+                         (wrap-response inlined-prompt-response-schema)
+                         (wrap-notification "notifications/message" inlined-logging-notification-schema)]
                   tool-response (conj tool-response))]
     (into [:or] schemas)))
 
