@@ -453,8 +453,8 @@
    - Other keys as needed by actions (e.g. :store, :provider, :model)
    
    Optional context keys:
-   - :hat-registry - Map of hat-name -> hat-maker. If present, don-hats is called
-                     to expand any hat declarations before starting.
+   - [:hats :registry] - Map of hat-name -> hat-maker. If present, don-hats is called
+                         to expand any hat declarations before starting.
    
    Returns a map with:
    - :submit - Function to submit input data to the FSM
@@ -476,14 +476,14 @@
    With hats:
      (let [registry (-> (hat/make-hat-registry)
                         (hat/register-hat \"mcp\" mcp-hat-maker))
-           context (assoc context :hat-registry registry)
+           context (assoc-in context [:hats :registry] registry)
            {:keys [submit await]} (start-fsm context fsm)]
        ...)
    
    NOTE: Currently assumes exactly one transition from 'start'. See TODO above."
   [context {ss "states" xs "xitions" :as fsm}]
   (let [;; Don hats if registry present (expands hat declarations -> states/xitions)
-        [context fsm] (if-let [registry (:hat-registry context)]
+        [context fsm] (if-let [registry (get-in context [:hats :registry])]
                         (do
                           (log/info "Donning hats...")
                           (hat/don-hats context fsm registry))

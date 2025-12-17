@@ -254,19 +254,19 @@
    - context: the FSM context
    - hook-fn: function (fn [context]) that performs cleanup
    
-   Returns updated context with hook added to :fsm/stop-hooks."
+   Returns updated context with hook added to [:hats :stop-hooks]."
   [context hook-fn]
-  (update context :fsm/stop-hooks (fnil conj []) hook-fn))
+  (update-in context [:hats :stop-hooks] (fnil conj []) hook-fn))
 
 (defn run-stop-hooks
   "Run all stop hooks in reverse order (LIFO).
    
    Parameters:
-   - context: the FSM context with :fsm/stop-hooks
+   - context: the FSM context with [:hats :stop-hooks]
    
    Returns context after all hooks have run."
   [context]
-  (let [hooks (get context :fsm/stop-hooks [])]
+  (let [hooks (get-in context [:hats :stop-hooks] [])]
     (log/info "Running" (count hooks) "stop hooks")
     (reduce (fn [ctx hook]
               (try

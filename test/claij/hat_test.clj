@@ -254,10 +254,10 @@
 ;;------------------------------------------------------------------------------
 
 (deftest add-stop-hook-test
-  (testing "add-stop-hook adds to :fsm/stop-hooks"
+  (testing "add-stop-hook adds to [:hats :stop-hooks]"
     (let [hook (fn [ctx] ctx)
           ctx (add-stop-hook {} hook)]
-      (is (= [hook] (:fsm/stop-hooks ctx)))))
+      (is (= [hook] (get-in ctx [:hats :stop-hooks])))))
 
   (testing "add-stop-hook appends to existing hooks"
     (let [hook1 (fn [ctx] ctx)
@@ -265,7 +265,7 @@
           ctx (-> {}
                   (add-stop-hook hook1)
                   (add-stop-hook hook2))]
-      (is (= [hook1 hook2] (:fsm/stop-hooks ctx))))))
+      (is (= [hook1 hook2] (get-in ctx [:hats :stop-hooks]))))))
 
 (deftest run-stop-hooks-test
   (testing "run-stop-hooks calls hooks in reverse order (LIFO)"
