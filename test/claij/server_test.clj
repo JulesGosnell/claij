@@ -55,8 +55,7 @@
 
   (testing "fsms registry"
     (testing "contains expected FSM keys"
-      (is (contains? fsms "code-review-fsm"))
-      (is (contains? fsms "mcp-fsm")))
+      (is (contains? fsms "code-review-fsm")))
 
     (testing "all values are valid FSM maps"
       (doseq [[k v] fsms]
@@ -99,8 +98,7 @@
         (is (= 200 (:status response)))
         (is (vector? (:body response)))
         (is (every? string? (:body response)))
-        (is (some #{"code-review-fsm"} (:body response)))
-        (is (some #{"mcp-fsm"} (:body response))))))
+        (is (some #{"code-review-fsm"} (:body response))))))
 
   (testing "fsm-document-handler"
     (testing "returns 200 with FSM document for valid id"

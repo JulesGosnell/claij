@@ -25,8 +25,7 @@
    ;; Internal
    [claij.util :refer [assert-env-var clj->json json->clj]]
    [claij.graph :refer [fsm->dot]]
-   [claij.fsm.code-review-fsm :refer [code-review-fsm]]
-   [claij.fsm.mcp-fsm :refer [mcp-fsm]])
+   [claij.fsm.code-review-fsm :refer [code-review-fsm]])
   (:import
    [java.net URL])
   (:gen-class))
@@ -88,8 +87,7 @@
 ;; FSM Registry
 
 (def fsms
-  {"code-review-fsm" code-review-fsm
-   "mcp-fsm" mcp-fsm})
+  {"code-review-fsm" code-review-fsm})
 
 ;;------------------------------------------------------------------------------
 ;; Handlers
