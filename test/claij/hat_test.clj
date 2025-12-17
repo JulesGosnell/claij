@@ -1,7 +1,9 @@
 (ns claij.hat-test
   (:require
    [clojure.test :refer [deftest testing is]]
-   [claij.hat :refer [make-hat static-echo-hat-maker dynamic-counter-hat-maker]]))
+   [claij.hat :refer [make-hat static-echo-hat-maker dynamic-counter-hat-maker
+                      make-hat-registry register-hat get-hat-maker
+                      merge-fragment don-hats]]))
 
 ;;------------------------------------------------------------------------------
 ;; Task 2: Hat-maker Contract Tests
@@ -107,3 +109,141 @@
           (is (string? from) "Xition should have string from-state")
           (is (string? to) "Xition should have string to-state"))
         (is (some? (get xition "schema")) "Xition should have schema")))))
+
+;;------------------------------------------------------------------------------
+;; Task 3: Registry Tests
+;;------------------------------------------------------------------------------
+
+(deftest registry-test
+  (testing "create empty registry"
+    (is (= {} (make-hat-registry))))
+
+  (testing "register and retrieve hat-maker"
+    (let [reg (-> (make-hat-registry)
+                  (register-hat "echo" static-echo-hat-maker))]
+      (is (= static-echo-hat-maker (get-hat-maker reg "echo")))))
+
+  (testing "unknown hat returns nil"
+    (let [reg (make-hat-registry)]
+      (is (nil? (get-hat-maker reg "unknown"))))))
+
+;;------------------------------------------------------------------------------
+;; Task 3: Fragment Merging Tests
+;;------------------------------------------------------------------------------
+
+(deftest merge-fragment-test
+  (let [base-fsm {"id" "test"
+                  "states" [{"id" "mc" "prompts" ["Original prompt"]}
+                            {"id" "end"}]
+                  "xitions" [{"id" ["start" "mc"] "schema" :any}]}]
+
+    (testing "merge adds states"
+      (let [fragment {"states" [{"id" "mc-echo" "action" "echo"}]}
+            result (merge-fragment base-fsm fragment "mc")]
+        (is (= 3 (count (get result "states"))))
+        (is (some #(= "mc-echo" (get % "id")) (get result "states")))))
+
+    (testing "merge adds xitions"
+      (let [fragment {"xitions" [{"id" ["mc" "mc-echo"] "schema" :any}]}
+            result (merge-fragment base-fsm fragment "mc")]
+        (is (= 2 (count (get result "xitions"))))))
+
+    (testing "merge adds prompts to target state"
+      (let [fragment {"prompts" ["New prompt"]}
+            result (merge-fragment base-fsm fragment "mc")
+            mc-state (first (filter #(= "mc" (get % "id")) (get result "states")))]
+        (is (= ["Original prompt" "New prompt"] (get mc-state "prompts")))))
+
+    (testing "merge prompts to state without existing prompts"
+      (let [fragment {"prompts" ["New prompt"]}
+            result (merge-fragment base-fsm fragment "end")
+            end-state (first (filter #(= "end" (get % "id")) (get result "states")))]
+        (is (= ["New prompt"] (get end-state "prompts")))))))
+
+;;------------------------------------------------------------------------------
+;; Task 3: Don Hats Tests
+;;------------------------------------------------------------------------------
+
+(deftest don-hats-state-level-test
+  (let [registry (-> (make-hat-registry)
+                     (register-hat "echo" static-echo-hat-maker))]
+
+    (testing "don state-level hat (string form)"
+      (let [fsm {"id" "test"
+                 "states" [{"id" "mc" "hats" ["echo"]}
+                           {"id" "end"}]
+                 "xitions" []}
+            [ctx' fsm'] (don-hats {} fsm registry)]
+        ;; Should have added echo state
+        (is (= 3 (count (get fsm' "states"))))
+        (is (some #(= "mc-echo" (get % "id")) (get fsm' "states")))
+        ;; Should have added xitions
+        (is (= 2 (count (get fsm' "xitions"))))
+        ;; Should have added prompts
+        (let [mc (first (filter #(= "mc" (get % "id")) (get fsm' "states")))]
+          (is (= ["You can echo messages via mc-echo"] (get mc "prompts"))))))
+
+    (testing "don state-level hat (map form with config)"
+      (let [fsm {"id" "test"
+                 "states" [{"id" "mc" "hats" [{"echo" {:some "config"}}]}
+                           {"id" "end"}]
+                 "xitions" []}
+            [ctx' fsm'] (don-hats {} fsm registry)]
+        (is (= 3 (count (get fsm' "states"))))))
+
+    (testing "multiple hats on same state"
+      (let [registry' (register-hat registry "counter" dynamic-counter-hat-maker)
+            fsm {"id" "test"
+                 "states" [{"id" "mc" "hats" ["echo" "counter"]}
+                           {"id" "end"}]
+                 "xitions" []}
+            [ctx' fsm'] (don-hats {} fsm registry')]
+        ;; Each hat adds one state
+        (is (= 4 (count (get fsm' "states"))))))))
+
+(deftest don-hats-context-modification-test
+  (let [registry (-> (make-hat-registry)
+                     (register-hat "counter" dynamic-counter-hat-maker))]
+
+    (testing "dynamic hat can modify context"
+      (let [fsm {"id" "test"
+                 "states" [{"id" "mc" "hats" ["counter"]}]
+                 "xitions" []}
+            [ctx' fsm'] (don-hats {} fsm registry)]
+        ;; Counter hat initializes :counter/value
+        (is (= 100 (:counter/value ctx')))))))
+
+(deftest don-hats-unknown-hat-test
+  (let [registry (make-hat-registry)]
+
+    (testing "unknown hat is skipped with warning"
+      (let [fsm {"id" "test"
+                 "states" [{"id" "mc" "hats" ["unknown"]}]
+                 "xitions" []}
+            [ctx' fsm'] (don-hats {} fsm registry)]
+        ;; Should be unchanged (no states added)
+        (is (= 1 (count (get fsm' "states"))))))))
+
+(deftest don-hats-fsm-level-test
+  (testing "FSM-level hats work"
+    (let [;; Create a linking hat that adds error-handler state
+          link-hat-maker (fn [state-ids config]
+                           (fn [context]
+                             [context
+                              {"states" [{"id" "error-handler" "action" "error"}]
+                               "xitions" (mapv (fn [sid]
+                                                 {"id" [sid "error-handler"]
+                                                  "schema" :any})
+                                               state-ids)}]))
+          registry (-> (make-hat-registry)
+                       (register-hat "link" link-hat-maker))
+          fsm {"id" "test"
+               "hats" [["link" ["mc" "worker"]]]
+               "states" [{"id" "mc"}
+                         {"id" "worker"}]
+               "xitions" []}
+          [ctx' fsm'] (don-hats {} fsm registry)]
+      ;; Should have added error-handler state
+      (is (= 3 (count (get fsm' "states"))))
+      ;; Should have added xitions from both states to error-handler
+      (is (= 2 (count (get fsm' "xitions")))))))
