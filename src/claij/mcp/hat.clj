@@ -14,7 +14,8 @@
    [clojure.string :as str]
    [clojure.tools.logging :as log]
    [claij.hat :as hat]
-   [claij.mcp.bridge :as bridge]))
+   [claij.mcp.bridge :as bridge]
+   [claij.mcp.client :as client]))
 
 ;;------------------------------------------------------------------------------
 ;; Fragment Generation (private)
@@ -94,3 +95,33 @@
                                               (bridge/stop-bridge (get-in ctx [:hats :mcp :bridge]))
                                               ctx)))]
             [ctx' (generate-fragment state-id service-id cache)]))))))
+
+;;------------------------------------------------------------------------------
+;; MCP Service Action
+;;------------------------------------------------------------------------------
+
+(defn mcp-service-action
+  "Action that routes tool calls to MCP bridge.
+   
+   Simplified version for hat usage - bridge already initialized at [:hats :mcp :bridge].
+   
+   Supports batched tool calls:
+   - Single: {\"jsonrpc\" \"2.0\" ...}
+   - Batch: [{...} {...}]
+   
+   Returns to caller state with response(s)."
+  [_config _fsm ix _state]
+  (fn [context event _trail handler]
+    (let [{[from to] "id"} ix
+          bridge (get-in context [:hats :mcp :bridge])
+          ;; Event is the tool call request(s)
+          requests (if (vector? event) event [event])
+          ;; Execute via client batch API
+          responses (client/call-batch bridge requests {:timeout-ms 30000})
+          ;; Unwrap if single request
+          result (if (vector? event) responses (first responses))]
+      (log/info "mcp-service-action:" (count requests) "tool calls from" from)
+      ;; Drain any notifications
+      (bridge/drain-notifications bridge)
+      ;; Return to caller state
+      (handler context {"id" [to from] "message" result}))))
