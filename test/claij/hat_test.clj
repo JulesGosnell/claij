@@ -3,7 +3,8 @@
    [clojure.test :refer [deftest testing is]]
    [claij.hat :refer [make-hat static-echo-hat-maker dynamic-counter-hat-maker
                       make-hat-registry register-hat get-hat-maker
-                      merge-fragment don-hats]]))
+                      merge-fragment don-hats]]
+   [claij.fsm :as fsm]))
 
 ;;------------------------------------------------------------------------------
 ;; Task 2: Hat-maker Contract Tests
@@ -247,3 +248,41 @@
       (is (= 3 (count (get fsm' "states"))))
       ;; Should have added xitions from both states to error-handler
       (is (= 2 (count (get fsm' "xitions")))))))
+
+;;------------------------------------------------------------------------------
+;; Task 4: start-fsm Integration Test
+;;------------------------------------------------------------------------------
+
+(deftest start-fsm-with-hats-test
+  (testing "start-fsm integrates with hat registry"
+    ;; This test verifies that start-fsm calls don-hats when :hat-registry is present
+    ;; We use an atom to track whether the hat was donned
+    (let [hat-donned (atom false)
+          tracking-hat-maker (fn [state-id config]
+                               (fn [context]
+                                 (reset! hat-donned true)
+                                 [context
+                                  {"states" [{"id" (str state-id "-track") "action" "end"}]
+                                   "xitions" [{"id" [state-id (str state-id "-track")]
+                                               "schema" :any}]}]))
+          registry (-> (make-hat-registry)
+                       (register-hat "track" tracking-hat-maker))
+          fsm {"id" "test-hat-integration"
+               "states" [{"id" "first" "hats" ["track"]}
+                         {"id" "end" "action" "end"}]
+               "xitions" [{"id" ["start" "first"] "schema" :any}
+                          {"id" ["first" "end"] "schema" :any}]}
+          context {:id->action {"end" (fn [_ _ _ _] (fn [ctx event _ handler]
+                                                      (handler ctx event)))}
+                   :hat-registry registry}]
+
+      ;; Before start-fsm, hat not donned
+      (is (false? @hat-donned))
+
+      ;; Start FSM (should trigger don-hats)
+      (let [{:keys [stop]} (fsm/start-fsm context fsm)]
+        (try
+          ;; After start-fsm, hat should have been donned
+          (is (true? @hat-donned) "Hat should be donned during start-fsm")
+          (finally
+            (stop)))))))

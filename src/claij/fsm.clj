@@ -9,7 +9,8 @@
    [claij.util :refer [index-by ->key map-values make-retrier]]
    [claij.malli :refer [def-fsm fsm-registry base-registry expand-refs-for-llm]]
    [claij.action :refer [def-action action-input-schema action-output-schema]]
-   [claij.llm :refer [call]]))
+   [claij.llm :refer [call]]
+   [claij.hat :as hat]))
 
 ;;------------------------------------------------------------------------------
 ;; Action Dispatch Helpers
@@ -451,6 +452,10 @@
    - :id->action - Map of action-id to action function
    - Other keys as needed by actions (e.g. :store, :provider, :model)
    
+   Optional context keys:
+   - :hat-registry - Map of hat-name -> hat-maker. If present, don-hats is called
+                     to expand any hat declarations before starting.
+   
    Returns a map with:
    - :submit - Function to submit input data to the FSM
    - :await - Function to wait for FSM completion, optionally with timeout-ms
@@ -468,9 +473,27 @@
            (println \"FSM timed out\")
            (println \"FSM completed:\" result))))
    
+   With hats:
+     (let [registry (-> (hat/make-hat-registry)
+                        (hat/register-hat \"mcp\" mcp-hat-maker))
+           context (assoc context :hat-registry registry)
+           {:keys [submit await]} (start-fsm context fsm)]
+       ...)
+   
    NOTE: Currently assumes exactly one transition from 'start'. See TODO above."
   [context {ss "states" xs "xitions" :as fsm}]
-  (let [;; Build FSM registry once at startup - includes base + FSM schemas + any context registry
+  (let [;; Don hats if registry present (expands hat declarations -> states/xitions)
+        [context fsm] (if-let [registry (:hat-registry context)]
+                        (do
+                          (log/info "Donning hats...")
+                          (hat/don-hats context fsm registry))
+                        [context fsm])
+
+        ;; Re-bind ss and xs from potentially modified fsm
+        ss (get fsm "states")
+        xs (get fsm "xitions")
+
+        ;; Build FSM registry once at startup - includes base + FSM schemas + any context registry
         fsm-registry (build-fsm-registry fsm context)
 
         ;; Create completion promise (internal to start-fsm)
