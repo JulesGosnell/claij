@@ -13,9 +13,12 @@
 ;; 1. Setup - Load namespaces
 ;;==============================================================================
 
-(require '[claij.fsm :refer [start-fsm llm-action]]
+(require '[claij.fsm :refer [start-fsm]]
          '[claij.hat :as hat]
          '[claij.hat.mcp :as mcp-hat])
+
+;; Import the var (not the value) so metadata is preserved
+(def llm-action (var claij.fsm/llm-action))
 
 ;;==============================================================================
 ;; 2. Define a minimal FSM
@@ -28,13 +31,13 @@
               "hats" ["mcp"]
               "prompts" ["You are a helpful assistant with access to MCP tools.
 When asked a question that requires system information, use the bash tool.
-When you have the final answer, respond with id=\"end\" and include your answer in the result field."]}
+When you have the final answer, respond with id=[\"ask\" \"end\"] and include your answer in the result field."]}
              {"id" "end"}]
    "xitions" [{"id" ["start" "ask"]
                "omit" true}
               {"id" ["ask" "end"]
                "schema" [:map
-                         ["id" [:= "end"]]
+                         ["id" [:= ["ask" "end"]]]
                          ["result" :string]]}]})
 
 ;;==============================================================================
