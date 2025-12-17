@@ -91,3 +91,33 @@
                             (bridge/stop-bridge (get-in ctx [:hats :mcp :bridge]))
                             ctx)))]
             [ctx' (make-fragment state-id service-id mcp-data)]))))))
+
+;;------------------------------------------------------------------------------
+;; MCP Service Action
+;;------------------------------------------------------------------------------
+
+(defn mcp-service-action
+  "Action that routes tool calls to MCP bridge.
+   
+   Bridge already initialized at [:hats :mcp :bridge] by mcp-hat-maker.
+   
+   Supports batched tool calls:
+   - Single: {\"jsonrpc\" \"2.0\" ...}
+   - Batch: [{...} {...}]
+   
+   Returns to caller state with response(s)."
+  [_config _fsm ix _state]
+  (fn [context event _trail handler]
+    (let [{[from to] "id"} ix
+          bridge (get-in context [:hats :mcp :bridge])
+          ;; Event is the tool call request(s)
+          requests (if (vector? event) event [event])
+          ;; Execute via bridge batch API
+          responses (bridge/send-and-await bridge requests 30000)
+          ;; Unwrap if single request
+          result (if (vector? event) responses (first responses))]
+      (log/info "mcp-service-action:" (count requests) "tool calls from" from)
+      ;; Drain any notifications
+      (bridge/drain-notifications bridge)
+      ;; Return to caller state
+      (handler context {"id" [to from] "message" result}))))
