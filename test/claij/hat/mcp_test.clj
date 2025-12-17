@@ -58,8 +58,9 @@
       ;; Schema functions registered
       (is (fn? (get-in ctx' [:id->schema "mc-mcp-request"])))
       (is (fn? (get-in ctx' [:id->schema "mc-mcp-response"])))
-      ;; Action registered
-      (is (= mcp-service-action (get-in ctx' [:id->action "mcp-service"])))
+      ;; Action var registered (for metadata detection)
+      (is (var? (get-in ctx' [:id->action "mcp-service"])))
+      (is (= #'mcp-service-action (get-in ctx' [:id->action "mcp-service"])))
       ;; Fragment has correct structure
       (is (= 1 (count (get fragment "states"))))
       (is (= "mc-mcp" (get-in fragment ["states" 0 "id"])))
@@ -164,7 +165,7 @@
 
 (deftest mcp-service-action-test
   (testing "returns error when no bridge"
-    (let [action-fn (mcp-service-action nil nil nil {"id" "svc"})
+    (let [action-fn (mcp-service-action {} nil nil {"id" "svc"})
           result (atom nil)
           handler (fn [_ctx event] (reset! result event))
           context {}
@@ -175,7 +176,7 @@
   (testing "routes single request to bridge"
     (let [;; Mock bridge that returns fixed response
           mock-bridge {:mock true}
-          action-fn (mcp-service-action nil nil nil {"id" "svc"})
+          action-fn (mcp-service-action {} nil nil {"id" "svc"})
           result (atom nil)
           handler (fn [_ctx event] (reset! result event))
           context {:hats {:mcp {:bridge mock-bridge}}}
@@ -191,7 +192,7 @@
 
   (testing "routes batch requests"
     (let [mock-bridge {:mock true}
-          action-fn (mcp-service-action nil nil nil {"id" "svc"})
+          action-fn (mcp-service-action {} nil nil {"id" "svc"})
           result (atom nil)
           handler (fn [_ctx event] (reset! result event))
           context {:hats {:mcp {:bridge mock-bridge}}}

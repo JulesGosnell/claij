@@ -10,6 +10,7 @@
    {\"hats\" [{\"mcp\" {:services [\"my-server\"]}}]}"
   (:require
    [clojure.tools.logging :as log]
+   [claij.action :refer [def-action]]
    [claij.hat :as hat]
    [claij.mcp.bridge :as bridge]
    [claij.mcp.schema :as mcp-schema]))
@@ -109,7 +110,7 @@
                          (update :id->schema merge
                                  {request-schema-id hat-mcp-request-schema-fn
                                   response-schema-id hat-mcp-response-schema-fn})
-                         (update :id->action assoc "mcp-service" mcp-service-action))]
+                         (update :id->action assoc "mcp-service" #'mcp-service-action))]
             [ctx'
              {"states" [{"id" service-id
                          "action" "mcp-service"}]
@@ -133,7 +134,7 @@
                                  {request-schema-id hat-mcp-request-schema-fn
                                   response-schema-id hat-mcp-response-schema-fn})
                          ;; Register the mcp-service action
-                         (update :id->action assoc "mcp-service" mcp-service-action)
+                         (update :id->action assoc "mcp-service" #'mcp-service-action)
                          ;; Add stop hook for cleanup
                          (hat/add-stop-hook
                           (fn [ctx]
@@ -153,13 +154,12 @@
 ;; MCP Service Action
 ;;==============================================================================
 
-(defn mcp-service-action
+(def-action mcp-service-action
   "Action for MCP service state. Routes tool calls to bridge.
    
    Expects bridge at [:hats :mcp :bridge] in context.
-   Handles single or batched tool calls.
-   
-   This is a curried action: call with config to get the action function."
+   Handles single or batched tool calls."
+  [:map] ;; No config required
   [_config _fsm _ix {state-id "id" :as _state}]
   (fn [context event _trail handler]
     (let [bridge (get-in context [:hats :mcp :bridge])
