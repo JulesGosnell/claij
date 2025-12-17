@@ -13,24 +13,29 @@
 
 (deftest format-tools-prompt-test
   (testing "formats empty tools list"
-    (is (= "No MCP tools available." (format-tools-prompt []))))
+    (is (= "No MCP tools available." (format-tools-prompt "mc" "mc-mcp" []))))
 
   (testing "formats single tool"
     (let [tools [{"name" "read_file"
                   "description" "Read a file"
                   "inputSchema" {"type" "object"
                                  "properties" {"path" {"type" "string"}}}}]
-          prompt (format-tools-prompt tools)]
+          prompt (format-tools-prompt "mc" "mc-mcp" tools)]
       (is (clojure.string/includes? prompt "read_file"))
       (is (clojure.string/includes? prompt "Read a file"))
-      (is (clojure.string/includes? prompt "tool_calls"))))
+      ;; Check for correct routing format
+      (is (clojure.string/includes? prompt "[\"mc\", \"mc-mcp\"]"))
+      (is (clojure.string/includes? prompt "jsonrpc"))))
 
   (testing "formats multiple tools"
     (let [tools [{"name" "tool1" "description" "First"}
                  {"name" "tool2" "description" "Second"}]
-          prompt (format-tools-prompt tools)]
+          prompt (format-tools-prompt "llm" "llm-mcp" tools)]
       (is (clojure.string/includes? prompt "tool1"))
-      (is (clojure.string/includes? prompt "tool2")))))
+      (is (clojure.string/includes? prompt "tool2"))
+      ;; Check state IDs are embedded
+      (is (clojure.string/includes? prompt "llm"))
+      (is (clojure.string/includes? prompt "llm-mcp")))))
 
 ;;------------------------------------------------------------------------------
 ;; Hat Maker Contract Tests (no actual bridge)

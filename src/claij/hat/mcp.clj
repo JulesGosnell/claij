@@ -29,13 +29,20 @@
          (str "\n  Input: " (pr-str inputSchema)))))
 
 (defn format-tools-prompt
-  "Generate prompt text describing available MCP tools."
-  [tools]
+  "Generate prompt text describing available MCP tools.
+   Takes state-id and service-id to generate correct routing instructions."
+  [state-id service-id tools]
   (if (seq tools)
     (str "You have access to the following MCP tools:\n\n"
          (clojure.string/join "\n\n" (map format-tool-schema tools))
-         "\n\nTo call a tool, output a JSON object with:\n"
-         "  {\"tool_calls\": [{\"name\": \"<tool>\", \"arguments\": {...}}]}")
+         "\n\n"
+         "To call a tool, output JSON with id=[\"" state-id "\" \"" service-id "\"] and a message containing "
+         "a JSON-RPC request:\n"
+         "  {\"id\": [\"" state-id "\", \"" service-id "\"],\n"
+         "   \"message\": {\"jsonrpc\": \"2.0\", \"id\": 1, \"method\": \"tools/call\",\n"
+         "               \"params\": {\"name\": \"<tool-name>\", \"arguments\": {...}}}}\n\n"
+         "Tool results will be returned in the message field. You can call multiple tools "
+         "by making successive requests.")
     "No MCP tools available."))
 
 ;;==============================================================================
@@ -110,7 +117,7 @@
                           "schema" request-schema-id}
                          {"id" [service-id state-id]
                           "schema" response-schema-id}]
-              "prompts" [(format-tools-prompt tools)]}]))
+              "prompts" [(format-tools-prompt state-id service-id tools)]}]))
 
         ;; Initialize new bridge
         (do
@@ -140,7 +147,7 @@
                           "schema" request-schema-id}
                          {"id" [service-id state-id]
                           "schema" response-schema-id}]
-              "prompts" [(format-tools-prompt tools)]}]))))))
+              "prompts" [(format-tools-prompt state-id service-id tools)]}]))))))
 
 ;;==============================================================================
 ;; MCP Service Action
