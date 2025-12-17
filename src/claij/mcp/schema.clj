@@ -64,7 +64,10 @@
 (def prompt-response-schema [:ref "prompt-response"])
 (def logging-level-strings #{"debug" "info" "notice" "warning" "error" "critical" "alert" "emergency"})
 (def logging-levels [:ref "logging-level"])
-(def logging-set-level-request-schema [:ref "logging-set-level-request"])
+(def logging-set-level-request-schema
+  "Inlined schema (not using ref) so it works without MCP registry during validation."
+  [:map {:closed true}
+   ["level" [:enum "debug" "info" "notice" "warning" "error" "critical" "alert" "emergency"]]])
 (def logging-notification-schema [:ref "logging-notification"])
 
 ;;------------------------------------------------------------------------------
