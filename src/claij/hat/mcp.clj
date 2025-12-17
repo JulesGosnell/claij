@@ -11,7 +11,8 @@
   (:require
    [clojure.tools.logging :as log]
    [claij.hat :as hat]
-   [claij.mcp.bridge :as bridge]))
+   [claij.mcp.bridge :as bridge]
+   [claij.mcp.schema :as mcp-schema]))
 
 ;;==============================================================================
 ;; Tool Prompt Generation
@@ -35,6 +36,33 @@
     "No MCP tools available."))
 
 ;;==============================================================================
+;; Schema Functions (hat-aware)
+;;==============================================================================
+
+(defn hat-mcp-request-schema-fn
+  "Schema function for hat-based MCP requests.
+   Looks up cache at [:hats :mcp :cache]."
+  [context {xid "id" :as _xition}]
+  (let [cache (get-in context [:hats :mcp :cache])
+        single-request-schema (mcp-schema/mcp-cache->request-schema cache)
+        batch-request-schema [:vector single-request-schema]]
+    [:map {:closed true}
+     ["id" [:= xid]]
+     ["message" [:or single-request-schema batch-request-schema]]]))
+
+(defn hat-mcp-response-schema-fn
+  "Schema function for hat-based MCP responses.
+   Looks up cache at [:hats :mcp :cache]."
+  [context {xid "id" :as _xition}]
+  (let [cache (get-in context [:hats :mcp :cache])
+        single-response-schema (mcp-schema/mcp-cache->response-schema cache)
+        batch-response-schema [:vector single-response-schema]]
+    [:map {:closed true}
+     ["id" [:= xid]]
+     ["document" {:optional true} :string]
+     ["message" {:optional true} [:or single-response-schema batch-response-schema]]]))
+
+;;==============================================================================
 ;; MCP Hat Maker
 ;;==============================================================================
 
@@ -45,6 +73,7 @@
    - Starts MCP bridge on first use (or reuses existing)
    - Generates service state for tool calls
    - Adds stop-hook for bridge cleanup
+   - Registers schema functions for request/response validation
    
    Config options:
    - :config - MCP server config (defaults to claij tools server)
@@ -52,7 +81,10 @@
   [state-id config]
   (let [service-id (str state-id "-mcp")
         mcp-config (or (:config config) bridge/default-mcp-config)
-        timeout-ms (or (:timeout-ms config) 30000)]
+        timeout-ms (or (:timeout-ms config) 30000)
+        ;; Schema IDs are state-specific to avoid conflicts
+        request-schema-id (str state-id "-mcp-request")
+        response-schema-id (str state-id "-mcp-response")]
     (fn [context]
       ;; Check for existing bridge
       (if-let [existing-bridge (get-in context [:hats :mcp :bridge])]
@@ -60,14 +92,18 @@
         (do
           (log/info "MCP hat: reusing existing bridge for" state-id)
           (let [cache (get-in context [:hats :mcp :cache])
-                tools (get cache "tools" [])]
-            [context
+                tools (get cache "tools" [])
+                ;; Register schema functions for this state
+                ctx' (update context :id->schema merge
+                             {request-schema-id hat-mcp-request-schema-fn
+                              response-schema-id hat-mcp-response-schema-fn})]
+            [ctx'
              {"states" [{"id" service-id
                          "action" "mcp-service"}]
               "xitions" [{"id" [state-id service-id]
-                          "schema" "mcp-request-xition"}
+                          "schema" request-schema-id}
                          {"id" [service-id state-id]
-                          "schema" "mcp-response-xition"}]
+                          "schema" response-schema-id}]
               "prompts" [(format-tools-prompt tools)]}]))
 
         ;; Initialize new bridge
@@ -75,10 +111,14 @@
           (log/info "MCP hat: initializing bridge for" state-id)
           (let [{:keys [bridge cache]} (bridge/init-bridge mcp-config {:timeout-ms timeout-ms})
                 tools (get cache "tools" [])
-                ;; Add bridge and cache to context
+                ;; Add bridge, cache, and schema functions to context
                 ctx' (-> context
                          (assoc-in [:hats :mcp :bridge] bridge)
                          (assoc-in [:hats :mcp :cache] cache)
+                         ;; Register schema functions
+                         (update :id->schema merge
+                                 {request-schema-id hat-mcp-request-schema-fn
+                                  response-schema-id hat-mcp-response-schema-fn})
                          ;; Add stop hook for cleanup
                          (hat/add-stop-hook
                           (fn [ctx]
@@ -89,9 +129,9 @@
              {"states" [{"id" service-id
                          "action" "mcp-service"}]
               "xitions" [{"id" [state-id service-id]
-                          "schema" "mcp-request-xition"}
+                          "schema" request-schema-id}
                          {"id" [service-id state-id]
-                          "schema" "mcp-response-xition"}]
+                          "schema" response-schema-id}]
               "prompts" [(format-tools-prompt tools)]}]))))))
 
 ;;==============================================================================

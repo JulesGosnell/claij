@@ -48,10 +48,16 @@
           [ctx' fragment] (hat-fn context)]
       ;; Context unchanged (bridge reused)
       (is (= fake-bridge (get-in ctx' [:hats :mcp :bridge])))
+      ;; Schema functions registered
+      (is (fn? (get-in ctx' [:id->schema "mc-mcp-request"])))
+      (is (fn? (get-in ctx' [:id->schema "mc-mcp-response"])))
       ;; Fragment has correct structure
       (is (= 1 (count (get fragment "states"))))
       (is (= "mc-mcp" (get-in fragment ["states" 0 "id"])))
       (is (= 2 (count (get fragment "xitions"))))
+      ;; Xitions reference the registered schema IDs
+      (is (= "mc-mcp-request" (get-in fragment ["xitions" 0 "schema"])))
+      (is (= "mc-mcp-response" (get-in fragment ["xitions" 1 "schema"])))
       ;; Prompts include tool
       (is (some #(clojure.string/includes? % "test_tool")
                 (get fragment "prompts"))))))
@@ -69,6 +75,9 @@
         (is (some? (get-in ctx' [:hats :mcp :bridge])))
         ;; Cache should have tools
         (is (seq (get-in ctx' [:hats :mcp :cache "tools"])))
+        ;; Schema functions should be registered
+        (is (fn? (get-in ctx' [:id->schema "mc-mcp-request"])))
+        (is (fn? (get-in ctx' [:id->schema "mc-mcp-response"])))
         ;; Stop hook should be registered
         (is (seq (get-in ctx' [:hats :stop-hooks])))
         ;; Fragment should have states/xitions/prompts
