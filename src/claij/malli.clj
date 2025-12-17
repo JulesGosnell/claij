@@ -723,13 +723,30 @@
     ;; Prompts are a vector of prompt strings
     :fsm/prompts [:vector [:ref :fsm/prompt]]
 
-;; A state in the FSM
+    ;; Hat declaration (state-level)
+    ;; Simple: "mcp" or with config: {"mcp" {:services ["x"]}}
+    :fsm/hat [:or
+              :string
+              [:map-of :string :any]]
+
+    ;; State-level hats - vector of hat declarations
+    :fsm/state-hats [:vector [:ref :fsm/hat]]
+
+    ;; FSM-level hat - [hat-name [state-ids...]]
+    ;; e.g. ["error-recovery" ["*" "error"]]
+    :fsm/fsm-hat [:tuple :string [:vector :string]]
+
+    ;; FSM-level hats - vector of linking hat declarations  
+    :fsm/fsm-hats [:vector [:ref :fsm/fsm-hat]]
+
+    ;; A state in the FSM
     :fsm/state [:map {:closed true}
                 ["id" :string]
                 ["description" {:optional true} :string]
                 ["action" {:optional true} :string]
                 ["config" {:optional true} :any] ;; Action-specific configuration
-                ["prompts" {:optional true} [:ref :fsm/prompts]]]
+                ["prompts" {:optional true} [:ref :fsm/prompts]]
+                ["hats" {:optional true} [:ref :fsm/state-hats]]]
 
     ;; A transition ID is a tuple of [from-state, to-state]
     :fsm/xition-id [:tuple :string :string]
@@ -751,6 +768,7 @@
                      ["schema" {:optional true} :any]
                      ["schemas" {:optional true} :any] ;; Map of schema-key -> Malli schema (data)
                      ["prompts" {:optional true} [:ref :fsm/prompts]]
+                     ["hats" {:optional true} [:ref :fsm/fsm-hats]]
                      ["states" [:vector [:ref :fsm/state]]]
                      ["xitions" [:vector [:ref :fsm/xition]]]]}))
 
