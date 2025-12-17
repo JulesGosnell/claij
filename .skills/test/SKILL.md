@@ -1,5 +1,12 @@
 # Test Writing Skill
 
+## Coverage Requirement
+- Run `./bin/test-coverage.sh` before committing
+- Maintain 90%+ line coverage (script enforces this)
+- Check `target/coverage/index.html` for gaps
+- Add minimal tests to cover new code paths
+- Use simplest possible inputs to exercise code
+
 ## Structure
 - One x_test.clj per x.clj
 - require uses :refer not :as

@@ -1,8 +1,10 @@
 (ns claij.hat.mcp-test
   (:require
-   [clojure.test :refer [deftest testing is use-fixtures]]
+   [clojure.test :refer [deftest testing is]]
    [claij.hat :as hat]
-   [claij.hat.mcp :refer [mcp-hat-maker format-tools-prompt mcp-service-action]]
+   [claij.hat.mcp :refer [mcp-hat-maker format-tools-prompt format-tool-schema
+                          hat-mcp-request-schema-fn hat-mcp-response-schema-fn
+                          mcp-service-action]]
    [claij.mcp.bridge :as bridge]))
 
 ;;------------------------------------------------------------------------------
@@ -104,3 +106,116 @@
         (is (= "worker-mcp" (get-in fragment2 ["states" 0 "id"])))
         (finally
           (hat/run-stop-hooks ctx2))))))
+
+;;------------------------------------------------------------------------------
+;; format-tool-schema Tests
+;;------------------------------------------------------------------------------
+
+(deftest format-tool-schema-test
+  (testing "formats tool with description and schema"
+    (let [tool {"name" "read_file"
+                "description" "Read a file"
+                "inputSchema" {"type" "object"}}
+          result (format-tool-schema tool)]
+      (is (clojure.string/starts-with? result "- read_file:"))
+      (is (clojure.string/includes? result "Read a file"))
+      (is (clojure.string/includes? result "Input:"))))
+
+  (testing "formats tool without inputSchema"
+    (let [tool {"name" "simple" "description" "Simple tool"}
+          result (format-tool-schema tool)]
+      (is (clojure.string/includes? result "simple"))
+      (is (not (clojure.string/includes? result "Input:")))))
+
+  (testing "formats tool without description"
+    (let [tool {"name" "nodesc"}
+          result (format-tool-schema tool)]
+      (is (clojure.string/includes? result "No description")))))
+
+;;------------------------------------------------------------------------------
+;; Schema Function Tests
+;;------------------------------------------------------------------------------
+
+(deftest hat-mcp-request-schema-fn-test
+  (testing "generates request schema from cache"
+    (let [context {:hats {:mcp {:cache {"tools" [{"name" "test_tool"
+                                                  "inputSchema" {"type" "object"}}]}}}}
+          xition {"id" ["mc" "mc-mcp"]}
+          schema (hat-mcp-request-schema-fn context xition)]
+      (is (vector? schema))
+      (is (= :map (first schema))))))
+
+(deftest hat-mcp-response-schema-fn-test
+  (testing "generates response schema from cache"
+    (let [context {:hats {:mcp {:cache {"tools" [{"name" "test_tool"}]}}}}
+          xition {"id" ["mc-mcp" "mc"]}
+          schema (hat-mcp-response-schema-fn context xition)]
+      (is (vector? schema))
+      (is (= :map (first schema))))))
+
+;;------------------------------------------------------------------------------
+;; mcp-service-action Tests
+;;------------------------------------------------------------------------------
+
+(deftest mcp-service-action-test
+  (testing "returns error when no bridge"
+    (let [action-fn (mcp-service-action nil nil nil {"id" "svc"})
+          result (atom nil)
+          handler (fn [_ctx event] (reset! result event))
+          context {}
+          event {"id" ["mc" "svc"] "message" {"test" true}}]
+      (action-fn context event [] handler)
+      (is (= "No MCP bridge" (get-in @result ["message" "error"])))))
+
+  (testing "routes single request to bridge"
+    (let [;; Mock bridge that returns fixed response
+          mock-bridge {:mock true}
+          action-fn (mcp-service-action nil nil nil {"id" "svc"})
+          result (atom nil)
+          handler (fn [_ctx event] (reset! result event))
+          context {:hats {:mcp {:bridge mock-bridge}}}
+          event {"id" ["mc" "svc"] "message" {"jsonrpc" "2.0" "method" "test"}}]
+      ;; Mock the bridge functions
+      (with-redefs [bridge/send-and-await (fn [_b requests _timeout]
+                                            (mapv (fn [_] {"result" "ok"}) requests))
+                    bridge/drain-notifications (fn [_b] nil)]
+        (action-fn context event [] handler)
+        ;; Should return to caller with result
+        (is (= ["svc" "mc"] (get @result "id")))
+        (is (= {"result" "ok"} (get @result "message"))))))
+
+  (testing "routes batch requests"
+    (let [mock-bridge {:mock true}
+          action-fn (mcp-service-action nil nil nil {"id" "svc"})
+          result (atom nil)
+          handler (fn [_ctx event] (reset! result event))
+          context {:hats {:mcp {:bridge mock-bridge}}}
+          event {"id" ["mc" "svc"] "message" [{"id" 1} {"id" 2}]}]
+      (with-redefs [bridge/send-and-await (fn [_b requests _timeout]
+                                            (mapv (fn [r] {"result" (get r "id")}) requests))
+                    bridge/drain-notifications (fn [_b] nil)]
+        (action-fn context event [] handler)
+        ;; Should return vector of responses
+        (is (vector? (get @result "message")))
+        (is (= 2 (count (get @result "message"))))))))
+
+;;------------------------------------------------------------------------------
+;; mcp-hat-maker Init Path Tests (with mocks)
+;;------------------------------------------------------------------------------
+
+(deftest mcp-hat-maker-init-test
+  (testing "initializes bridge when none exists"
+    (let [fake-bridge {:fake-new true}
+          fake-cache {"tools" [{"name" "new_tool"}]}]
+      (with-redefs [bridge/init-bridge (fn [_config _opts]
+                                         {:bridge fake-bridge :cache fake-cache})]
+        (let [hat-fn (mcp-hat-maker "mc" nil)
+              [ctx' fragment] (hat-fn {})]
+          ;; Bridge stored in context
+          (is (= fake-bridge (get-in ctx' [:hats :mcp :bridge])))
+          ;; Cache stored
+          (is (= fake-cache (get-in ctx' [:hats :mcp :cache])))
+          ;; Stop hook registered
+          (is (= 1 (count (get-in ctx' [:hats :stop-hooks]))))
+          ;; Fragment generated
+          (is (= "mc-mcp" (get-in fragment ["states" 0 "id"]))))))))
