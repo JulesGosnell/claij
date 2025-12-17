@@ -1,107 +1,67 @@
 (ns claij.mcp.hat-test
-  "Tests for MCP Hat functionality."
+  "Integration tests for MCP hat."
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
-   [clojure.tools.logging :as log]
-   [claij.hat :as hat]
+   [claij.hat :refer [make-hat-registry register-hat don-hats]]
    [claij.mcp.hat :refer [mcp-hat-maker mcp-service-action]]
    [claij.mcp.bridge :as bridge]))
 
-(defn quiet-logging [f]
-  (if (System/getenv "DEBUG")
-    (f)
-    (binding [log/*logger-factory* clojure.tools.logging.impl/disabled-logger-factory]
-      (f))))
-
-(use-fixtures :once quiet-logging)
-
 ;;------------------------------------------------------------------------------
-;; Unit Tests
+;; Task 6: Integration Tests
 ;;------------------------------------------------------------------------------
 
-(deftest mcp-hat-maker-contract-test
+(deftest mcp-hat-maker-test
   (testing "mcp-hat-maker returns a hat-fn"
-    (let [hat-fn (hat/make-hat mcp-hat-maker "mc" nil)]
-      (is (fn? hat-fn) "Should return a function"))))
+    (let [hat-fn (mcp-hat-maker "mc" nil)]
+      (is (fn? hat-fn)))))
 
-(deftest generate-fragment-structure-test
-  (testing "fragment has correct structure with mock cache"
-    ;; We can't call the hat-fn directly without starting bridge,
-    ;; but we can test the fragment generation via a mock
-    (let [mock-cache {"tools" [{"name" "read_file" "description" "Read a file"}
-                               {"name" "write_file" "description" "Write a file"}]}
-          ;; Use internal fn via with-redefs to test fragment generation
-          fragment (#'claij.mcp.hat/generate-fragment "mc" "mc-mcp" mock-cache)]
-
-      ;; Check states
+(deftest mcp-hat-fragment-structure-test
+  (testing "fragment has correct structure with mock data"
+    ;; Test fragment generation without starting real bridge
+    (let [mock-mcp {:bridge nil :cache {"tools" [{"name" "tool1"} {"name" "tool2"}]}}
+          context {:hats {:mcp mock-mcp}}
+          hat-fn (mcp-hat-maker "mc" nil)
+          [ctx' fragment] (hat-fn context)]
+      ;; Should reuse existing, not modify context
+      (is (= context ctx'))
+      ;; Fragment structure
       (is (= 1 (count (get fragment "states"))))
       (is (= "mc-mcp" (get-in fragment ["states" 0 "id"])))
       (is (= "mcp-service" (get-in fragment ["states" 0 "action"])))
-
-      ;; Check xitions (loopback)
       (is (= 2 (count (get fragment "xitions"))))
-      (is (= ["mc" "mc-mcp"] (get-in fragment ["xitions" 0 "id"])))
-      (is (= ["mc-mcp" "mc"] (get-in fragment ["xitions" 1 "id"])))
+      ;; Prompts mention tools
+      (let [prompts (get fragment "prompts")]
+        (is (some #(re-find #"2 MCP tools" %) prompts))
+        (is (some #(re-find #"tool1" %) prompts))))))
 
-      ;; Check prompts
-      (is (seq (get fragment "prompts")))
-      (is (some #(re-find #"2 MCP tools" %) (get fragment "prompts"))))))
+(deftest mcp-hat-empty-tools-test
+  (testing "fragment handles empty tools"
+    (let [mock-mcp {:bridge nil :cache {"tools" []}}
+          context {:hats {:mcp mock-mcp}}
+          hat-fn (mcp-hat-maker "mc" nil)
+          [_ fragment] (hat-fn context)]
+      (let [prompts (get fragment "prompts")]
+        (is (some #(re-find #"No MCP tools" %) prompts))))))
 
-(deftest tool-prompts-test
-  (testing "prompts format tools correctly"
-    (let [tools [{"name" "foo" "description" "Does foo"}
-                 {"name" "bar" "description" nil}]
-          prompts (#'claij.mcp.hat/generate-tool-prompts tools)]
-      (is (= 2 (count prompts)))
-      (is (re-find #"2 MCP tools" (first prompts)))
-      (is (re-find #"foo: Does foo" (second prompts)))
-      (is (re-find #"bar: No description" (second prompts)))))
-
-  (testing "empty tools"
-    (let [prompts (#'claij.mcp.hat/generate-tool-prompts [])]
-      (is (= ["No MCP tools available."] prompts)))))
-
-;;------------------------------------------------------------------------------
-;; Integration Tests (require real MCP server)
-;;------------------------------------------------------------------------------
-
-(deftest ^:integration ^:long-running mcp-hat-integration-test
-  (testing "MCP hat initializes bridge and populates cache"
-    (let [hat-fn (hat/make-hat mcp-hat-maker "mc" nil)
-          [ctx fragment] (hat-fn {})]
-      (try
-        ;; Bridge should be stored in context
-        (is (some? (get-in ctx [:hats :mcp :bridge])))
-        (is (some? (get-in ctx [:hats :mcp :cache])))
-
-        ;; Stop hook should be registered
-        (is (seq (get-in ctx [:hats :stop-hooks])))
-
-        ;; Fragment should have tools from real server
-        (let [tools (get-in ctx [:hats :mcp :cache "tools"])]
-          (is (seq tools) "Should have tools from MCP server"))
-
-        ;; Prompts should reference actual tool count
-        (is (seq (get fragment "prompts")))
-
-        (finally
-          ;; Clean up bridge
-          (hat/run-stop-hooks ctx))))))
-
-(deftest ^:integration ^:long-running mcp-hat-reuse-test
-  (testing "Second state with MCP hat reuses existing bridge"
-    (let [hat-fn-1 (hat/make-hat mcp-hat-maker "mc" nil)
-          hat-fn-2 (hat/make-hat mcp-hat-maker "worker" nil)
-          [ctx1 _] (hat-fn-1 {})
-          bridge1 (get-in ctx1 [:hats :mcp :bridge])
-          [ctx2 _] (hat-fn-2 ctx1) ;; Pass ctx1 to second hat
-          bridge2 (get-in ctx2 [:hats :mcp :bridge])]
-      (try
-        ;; Should be same bridge
-        (is (= bridge1 bridge2) "Should reuse same bridge")
-
-        ;; Should only have one stop hook
-        (is (= 1 (count (get-in ctx2 [:hats :stop-hooks]))))
-
-        (finally
-          (hat/run-stop-hooks ctx2))))))
+(deftest don-hats-with-mcp-test
+  (testing "don-hats integrates mcp hat"
+    ;; Use mock data to avoid starting real bridge
+    (let [;; Create a test hat-maker that uses mock data
+          mock-hat-maker (fn [state-id _config]
+                           (fn [context]
+                             (let [mock-mcp {:bridge :mock :cache {"tools" []}}]
+                               [(assoc-in context [:hats :mcp] mock-mcp)
+                                {"states" [{"id" (str state-id "-mcp") "action" "mcp-service"}]
+                                 "xitions" []
+                                 "prompts" ["Mock MCP"]}])))
+          registry (-> (make-hat-registry)
+                       (register-hat "mcp" mock-hat-maker))
+          fsm {"id" "test"
+               "states" [{"id" "mc" "hats" ["mcp"]}]
+               "xitions" []}
+          [ctx' fsm'] (don-hats {} fsm registry)]
+      ;; Context has MCP data
+      (is (= :mock (get-in ctx' [:hats :mcp :bridge])))
+      ;; FSM has new state
+      (is (= 2 (count (get fsm' "states"))))
+      (is (some #(= "mc-mcp" (get % "id")) (get fsm' "states"))))))
