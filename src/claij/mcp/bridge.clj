@@ -186,3 +186,111 @@
         (deliver promise {"error" {"message" "stale"} "id" id}))
       (swap! pending dissoc id))
     (count stale-ids)))
+
+;; =============================================================================
+;; Bridge Initialization - Full Protocol Setup
+;; =============================================================================
+
+(def default-mcp-config
+  "Default MCP server configuration for claij."
+  {"command" "bash"
+   "args" ["-c" "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"]
+   "transport" "stdio"})
+
+(defn drain-notifications
+  "Drain any pending notifications from the bridge's output channel.
+   Returns vector of drained notifications (may be empty)."
+  [{:keys [output-chan]}]
+  (loop [notifications []]
+    (let [[msg _] (clojure.core.async/alts!! [output-chan (clojure.core.async/timeout 50)])]
+      (if msg
+        (recur (conj notifications msg))
+        notifications))))
+
+(defn init-bridge
+  "Initialize an MCP bridge with full protocol handshake and cache population.
+   
+   This is the high-level entry point for MCP integration. It:
+   1. Creates a correlated bridge (subprocess)
+   2. Sends initialize request and waits for capabilities
+   3. Sends initialized notification
+   4. Lists tools/prompts/resources to populate cache
+   
+   Parameters:
+   - config: MCP server config map (defaults to default-mcp-config)
+   - opts: Optional map with :timeout-ms (default 30000)
+   
+   Returns map with:
+   - :bridge - The correlated bridge for tool calls
+   - :cache - Populated cache {\"tools\" [...] \"prompts\" [...] \"resources\" [...]}
+   
+   Throws on initialization failure."
+  ([] (init-bridge default-mcp-config {}))
+  ([config] (init-bridge config {}))
+  ([config {:keys [timeout-ms] :or {timeout-ms 30000}}]
+   (let [bridge (create-correlated-bridge config)
+         ;; Send initialize request
+         init-request {"jsonrpc" "2.0"
+                       "id" 0
+                       "method" "initialize"
+                       "params" {"protocolVersion" "2025-06-18"
+                                 "capabilities" {"elicitation" {}}
+                                 "clientInfo" {"name" "claij"
+                                               "version" "1.0-SNAPSHOT"}}}
+         init-promise (send-request bridge init-request)
+         init-response (await-response init-promise 0 timeout-ms)]
+
+     ;; Check for initialization error
+     (when (get init-response "error")
+       ((:stop bridge))
+       (throw (ex-info "MCP initialization failed" {:response init-response})))
+
+     ;; Drain any notifications that arrived during init
+     (drain-notifications bridge)
+
+     ;; Send initialized notification (fire and forget)
+     (>!! (:input-chan bridge)
+          (clojure.data.json/write-str
+           {"jsonrpc" "2.0"
+            "method" "notifications/initialized"
+            "params" {}}))
+
+     ;; Extract capabilities and determine what to list
+     (let [capabilities (get-in init-response ["result" "capabilities"])
+           has-tools? (get capabilities "tools")
+           has-prompts? (get capabilities "prompts")
+           has-resources? (get capabilities "resources")
+           ;; Build list requests based on capabilities
+           requests (cond-> []
+                      has-tools? (conj {"jsonrpc" "2.0" "id" 1 "method" "tools/list"})
+                      has-prompts? (conj {"jsonrpc" "2.0" "id" 2 "method" "prompts/list"})
+                      has-resources? (conj {"jsonrpc" "2.0" "id" 3 "method" "resources/list"}))
+           ;; Send all list requests and await responses
+           responses (when (seq requests)
+                       (send-and-await bridge requests timeout-ms))
+           ;; Extract cache data from responses
+           cache (reduce (fn [c resp]
+                           (if-let [result (get resp "result")]
+                             (merge c result)
+                             c))
+                         {}
+                         responses)]
+
+       ;; Drain any more notifications
+       (drain-notifications bridge)
+
+       {:bridge bridge
+        :cache cache}))))
+
+(defn stop-bridge
+  "Stop an MCP bridge cleanly.
+   
+   Parameters:
+   - bridge: The correlated bridge to stop (or nil)
+   
+   Returns nil. Safe to call with nil bridge."
+  [bridge]
+  (when bridge
+    (when-let [stop-fn (:stop bridge)]
+      (stop-fn)))
+  nil)
