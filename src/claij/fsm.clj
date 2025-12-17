@@ -547,6 +547,8 @@
 
         stop-fsm (fn []
                    (log/info (str "stopping fsm: " (or (get fsm "id") "unnamed")))
+                   ;; Run stop hooks (for hat cleanup like MCP bridge)
+                   (hat/run-stop-hooks context)
                    (doseq [c all-channels]
                      (safe-channel-operation close! c)))]
 

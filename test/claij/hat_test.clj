@@ -3,7 +3,8 @@
    [clojure.test :refer [deftest testing is]]
    [claij.hat :refer [make-hat static-echo-hat-maker dynamic-counter-hat-maker
                       make-hat-registry register-hat get-hat-maker
-                      merge-fragment don-hats]]))
+                      merge-fragment don-hats
+                      add-stop-hook run-stop-hooks]]))
 
 ;;------------------------------------------------------------------------------
 ;; Task 2: Hat-maker Contract Tests
@@ -247,3 +248,52 @@
       (is (= 3 (count (get fsm' "states"))))
       ;; Should have added xitions from both states to error-handler
       (is (= 2 (count (get fsm' "xitions")))))))
+
+;;------------------------------------------------------------------------------
+;; Task 4: Stop Hooks Tests
+;;------------------------------------------------------------------------------
+
+(deftest add-stop-hook-test
+  (testing "add-stop-hook adds to :fsm/stop-hooks"
+    (let [hook (fn [ctx] ctx)
+          ctx (add-stop-hook {} hook)]
+      (is (= [hook] (:fsm/stop-hooks ctx)))))
+
+  (testing "add-stop-hook appends to existing hooks"
+    (let [hook1 (fn [ctx] ctx)
+          hook2 (fn [ctx] ctx)
+          ctx (-> {}
+                  (add-stop-hook hook1)
+                  (add-stop-hook hook2))]
+      (is (= [hook1 hook2] (:fsm/stop-hooks ctx))))))
+
+(deftest run-stop-hooks-test
+  (testing "run-stop-hooks calls hooks in reverse order (LIFO)"
+    (let [call-order (atom [])
+          hook1 (fn [ctx] (swap! call-order conj 1) ctx)
+          hook2 (fn [ctx] (swap! call-order conj 2) ctx)
+          hook3 (fn [ctx] (swap! call-order conj 3) ctx)
+          ctx (-> {}
+                  (add-stop-hook hook1)
+                  (add-stop-hook hook2)
+                  (add-stop-hook hook3))]
+      (run-stop-hooks ctx)
+      (is (= [3 2 1] @call-order) "Hooks should run in reverse order")))
+
+  (testing "run-stop-hooks handles errors gracefully"
+    (let [call-order (atom [])
+          hook1 (fn [ctx] (swap! call-order conj 1) ctx)
+          hook-error (fn [_ctx] (throw (ex-info "Test error" {})))
+          hook3 (fn [ctx] (swap! call-order conj 3) ctx)
+          ctx (-> {}
+                  (add-stop-hook hook1)
+                  (add-stop-hook hook-error)
+                  (add-stop-hook hook3))]
+      ;; Should not throw, should continue after error
+      (run-stop-hooks ctx)
+      (is (= [3 1] @call-order) "Should continue after error")))
+
+  (testing "run-stop-hooks with no hooks"
+    (let [ctx {}]
+      ;; Should not throw
+      (is (= ctx (run-stop-hooks ctx))))))

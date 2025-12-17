@@ -242,3 +242,37 @@
         ;; Then, don FSM-level hats
         [ctx'' fsm''] (don-fsm-hats ctx' fsm' registry)]
     [ctx'' fsm'']))
+
+;;==============================================================================
+;; Stop Hooks
+;;==============================================================================
+
+(defn add-stop-hook
+  "Add a stop hook to the context. Stop hooks are called when the FSM stops.
+   
+   Parameters:
+   - context: the FSM context
+   - hook-fn: function (fn [context]) that performs cleanup
+   
+   Returns updated context with hook added to :fsm/stop-hooks."
+  [context hook-fn]
+  (update context :fsm/stop-hooks (fnil conj []) hook-fn))
+
+(defn run-stop-hooks
+  "Run all stop hooks in reverse order (LIFO).
+   
+   Parameters:
+   - context: the FSM context with :fsm/stop-hooks
+   
+   Returns context after all hooks have run."
+  [context]
+  (let [hooks (get context :fsm/stop-hooks [])]
+    (log/info "Running" (count hooks) "stop hooks")
+    (reduce (fn [ctx hook]
+              (try
+                (hook ctx)
+                (catch Exception e
+                  (log/error e "Error in stop hook")
+                  ctx)))
+            context
+            (reverse hooks))))
