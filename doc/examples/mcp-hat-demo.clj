@@ -44,7 +44,7 @@ When you have the final answer, respond with id=[\"ask\" \"end\"] and include yo
 ;; 3. Create context with hat registry
 ;;
 ;; Change :llm/provider and :llm/model to test different LLMs:
-;;   - "xai" / "grok-3-mini"
+;;   - "x-ai" / "grok-code-fast-1"
 ;;   - "anthropic" / "claude-sonnet-4-20250514"
 ;;   - "google" / "gemini-2.0-flash"
 ;;   - "openai" / "gpt-4o-mini"
@@ -52,8 +52,8 @@ When you have the final answer, respond with id=[\"ask\" \"end\"] and include yo
 
 (def context
   {:id->action {"llm" llm-action}
-   :llm/provider "xai"
-   :llm/model "grok-3-mini"
+   :llm/provider "x-ai"
+   :llm/model "grok-code-fast-1"
    :hats {:registry (-> (hat/make-hat-registry)
                         (hat/register-hat "mcp" mcp-hat/mcp-hat-maker))}})
 
