@@ -56,3 +56,19 @@
                           (if (= to "end") "end" to)
                           label)))
          "}\n")))
+
+(defn fsm->dot-with-hats
+  "Generate DOT graph with hat-generated states expanded.
+   
+   Requires claij.hat namespace - will fail if not available.
+   Use this to visualize the full FSM including hat fragments.
+   
+   Parameters:
+   - fsm: The FSM definition with hats
+   - registry: Hat registry from make-hat-registry
+   - context: Optional initial context (default {})"
+  ([fsm registry] (fsm->dot-with-hats fsm registry {}))
+  ([fsm registry context]
+   (let [don-hats (requiring-resolve 'claij.hat/don-hats)
+         [_ctx' expanded-fsm] (don-hats context fsm registry)]
+     (fsm->dot expanded-fsm))))

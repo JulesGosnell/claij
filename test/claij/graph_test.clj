@@ -7,7 +7,8 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [clojure.string :refer [includes?]]
-   [claij.graph :refer [fsm->dot]]))
+   [claij.graph :refer [fsm->dot fsm->dot-with-hats]]
+   [claij.hat]))
 
 ;; DOT format constants - these are Graphviz standard syntax elements
 (def ^:private dot-digraph-prefix "digraph")
@@ -102,4 +103,34 @@
                  "xitions" [{"id" ["a" "done"]}]}
             dot (fsm->dot fsm)]
         (is (includes? dot "[label=\"done\"]")
-            "Should use destination state as label when no explicit label")))))
+            "Should use destination state as label when no explicit label"))))
+
+  (testing "fsm->dot-with-hats"
+
+    (testing "expands hat-generated states"
+      (let [;; Mock hat-maker that adds a service state
+            mock-hat-maker (fn [state-id _config]
+                             (fn [context]
+                               [context
+                                {"states" [{"id" (str state-id "-svc") "action" "service"}]
+                                 "xitions" [{"id" [state-id (str state-id "-svc")]}
+                                            {"id" [(str state-id "-svc") state-id]}]
+                                 "prompts" []}]))
+            registry (-> (claij.hat/make-hat-registry)
+                         (claij.hat/register-hat "mock" mock-hat-maker))
+            fsm {"id" "hat-fsm"
+                 "states" [{"id" "mc" "hats" ["mock"]}]
+                 "xitions" [{"id" ["start" "mc"]}
+                            {"id" ["mc" "end"]}]}
+            dot (fsm->dot-with-hats fsm registry)]
+        ;; Should have original state
+        (is (includes? dot "mc [label=")
+            "Original state should appear")
+        ;; Should have hat-generated state
+        (is (includes? dot "mc-svc [label=")
+            "Hat-generated state should appear")
+        ;; Should have hat-generated transitions
+        (is (includes? dot "mc -> mc-svc")
+            "Hat-generated transition should appear")
+        (is (includes? dot "mc-svc -> mc")
+            "Hat loopback transition should appear")))))
