@@ -166,11 +166,25 @@ A Master of Ceremonies coordinates specialist reviewers. The MC delegates, aggre
 
 ![Code Review FSM](doc/code-review-fsm.svg)
 
-### MCP Protocol Management
+### MCP Integration via Hats
 
-The FSM platform manages the MCP protocol itself—initialization, tool discovery, request/response cycles—all as schema-guarded state transitions.
+CLAIJ integrates with the Model Context Protocol through the **hat system**—a declarative way to add capabilities to FSM states. When a state wears an MCP hat, it gains access to external tools (file systems, databases, APIs) through schema-validated requests.
 
-![MCP FSM](doc/mcp-fsm.svg)
+```clojure
+{"id" "mc"
+ "action" "llm"
+ "hats" ["mcp"]  ;; MC can now use MCP tools
+ "prompts" [...]}
+```
+
+The hat system automatically:
+- Starts MCP server processes on FSM startup
+- Injects tool schemas into prompts
+- Adds a service state for tool execution
+- Handles the tool call → result loop
+- Cleans up processes on FSM stop
+
+This keeps the FSM definition clean while providing powerful tooling capabilities. Multiple servers can be configured for cross-domain access (e.g., GitHub + local filesystem in one state).
 
 ---
 

@@ -1,0 +1,33 @@
+digraph "code-review" {
+  rankdir=TB;
+  node [shape=box, style=rounded, fontname="Helvetica", fontsize=10];
+  edge [fontname="Helvetica", fontsize=9];
+  title [shape=plaintext label=<<FONT POINT-SIZE="14" COLOR="gray40">Code Review FSM with MCP Hat</FONT>>];
+  { rank=same title }
+  title -> start [style=invis];
+  start [shape=doublecircle, fillcolor=lightgreen, style=filled];
+  end   [shape=doublecircle, fillcolor=lightcoral, style=filled];
+
+  // states
+  mc [label="mc\n(llm + mcp hat)\nOrchestrates code review\nCan use MCP tools to read files"];
+  reviewer [label="reviewer\n(llm)\nReviews code for concerns"];
+  mc_mcp [label="mc-mcp\n(mcp-service)\nExecutes tool calls", style="rounded,dashed"];
+
+  // transitions
+  start -> mc [label="entry"];
+  mc -> reviewer [label="request review"];
+  reviewer -> mc [label="review results"];
+  mc -> end [label="summary"];
+  
+  // MCP service loop (from hat)
+  mc -> mc_mcp [label="tool calls", style=dashed];
+  mc_mcp -> mc [label="tool results", style=dashed];
+  
+  // subgraph to show hat-generated states
+  subgraph cluster_hat {
+    label="Hat-generated";
+    style=dashed;
+    color=gray;
+    mc_mcp;
+  }
+}
