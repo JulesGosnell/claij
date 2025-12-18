@@ -23,11 +23,14 @@
           prompt (format-tools-prompt "mc" "mc-mcp" tools-by-server)]
       (is (clojure.string/includes? prompt "read_file"))
       (is (clojure.string/includes? prompt "Read a file"))
-      ;; Check for correct routing format with server field
-      (is (clojure.string/includes? prompt "\"server\": \"default\""))
+      ;; Check for new calls format
+      (is (clojure.string/includes? prompt "\"calls\":"))
+      (is (clojure.string/includes? prompt "\"default\":"))
       (is (clojure.string/includes? prompt "jsonrpc"))
       ;; Single server shouldn't show server header
-      (is (not (clojure.string/includes? prompt "### Server:")))))
+      (is (not (clojure.string/includes? prompt "### Server:")))
+      ;; Should mention results field
+      (is (clojure.string/includes? prompt "results"))))
 
   (testing "formats multiple servers with grouped tools"
     (let [tools-by-server {"github" [{"name" "list_issues" "description" "List issues"}
@@ -42,7 +45,9 @@
       (is (clojure.string/includes? prompt "### Server: github"))
       (is (clojure.string/includes? prompt "### Server: tools"))
       ;; Available servers listed
-      (is (clojure.string/includes? prompt "Available servers:"))))
+      (is (clojure.string/includes? prompt "Available servers:"))
+      ;; Mentions cross-server batching
+      (is (clojure.string/includes? prompt "multiple servers"))))
 
   (testing "formats state IDs correctly"
     (let [tools-by-server {"default" [{"name" "test" "description" "Test"}]}
@@ -157,41 +162,47 @@
 ;;------------------------------------------------------------------------------
 
 (deftest hat-mcp-request-schema-fn-test
-  (testing "generates request schema with server enum"
+  (testing "generates request schema with calls field"
     (let [context {:hats {:mcp {:servers {"default" {:cache {"tools" [{"name" "test_tool"
                                                                        "inputSchema" {"type" "object"}}]}}}}}}
           xition {"id" ["mc" "mc-mcp"]}
           schema (hat-mcp-request-schema-fn context xition)]
       (is (vector? schema))
       (is (= :map (first schema)))
-      ;; Find server field spec (filter out map options like {:closed true})
+      ;; Find calls field spec
       (let [fields (filter vector? (rest schema))
-            server-spec (some (fn [[k v]] (when (= k "server") v)) fields)]
-        (is (= [:enum "default"] server-spec)))))
+            calls-spec (some (fn [[k v]] (when (= k "calls") v)) fields)]
+        (is (some? calls-spec))
+        ;; Should be map-of with server enum as key
+        (is (= :map-of (first calls-spec))))))
 
-  (testing "generates request schema with multiple servers"
+  (testing "generates request schema with multiple server enum"
     (let [context {:hats {:mcp {:servers {"github" {:cache {"tools" [{"name" "list_issues"}]}}
                                           "tools" {:cache {"tools" [{"name" "bash"}]}}}}}}
           xition {"id" ["mc" "mc-mcp"]}
           schema (hat-mcp-request-schema-fn context xition)]
       (is (vector? schema))
-      ;; Server enum should have both servers
+      ;; Calls field should have server enum with both servers
       (let [fields (filter vector? (rest schema))
-            server-spec (some (fn [[k v]] (when (= k "server") v)) fields)]
-        (is (= :enum (first server-spec)))
-        (is (= #{"github" "tools"} (set (rest server-spec))))))))
+            calls-spec (some (fn [[k v]] (when (= k "calls") v)) fields)
+            ;; calls-spec is [:map-of server-enum batch-schema]
+            server-enum (second calls-spec)]
+        (is (= :enum (first server-enum)))
+        (is (= #{"github" "tools"} (set (rest server-enum))))))))
 
 (deftest hat-mcp-response-schema-fn-test
-  (testing "generates response schema with server field"
+  (testing "generates response schema with results field"
     (let [context {:hats {:mcp {:servers {"default" {:cache {"tools" [{"name" "test_tool"}]}}}}}}
           xition {"id" ["mc-mcp" "mc"]}
           schema (hat-mcp-response-schema-fn context xition)]
       (is (vector? schema))
       (is (= :map (first schema)))
-      ;; Find server field spec (filter out map options like {:closed true})
+      ;; Find results field spec
       (let [fields (filter vector? (rest schema))
-            server-spec (some (fn [[k v]] (when (= k "server") v)) fields)]
-        (is (= :string server-spec))))))
+            results-spec (some (fn [[k v]] (when (= k "results") v)) fields)]
+        (is (some? results-spec))
+        ;; Should be map-of string to batch response
+        (is (= :map-of (first results-spec)))))))
 
 ;;------------------------------------------------------------------------------
 ;; mcp-service-action Tests
@@ -203,9 +214,9 @@
           result (atom nil)
           handler (fn [_ctx event] (reset! result event))
           context {}
-          event {"id" ["mc" "svc"] "server" "default" "message" {"test" true}}]
+          event {"id" ["mc" "svc"] "calls" {"default" [{"test" true}]}}]
       (action-fn context event [] handler)
-      (is (clojure.string/includes? (get-in @result ["message" "error"]) "No MCP servers"))))
+      (is (clojure.string/includes? (get-in @result ["results" "error"]) "No MCP servers"))))
 
   (testing "returns error when server not found"
     (let [mock-bridge {:mock true}
@@ -213,68 +224,65 @@
           result (atom nil)
           handler (fn [_ctx event] (reset! result event))
           context {:hats {:mcp {:servers {"github" {:bridge mock-bridge}}}}}
-          event {"id" ["mc" "svc"] "server" "unknown" "message" {"test" true}}]
+          event {"id" ["mc" "svc"] "calls" {"unknown" [{"test" true}]}}]
       (action-fn context event [] handler)
-      (is (clojure.string/includes? (get-in @result ["message" "error"]) "Unknown server"))))
+      (is (clojure.string/includes? (get-in @result ["results" "error"]) "Unknown servers"))))
 
-  (testing "routes single request to correct server"
+  (testing "routes requests to single server"
     (let [mock-bridge {:mock true}
           action-fn (mcp-service-action {} nil nil {"id" "svc"})
           result (atom nil)
           handler (fn [_ctx event] (reset! result event))
           context {:hats {:mcp {:servers {"default" {:bridge mock-bridge}}}}}
-          event {"id" ["mc" "svc"] "server" "default" "message" {"jsonrpc" "2.0" "method" "test"}}]
+          event {"id" ["mc" "svc"] "calls" {"default" [{"jsonrpc" "2.0" "method" "test"}]}}]
       (with-redefs [bridge/send-and-await (fn [_b requests _timeout]
                                             (mapv (fn [_] {"result" "ok"}) requests))
                     bridge/drain-notifications (fn [_b] nil)]
         (action-fn context event [] handler)
-        ;; Should return to caller with result
+        ;; Should return to caller with results keyed by server
         (is (= ["svc" "mc"] (get @result "id")))
-        (is (= "default" (get @result "server"))) ;; Server echoed back
-        (is (= {"result" "ok"} (get @result "message"))))))
+        (is (= {"default" [{"result" "ok"}]} (get @result "results"))))))
 
-  (testing "routes batch requests"
+  (testing "routes batch requests to single server"
     (let [mock-bridge {:mock true}
           action-fn (mcp-service-action {} nil nil {"id" "svc"})
           result (atom nil)
           handler (fn [_ctx event] (reset! result event))
           context {:hats {:mcp {:servers {"default" {:bridge mock-bridge}}}}}
-          event {"id" ["mc" "svc"] "server" "default" "message" [{"id" 1} {"id" 2}]}]
+          event {"id" ["mc" "svc"] "calls" {"default" [{"id" 1} {"id" 2}]}}]
       (with-redefs [bridge/send-and-await (fn [_b requests _timeout]
                                             (mapv (fn [r] {"result" (get r "id")}) requests))
                     bridge/drain-notifications (fn [_b] nil)]
         (action-fn context event [] handler)
         ;; Should return vector of responses
-        (is (vector? (get @result "message")))
-        (is (= 2 (count (get @result "message"))))
-        (is (= "default" (get @result "server")))))) ;; Server echoed back
+        (is (= 2 (count (get-in @result ["results" "default"]))))
+        (is (= [{"result" 1} {"result" 2}] (get-in @result ["results" "default"]))))))
 
-  (testing "routes to multiple servers correctly"
+  (testing "routes to multiple servers in single call"
     (let [github-bridge {:server "github"}
           tools-bridge {:server "tools"}
           action-fn (mcp-service-action {} nil nil {"id" "svc"})
+          result (atom nil)
+          handler (fn [_ctx event] (reset! result event))
           context {:hats {:mcp {:servers {"github" {:bridge github-bridge}
-                                          "tools" {:bridge tools-bridge}}}}}]
-      ;; Route to github
-      (let [result (atom nil)
-            handler (fn [_ctx event] (reset! result event))
-            event {"id" ["mc" "svc"] "server" "github" "message" {"method" "test"}}]
-        (with-redefs [bridge/send-and-await (fn [b _requests _timeout]
-                                              [{"from" (:server b)}])
-                      bridge/drain-notifications (fn [_b] nil)]
-          (action-fn context event [] handler)
-          (is (= "github" (get @result "server")))
-          (is (= {"from" "github"} (get @result "message")))))
-      ;; Route to tools
-      (let [result (atom nil)
-            handler (fn [_ctx event] (reset! result event))
-            event {"id" ["mc" "svc"] "server" "tools" "message" {"method" "test"}}]
-        (with-redefs [bridge/send-and-await (fn [b _requests _timeout]
-                                              [{"from" (:server b)}])
-                      bridge/drain-notifications (fn [_b] nil)]
-          (action-fn context event [] handler)
-          (is (= "tools" (get @result "server")))
-          (is (= {"from" "tools"} (get @result "message"))))))))
+                                          "tools" {:bridge tools-bridge}}}}}
+          ;; Call both servers at once!
+          event {"id" ["mc" "svc"]
+                 "calls" {"github" [{"method" "list_issues"}]
+                          "tools" [{"method" "bash"} {"method" "read_file"}]}}]
+      (with-redefs [bridge/send-and-await (fn [b requests _timeout]
+                                            (mapv (fn [r] {"from" (:server b) "method" (get r "method")}) requests))
+                    bridge/drain-notifications (fn [_b] nil)]
+        (action-fn context event [] handler)
+        ;; Results keyed by server
+        (is (contains? (get @result "results") "github"))
+        (is (contains? (get @result "results") "tools"))
+        ;; GitHub got 1 call
+        (is (= 1 (count (get-in @result ["results" "github"]))))
+        (is (= "github" (get-in @result ["results" "github" 0 "from"])))
+        ;; Tools got 2 calls  
+        (is (= 2 (count (get-in @result ["results" "tools"]))))
+        (is (= "tools" (get-in @result ["results" "tools" 0 "from"])))))))
 
 ;;------------------------------------------------------------------------------
 ;; mcp-hat-maker Init Path Tests (with mocks)

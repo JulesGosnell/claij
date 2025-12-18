@@ -107,10 +107,13 @@
    {\"github\" [{\"name\" \"list_issues\" ...} ...]
     \"tools\"  [{\"name\" \"bash\" ...} ...]}
    
-   For single-server configs, tools-by-server will have one key (\"default\")."
+   For single-server configs, tools-by-server will have one key (\"default\").
+   
+   The prompt explains the cross-server batching format where multiple servers
+   can be called in a single round trip."
   [state-id service-id tools-by-server]
   (if (seq tools-by-server)
-    (let [server-names (keys tools-by-server)
+    (let [server-names (sort (keys tools-by-server))
           single-server? (= 1 (count server-names))
           ;; Format tools grouped by server
           server-sections (for [[server-name tools] (sort-by first tools-by-server)]
@@ -118,23 +121,29 @@
                                    (str "### Server: " server-name "\n"))
                                  (clojure.string/join "\n\n" (map format-tool-schema tools))))
           tools-text (clojure.string/join "\n\n" server-sections)
-          ;; Build example based on single vs multi server
+          ;; Build example
           example-server (first server-names)
           example-tool (get-in tools-by-server [example-server 0 "name"] "tool_name")]
       (str "## MCP Tools\n\n"
            tools-text
            "\n\n"
-           "To call a tool, output JSON with the following structure:\n"
+           "To call tools, output JSON with calls grouped by server:\n"
            "```json\n"
            "{\"id\": [\"" state-id "\", \"" service-id "\"],\n"
-           " \"server\": \"" example-server "\",\n"
-           " \"message\": {\"jsonrpc\": \"2.0\", \"id\": 1, \"method\": \"tools/call\",\n"
-           "             \"params\": {\"name\": \"" example-tool "\", \"arguments\": {...}}}}\n"
-           "```\n\n"
+           " \"calls\": {\n"
+           "   \"" example-server "\": [\n"
+           "     {\"jsonrpc\": \"2.0\", \"id\": 1, \"method\": \"tools/call\",\n"
+           "      \"params\": {\"name\": \"" example-tool "\", \"arguments\": {...}}}\n"
+           "   ]"
            (when-not single-server?
-             (str "Available servers: " (clojure.string/join ", " (sort server-names)) "\n\n"))
-           "The `server` field specifies which MCP server to route the tool call to.\n"
-           "Tool results will be returned in the message field."))
+             (str ",\n   \"" (second server-names) "\": [...]"))
+           "\n }}\n"
+           "```\n\n"
+           (if single-server?
+             "Tool results will be returned in the `results` field keyed by server."
+             (str "Available servers: " (clojure.string/join ", " server-names) "\n\n"
+                  "You can call multiple tools across multiple servers in a single request.\n"
+                  "Results will be returned in the `results` field keyed by server."))))
     "No MCP tools available."))
 
 ;;==============================================================================
@@ -142,13 +151,15 @@
 ;;==============================================================================
 
 (defn hat-mcp-request-schema-fn
-  "Schema function for hat-based MCP requests.
+  "Schema function for hat-based MCP requests with cross-server batching.
    Looks up servers at [:hats :mcp :servers] and builds dynamic server enum.
    
-   Schema includes:
-   - id: transition id
-   - server: enum of available server names
-   - message: JSON-RPC tool call request"
+   Schema format enables calling multiple servers in one round trip:
+   {\"id\": [\"mc\", \"mc-mcp\"],
+    \"calls\": {\"github\": [<request>, ...],
+               \"tools\": [<request>, ...]}}
+   
+   Each server gets a batch of JSON-RPC tool call requests."
   [context {xid "id" :as _xition}]
   (let [servers (get-in context [:hats :mcp :servers] {})
         server-names (keys servers)
@@ -162,17 +173,17 @@
                       :string)]
     [:map {:closed true}
      ["id" [:= xid]]
-     ["server" server-enum]
-     ["message" [:or single-request-schema batch-request-schema]]]))
+     ["calls" [:map-of server-enum batch-request-schema]]]))
 
 (defn hat-mcp-response-schema-fn
-  "Schema function for hat-based MCP responses.
-   Looks up servers at [:hats :mcp :servers].
+  "Schema function for hat-based MCP responses with cross-server results.
    
-   Schema includes:
-   - id: transition id
-   - server: which server responded
-   - message: JSON-RPC response"
+   Schema format returns results keyed by server:
+   {\"id\": [\"mc-mcp\", \"mc\"],
+    \"results\": {\"github\": [<response>, ...],
+                 \"tools\": [<response>, ...]}}
+   
+   Each server's responses are in the same order as the requests."
   [context {xid "id" :as _xition}]
   (let [servers (get-in context [:hats :mcp :servers] {})
         ;; Merge all caches to build combined response schema
@@ -182,9 +193,8 @@
         batch-response-schema [:vector single-response-schema]]
     [:map {:closed true}
      ["id" [:= xid]]
-     ["server" :string] ;; Echo back which server handled the request
      ["document" {:optional true} :string]
-     ["message" {:optional true} [:or single-response-schema batch-response-schema]]]))
+     ["results" [:map-of :string batch-response-schema]]]))
 
 ;;==============================================================================
 ;; MCP Hat Maker
@@ -293,51 +303,54 @@
 ;;==============================================================================
 
 (def-action mcp-service-action
-  "Action for MCP service state. Routes tool calls to appropriate server bridge.
+  "Action for MCP service state. Routes tool calls to appropriate server bridges.
    
-   Expects servers at [:hats :mcp :servers] in context.
-   Routes based on \"server\" field in event.
-   Handles single or batched tool calls.
-   Echoes server name back in response for LLM context."
+   Supports cross-server batching: multiple servers can be called in one round trip.
+   
+   Expects:
+   - servers at [:hats :mcp :servers] in context
+   - event with \"calls\" map: {\"server-name\" [<requests>...], ...}
+   
+   Returns:
+   - \"results\" map: {\"server-name\" [<responses>...], ...}"
   [:map] ;; No config required
   [_config _fsm _ix {state-id "id" :as _state}]
   (fn [context event _trail handler]
     (let [servers (get-in context [:hats :mcp :servers] {})
           [from _to] (get event "id")
-          server-name (get event "server")
-          message (get event "message")]
-      (log/info "mcp-service-action:" state-id "from" from "server:" server-name)
+          calls (get event "calls" {})]
+      (log/info "mcp-service-action:" state-id "from" from
+                "servers:" (keys calls) "total-calls:" (reduce + 0 (map count (vals calls))))
       (cond
         ;; No servers configured
         (empty? servers)
         (do
           (log/error "mcp-service-action: no servers in context")
           (handler context {"id" [state-id from]
-                            "server" server-name
-                            "message" {"error" "No MCP servers configured"}}))
+                            "results" {"error" "No MCP servers configured"}}))
 
-        ;; Server not found
-        (not (contains? servers server-name))
+        ;; Check for unknown servers
+        (let [unknown (remove #(contains? servers %) (keys calls))]
+          (seq unknown))
         (do
-          (log/error "mcp-service-action: unknown server" server-name
+          (log/error "mcp-service-action: unknown servers" (remove #(contains? servers %) (keys calls))
                      "available:" (keys servers))
           (handler context {"id" [state-id from]
-                            "server" server-name
-                            "message" {"error" (str "Unknown server: " server-name
+                            "results" {"error" (str "Unknown servers: "
+                                                    (clojure.string/join ", " (remove #(contains? servers %) (keys calls)))
                                                     ". Available: " (clojure.string/join ", " (keys servers)))}}))
 
-        ;; Execute tool calls on correct server
+        ;; Execute tool calls on each server (could parallelize with pmap)
         :else
-        (let [bridge (get-in servers [server-name :bridge])
-              ;; Normalize to batch format
-              requests (if (vector? message) message [message])
-              ;; Execute batch
-              responses (bridge/send-and-await bridge requests 30000)
-              ;; If single request, unwrap the response
-              result (if (vector? message) responses (first responses))]
-          ;; Drain notifications
-          (bridge/drain-notifications bridge)
-          ;; Return to calling state with server echoed
+        (let [results (reduce-kv
+                       (fn [acc server-name requests]
+                         (log/info "mcp-service-action: calling" server-name "with" (count requests) "requests")
+                         (let [bridge (get-in servers [server-name :bridge])
+                               responses (bridge/send-and-await bridge requests 30000)]
+                           (bridge/drain-notifications bridge)
+                           (assoc acc server-name responses)))
+                       {}
+                       calls)]
+          ;; Return to calling state with results keyed by server
           (handler context {"id" [state-id from]
-                            "server" server-name
-                            "message" result}))))))
+                            "results" results}))))))
