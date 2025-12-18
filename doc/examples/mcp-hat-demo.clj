@@ -115,14 +115,15 @@ When you have the final answer, respond with id=[\"ask\", \"end\"] and include y
   {"id" "multi-server-demo"
    "states" [{"id" "ask"
               "action" "llm"
-              ;; NEW: Multiple servers in one hat!
+              ;; Multiple servers in one hat - enables cross-server batching!
               "hats" [{"mcp" {:servers {"github" {:config github-mcp-config}
                                         "tools" {:config claij-tools-config}}}}]
               "prompts" ["You are a helpful assistant with access to multiple MCP servers:
 - 'github': GitHub API tools (list_issues, create_pull_request, etc.)
 - 'tools': Local system tools (bash, read_file, clojure_eval, etc.)
 
-When calling a tool, specify which server to use in the 'server' field.
+You can call tools from multiple servers in a SINGLE request using the 'calls' format.
+Group your tool calls by server - this is more efficient than separate requests.
 When you have the final answer, respond with id=[\"ask\", \"end\"]."]}
              {"id" "end"
               "action" "end"}]
