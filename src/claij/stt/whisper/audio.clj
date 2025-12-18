@@ -5,9 +5,9 @@
    transcription backend. Key features:
    
    - Converts WAV format bytes to numpy arrays for Whisper
-   - Automatically resamples to 16kHz if needed (using scipy.signal.resample)
    - All operations performed in-memory (no temporary files)
    - Handles Java/Python byte representation differences
+   - Automatically resamples audio to 16kHz for Whisper compatibility
    
    Public API:
    - wav-bytes->audio-array: Convert WAV bytes to numpy float32 array

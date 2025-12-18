@@ -68,9 +68,9 @@
      :torch (py-import "torch")
      :numpy (py-import "numpy")
      :soundfile (py-import "soundfile")
-     :scipy-signal (py-import "scipy.signal")
      :io (py-import "io")
-     :builtins (py-import "builtins")}))
+     :builtins (py-import "builtins")
+     :scipy-signal (py-import "scipy.signal")}))
 
 (defn- load-modules!
   "Load Python modules if not already loaded.
