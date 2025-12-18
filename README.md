@@ -32,6 +32,8 @@
 [![codecov](https://codecov.io/gh/JulesGosnell/claij/branch/main/graph/badge.svg)](https://codecov.io/gh/JulesGosnell/claij)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
+> **Why CLAIJ?** Traditional agentic pipelines are complex, fragile Python code with slow iterations and production downtime. CLAIJ replaces imperative pipelines with **FSMs as pure data**—business logic you can version, hot-reload, and improve without deployment. **[Read the full vision →](doc/VISION.md)**
+
 ---
 
 ## The Philosophy
@@ -47,6 +49,8 @@ CLAIJ is built on this foundation. The system is data. The data describes itself
 📖 **[Read the full philosophical foundation →](doc/SELF-DESCRIPTIVE-SYSTEMS.md)**
 
 📐 **[Read the technical architecture →](doc/ARCHITECTURE.md)**
+
+🚀 **[Read the vision: Why FSMs as Data →](doc/VISION.md)**
 
 ---
 
