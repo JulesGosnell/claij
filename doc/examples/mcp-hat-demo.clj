@@ -6,6 +6,12 @@
    - Grok (x-ai) provider for tool-calling
    - MCP bridge initialization and tool execution
    - Multiple MCP server configurations (claij-tools, GitHub)
+   - Multi-server support: using multiple MCP servers in a single state
+   
+   Examples:
+   1. Hostname demo - single server (claij-tools default)
+   2. GitHub demo - single server (GitHub MCP)
+   3. Multi-server demo - GitHub + claij-tools in one state
    
    Usage: Evaluate forms in order in your REPL.")
 
@@ -98,6 +104,43 @@ When you have the final answer, respond with id=[\"ask\", \"end\"] and include y
                         (claij.hat/register-hat "mcp" claij.hat.mcp/mcp-hat-maker))}})
 
 ;;------------------------------------------------------------------------------
+;; Example 3: Multi-server demo (GitHub + claij-tools together)
+;;------------------------------------------------------------------------------
+
+;; claij-tools default config
+(def claij-tools-config
+  claij.mcp.bridge/default-mcp-config)
+
+(def multi-server-fsm
+  {"id" "multi-server-demo"
+   "states" [{"id" "ask"
+              "action" "llm"
+              ;; NEW: Multiple servers in one hat!
+              "hats" [{"mcp" {:servers {"github" {:config github-mcp-config}
+                                        "tools" {:config claij-tools-config}}}}]
+              "prompts" ["You are a helpful assistant with access to multiple MCP servers:
+- 'github': GitHub API tools (list_issues, create_pull_request, etc.)
+- 'tools': Local system tools (bash, read_file, clojure_eval, etc.)
+
+When calling a tool, specify which server to use in the 'server' field.
+When you have the final answer, respond with id=[\"ask\", \"end\"]."]}
+             {"id" "end"
+              "action" "end"}]
+   "xitions" [{"id" ["start" "ask"] "omit" true}
+              {"id" ["ask" "end"]
+               "schema" [:map
+                         ["id" [:= ["ask" "end"]]]
+                         ["result" :string]]}]})
+
+(def multi-server-context
+  {:id->action {"llm" llm-action
+                "end" (var claij.actions/end-action)}
+   :llm/provider "x-ai"
+   :llm/model "grok-code-fast-1"
+   :hats {:registry (-> (claij.hat/make-hat-registry)
+                        (claij.hat/register-hat "mcp" claij.hat.mcp/mcp-hat-maker))}})
+
+;;------------------------------------------------------------------------------
 ;; Run the demos
 ;;------------------------------------------------------------------------------
 
@@ -119,5 +162,17 @@ When you have the final answer, respond with id=[\"ask\", \"end\"] and include y
   (def fsm (claij.fsm/start-fsm github-context github-fsm))
   ((:submit fsm) {"question" "How many open issues are in the JulesGosnell/claij repository?"})
   (def result ((:await fsm) 120000))
+  (println "Result:" result)
+  ((:stop fsm))
+
+  ;; ============================================================
+  ;; Example 3: Multi-server (GitHub + tools in one state)
+  ;; ============================================================
+  ;; This demonstrates using multiple MCP servers simultaneously.
+  ;; The LLM can use GitHub tools AND local bash/file tools in the same conversation.
+
+  (def fsm (claij.fsm/start-fsm multi-server-context multi-server-fsm))
+  ((:submit fsm) {"question" "List the open issues in JulesGosnell/claij and tell me my hostname"})
+  (def result ((:await fsm) 180000))
   (println "Result:" result)
   ((:stop fsm)))
