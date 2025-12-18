@@ -64,3 +64,27 @@
   (testing "openapi-hat-maker returns a function"
     (let [maker (openapi/openapi-hat-maker "test-state" {:spec-url "http://example.com/openapi.json"})]
       (is (fn? maker)))))
+
+(deftest test-resolve-schema
+  (testing "resolve-schema returns schema directly when no ref"
+    (let [spec {}
+          schema {"type" "string"}]
+      (is (= schema (openapi/resolve-schema spec schema)))))
+
+  (testing "resolve-schema handles nil schema"
+    (let [spec {}]
+      (is (nil? (openapi/resolve-schema spec nil))))))
+
+(deftest test-tools->request-schema
+  (testing "tools->request-schema generates valid schema"
+    (let [tools [{:operation-id "test" :request-schema {"type" "object"}}]
+          schema (openapi/tools->request-schema tools)]
+      (is (vector? schema)) ;; Malli schemas are vectors
+      (is (= :map (first schema))))))
+
+(deftest test-tools->response-schema
+  (testing "tools->response-schema generates valid schema"
+    (let [tools [{:operation-id "test"}]
+          schema (openapi/tools->response-schema tools)]
+      (is (vector? schema)) ;; Malli schemas are vectors
+      (is (= :map (first schema))))))

@@ -40,6 +40,7 @@
 |------|---------|-------------|
 | 2025-12-18 | **OpenAPI Hat & Actions** | Direct OpenAPI endpoint invocation with binary support (audio/wav, multipart). Enables declarative voice pipelines—TTS and STT as simple FSM actions. |
 | 2025-12-17 | **Hat System** | Modular capability injection for FSM states. Hats wrap actions with cross-cutting concerns (MCP tools, OpenAPI specs, REPL access) without touching FSM structure. |
+| 2025-12-06 | **Malli Migration** | Replaced JSON Schema with Malli for native Clojure schemas—more token-efficient, better error messages, and enabling the reflexive m1→m2→m3→m3 hierarchy that grounds the architecture. |
 | 2025-11-14 | **MCP Integration** | Model Context Protocol support lets LLMs call external tools (GitHub, filesystem, databases) through a standardized interface. Multi-server batching for efficiency. |
 
 *Coming soon: Fully declarative Bath Driven Development (BDD) demo—voice in, FSM orchestration, voice out. All as pure data.*
@@ -222,10 +223,6 @@ An FSM that produces FSMs. Feed it a workflow description; it outputs a runnable
 At any point in execution, an LLM can enter the FSM-FSM to improve the *current* FSM—a mini-retrospective. Better prompts, extended schemas, new states. The improvement validates against the meta-schema, loads, and execution continues from the current state into the improved FSM.
 
 This is the vision: **an elastic collection of LLMs coordinating on a self-improving process.**
-
-### Malli Migration ✅
-
-Completed migration from JSON Schema to Malli for native Clojure schemas—more token-efficient, better error messages, and enabling the reflexive m1→m2→m3→m3 hierarchy that grounds the entire architecture.
 
 ---
 

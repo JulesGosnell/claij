@@ -85,7 +85,7 @@
         keys
         first)))
 
-(defn- binary-content-type?
+(defn binary-content-type?
   "Returns true if the content-type indicates binary data."
   [content-type]
   (when content-type
@@ -94,7 +94,7 @@
         (str/starts-with? content-type "video/")
         (= content-type "application/octet-stream"))))
 
-(defn- multipart-content-type?
+(defn multipart-content-type?
   "Returns true if the content-type indicates multipart form data."
   [content-type]
   (when content-type

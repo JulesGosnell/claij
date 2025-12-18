@@ -26,15 +26,44 @@
 ;; Content Type Detection Tests
 ;;------------------------------------------------------------------------------
 
-(deftest test-content-type-detection
-  (testing "get-response-content-type extracts from spec"
-    ;; Test via creating action - validates spec parsing works
-    (let [action (openapi-call/openapi-call-action
-                  {:spec-url "http://localhost:8765/openapi.json"
-                   :base-url "http://localhost:8765"
-                   :operation "listItems"}
-                  nil 0 {"id" "test"})]
-      (is (fn? action) "Action factory returns function"))))
+(deftest test-binary-content-type-detection
+  (testing "audio types are binary"
+    (is (true? (openapi-call/binary-content-type? "audio/wav")))
+    (is (true? (openapi-call/binary-content-type? "audio/mpeg")))
+    (is (true? (openapi-call/binary-content-type? "audio/ogg"))))
+
+  (testing "image types are binary"
+    (is (true? (openapi-call/binary-content-type? "image/png")))
+    (is (true? (openapi-call/binary-content-type? "image/jpeg"))))
+
+  (testing "video types are binary"
+    (is (true? (openapi-call/binary-content-type? "video/mp4")))
+    (is (true? (openapi-call/binary-content-type? "video/webm"))))
+
+  (testing "octet-stream is binary"
+    (is (true? (openapi-call/binary-content-type? "application/octet-stream"))))
+
+  (testing "json is not binary"
+    (is (not (openapi-call/binary-content-type? "application/json"))))
+
+  (testing "text is not binary"
+    (is (not (openapi-call/binary-content-type? "text/plain"))))
+
+  (testing "nil is not binary"
+    (is (nil? (openapi-call/binary-content-type? nil)))))
+
+(deftest test-multipart-content-type-detection
+  (testing "multipart/form-data is multipart"
+    (is (true? (openapi-call/multipart-content-type? "multipart/form-data"))))
+
+  (testing "multipart/mixed is multipart"
+    (is (true? (openapi-call/multipart-content-type? "multipart/mixed"))))
+
+  (testing "application/json is not multipart"
+    (is (not (openapi-call/multipart-content-type? "application/json"))))
+
+  (testing "nil is not multipart"
+    (is (nil? (openapi-call/multipart-content-type? nil)))))
 
 ;;------------------------------------------------------------------------------
 ;; Action Creation Tests
@@ -160,3 +189,24 @@
   (testing "openapi-call-actions map contains action var"
     (is (contains? openapi-call/openapi-call-actions "openapi-call"))
     (is (var? (get openapi-call/openapi-call-actions "openapi-call")))))
+
+(deftest test-build-multipart-body
+  (testing "build-multipart-body handles byte arrays"
+    (let [params {"audio" (byte-array [1 2 3])}
+          result (#'openapi-call/build-multipart-body params)]
+      (is (= 1 (count result)))
+      (is (= "audio" (:name (first result))))
+      (is (= "audio/wav" (:content-type (first result))))))
+
+  (testing "build-multipart-body handles string values"
+    (let [params {"text" "hello world"}
+          result (#'openapi-call/build-multipart-body params)]
+      (is (= 1 (count result)))
+      (is (= "text" (:name (first result))))
+      (is (= "hello world" (:content (first result))))))
+
+  (testing "build-multipart-body handles mixed params"
+    (let [params {"audio" (byte-array [1 2 3])
+                  "language" "en"}
+          result (#'openapi-call/build-multipart-body params)]
+      (is (= 2 (count result))))))
