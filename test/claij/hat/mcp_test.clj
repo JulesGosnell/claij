@@ -4,7 +4,7 @@
    [claij.hat :as hat]
    [claij.hat.mcp :refer [mcp-hat-maker format-tools-prompt format-tool-schema
                           hat-mcp-request-schema-fn hat-mcp-response-schema-fn
-                          mcp-service-action]]
+                          mcp-service-action normalize-mcp-config]]
    [claij.mcp.bridge :as bridge]))
 
 ;;------------------------------------------------------------------------------
@@ -225,3 +225,61 @@
           (is (= 1 (count (get-in ctx' [:hats :stop-hooks]))))
           ;; Fragment generated
           (is (= "mc-mcp" (get-in fragment ["states" 0 "id"]))))))))
+
+;;------------------------------------------------------------------------------
+;; Config Normalization Tests
+;;------------------------------------------------------------------------------
+
+(deftest normalize-mcp-config-test
+  (testing "nil config becomes default server"
+    (let [result (normalize-mcp-config nil)]
+      (is (contains? result :servers))
+      (is (contains? (:servers result) "default"))
+      (is (= bridge/default-mcp-config (get-in result [:servers "default" :config])))
+      (is (= 30000 (get-in result [:servers "default" :timeout-ms])))
+      (is (= 30000 (:timeout-ms result)))))
+
+  (testing "empty config becomes default server"
+    (let [result (normalize-mcp-config {})]
+      (is (contains? (:servers result) "default"))
+      (is (= bridge/default-mcp-config (get-in result [:servers "default" :config])))))
+
+  (testing "single :config wraps as default server"
+    (let [my-config {"command" "npx" "args" ["my-server"]}
+          result (normalize-mcp-config {:config my-config})]
+      (is (contains? (:servers result) "default"))
+      (is (= my-config (get-in result [:servers "default" :config])))
+      (is (= 30000 (get-in result [:servers "default" :timeout-ms])))))
+
+  (testing "custom timeout propagates"
+    (let [result (normalize-mcp-config {:timeout-ms 60000})]
+      (is (= 60000 (:timeout-ms result)))
+      (is (= 60000 (get-in result [:servers "default" :timeout-ms])))))
+
+  (testing ":servers config passes through with defaults applied"
+    (let [github-config {"command" "npx" "args" ["github-server"]}
+          result (normalize-mcp-config {:servers {"github" {:config github-config}}})]
+      (is (contains? (:servers result) "github"))
+      (is (= github-config (get-in result [:servers "github" :config])))
+      ;; Default timeout applied
+      (is (= 30000 (get-in result [:servers "github" :timeout-ms])))))
+
+  (testing "multiple servers preserved"
+    (let [github-config {"command" "github"}
+          tools-config {"command" "tools"}
+          result (normalize-mcp-config {:servers {"github" {:config github-config}
+                                                  "tools" {:config tools-config}}})]
+      (is (= 2 (count (:servers result))))
+      (is (= github-config (get-in result [:servers "github" :config])))
+      (is (= tools-config (get-in result [:servers "tools" :config])))))
+
+  (testing "per-server timeout override"
+    (let [result (normalize-mcp-config {:timeout-ms 30000
+                                        :servers {"fast" {:config {} :timeout-ms 5000}
+                                                  "slow" {:config {} :timeout-ms 120000}}})]
+      (is (= 5000 (get-in result [:servers "fast" :timeout-ms])))
+      (is (= 120000 (get-in result [:servers "slow" :timeout-ms])))))
+
+  (testing "server without config gets default"
+    (let [result (normalize-mcp-config {:servers {"myserver" {}}})]
+      (is (= bridge/default-mcp-config (get-in result [:servers "myserver" :config]))))))

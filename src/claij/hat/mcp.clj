@@ -6,8 +6,28 @@
     \"action\" \"llm\"
     \"hats\" [\"mcp\"]}
    
-   Or with config:
-   {\"hats\" [{\"mcp\" {:services [\"my-server\"]}}]}"
+   Or with single server config:
+   {\"hats\" [{\"mcp\" {:config my-server-config}}]}
+   
+   Or with multiple servers:
+   {\"hats\" [{\"mcp\" {:servers {\"github\" github-config
+                                \"tools\" tools-config}}}]}
+   
+   ## Design Decision: Tool Routing (Option B vs Option A)
+   
+   The MCP community is converging on prefixed tool names (Option A) like
+   `github__list_issues` because MCP's tool name regex forbids `/` or `:`.
+   
+   We chose Option B (structured `server` field) instead because:
+   1. Cognitive grouping - structured server groupings help LLMs reason about
+      tool relationships (\"I need GitHub functionality\" → look at github tools)
+   2. Schema validation - [:enum \"github\" \"tools\"] catches routing errors at
+      validation time, not dispatch time  
+   3. Semantic clarity - the \"simplicity\" of flat names is illusory; complexity
+      just moves to munging/parsing
+   4. Cleaner prompts - grouped tool documentation by server is more readable
+   
+   See issue #72 for full discussion."
   (:require
    [clojure.tools.logging :as log]
    [claij.action :refer [def-action]]
@@ -17,6 +37,57 @@
 
 ;; Forward declaration for mcp-hat-maker to reference
 (declare mcp-service-action)
+
+;;==============================================================================
+;; Config Normalization
+;;==============================================================================
+
+(defn normalize-mcp-config
+  "Normalize various MCP hat config formats to canonical multi-server format.
+   
+   Input formats:
+   - nil or {}           -> {:servers {\"default\" {:config default-mcp-config}}}
+   - {:config cfg}       -> {:servers {\"default\" {:config cfg}}}
+   - {:servers {...}}    -> passed through as-is
+   
+   Output format (canonical):
+   {:servers {\"server-name\" {:config mcp-server-config
+                              :timeout-ms 30000}
+              ...}
+    :timeout-ms 30000}  ;; global default
+   
+   Each server entry can have:
+   - :config - MCP server config map (command, args, transport, env)
+   - :timeout-ms - per-server timeout override"
+  [config]
+  (let [global-timeout (or (:timeout-ms config) 30000)]
+    (cond
+      ;; Already has :servers - pass through with defaults applied
+      (:servers config)
+      (-> config
+          (update :servers
+                  (fn [servers]
+                    (reduce-kv
+                     (fn [acc server-name server-config]
+                       (assoc acc server-name
+                              (-> server-config
+                                  (update :config #(or % bridge/default-mcp-config))
+                                  (update :timeout-ms #(or % global-timeout)))))
+                     {}
+                     servers)))
+          (assoc :timeout-ms global-timeout))
+
+      ;; Has :config - wrap as single "default" server
+      (:config config)
+      {:servers {"default" {:config (:config config)
+                            :timeout-ms global-timeout}}
+       :timeout-ms global-timeout}
+
+      ;; Empty/nil config - use default server
+      :else
+      {:servers {"default" {:config bridge/default-mcp-config
+                            :timeout-ms global-timeout}}
+       :timeout-ms global-timeout})))
 
 ;;==============================================================================
 ;; Tool Prompt Generation
