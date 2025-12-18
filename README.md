@@ -32,6 +32,20 @@
 [![codecov](https://codecov.io/gh/JulesGosnell/claij/branch/main/graph/badge.svg)](https://codecov.io/gh/JulesGosnell/claij)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
+---
+
+## 📢 Announcements
+
+| Date | Feature | Description |
+|------|---------|-------------|
+| 2025-12-18 | **OpenAPI Hat & Actions** | Direct OpenAPI endpoint invocation with binary support (audio/wav, multipart). Enables declarative voice pipelines—TTS and STT as simple FSM actions. |
+| 2025-12-17 | **Hat System** | Modular capability injection for FSM states. Hats wrap actions with cross-cutting concerns (MCP tools, OpenAPI specs, REPL access) without touching FSM structure. |
+| 2025-11-14 | **MCP Integration** | Model Context Protocol support lets LLMs call external tools (GitHub, filesystem, databases) through a standardized interface. Multi-server batching for efficiency. |
+
+*Coming soon: Fully declarative Bath Driven Development (BDD) demo—voice in, FSM orchestration, voice out. All as pure data.*
+
+---
+
 > **Why CLAIJ?** Traditional agentic pipelines are complex, fragile Python code with slow iterations and production downtime. CLAIJ replaces imperative pipelines with **FSMs as pure data**—business logic you can version, hot-reload, and improve without deployment. **[Read the full vision →](doc/VISION.md)**
 
 ---
