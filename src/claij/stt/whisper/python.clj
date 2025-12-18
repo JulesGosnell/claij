@@ -68,6 +68,7 @@
      :torch (py-import "torch")
      :numpy (py-import "numpy")
      :soundfile (py-import "soundfile")
+     :scipy-signal (py-import "scipy.signal")
      :io (py-import "io")
      :builtins (py-import "builtins")}))
 

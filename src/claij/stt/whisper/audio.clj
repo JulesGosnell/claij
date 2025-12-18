@@ -5,15 +5,15 @@
    transcription backend. Key features:
    
    - Converts WAV format bytes to numpy arrays for Whisper
+   - Automatically resamples to 16kHz if needed (using scipy.signal.resample)
    - All operations performed in-memory (no temporary files)
    - Handles Java/Python byte representation differences
-   - Validates audio format and sample rate
    
    Public API:
    - wav-bytes->audio-array: Convert WAV bytes to numpy float32 array
    
    Dependencies:
-   - Requires libpython-clj and Python libraries (numpy, soundfile)
+   - Requires libpython-clj and Python libraries (numpy, soundfile, scipy)
    - Use with :whisper alias: clojure -M:whisper")
 
 ;;; Python Interop Helpers
@@ -86,13 +86,26 @@
   (let [sf (:soundfile module-cache)]
     (py-call-attr sf "read" bytes-io)))
 
-(defn- validate-sample-rate!
-  "Validate that audio is at 16kHz. Throws exception if not."
-  [sample-rate]
-  (when (not= sample-rate 16000)
-    (throw (ex-info "Audio must be 16kHz"
-                    {:sample-rate sample-rate
-                     :expected 16000}))))
+(defn- resample-audio
+  "Resample audio data to target sample rate using scipy.
+   
+   Args:
+     module-cache - Map of Python modules
+     audio-data - Numpy array of audio samples
+     orig-sr - Original sample rate
+     target-sr - Target sample rate (default 16000)
+   
+   Returns:
+     Resampled numpy array."
+  [module-cache audio-data orig-sr target-sr]
+  (if (= orig-sr target-sr)
+    audio-data
+    (let [signal (:scipy-signal module-cache)
+          ;; Calculate number of samples in output
+          num-samples (py-get-attr audio-data "shape")
+          ;; Use scipy.signal.resample for high-quality resampling
+          new-num-samples (int (* (first num-samples) (/ target-sr orig-sr)))]
+      (py-call-attr signal "resample" audio-data new-num-samples))))
 
 (defn- to-float32
   "Convert numpy array to float32 type for Whisper.
@@ -112,15 +125,17 @@
 (defn wav-bytes->audio-array
   "Convert WAV format bytes to numpy float32 array suitable for Whisper.
    Processes audio entirely in memory using Python's BytesIO.
+   Automatically resamples to 16kHz if needed.
    
    Args:
-     module-cache - Map of Python modules (:numpy, :soundfile, :io, :builtins)
+     module-cache - Map of Python modules (:numpy, :soundfile, :io, :builtins, :scipy-signal)
      wav-bytes - WAV format audio as byte array
    
    Returns:
      Numpy array of audio samples at 16kHz as float32."
   [module-cache ^bytes wav-bytes]
   (let [bytes-io (create-bytes-io module-cache wav-bytes)
-        [audio-data sample-rate] (read-wav-from-bytesio module-cache bytes-io)]
-    (validate-sample-rate! sample-rate)
-    (to-float32 module-cache audio-data)))
+        [audio-data sample-rate] (read-wav-from-bytesio module-cache bytes-io)
+        ;; Resample to 16kHz if needed
+        resampled (resample-audio module-cache audio-data sample-rate 16000)]
+    (to-float32 module-cache resampled)))

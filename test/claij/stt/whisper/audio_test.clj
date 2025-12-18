@@ -67,30 +67,34 @@
           (is (some? audio-array)
               "Should return audio array for valid input"))))))
 
-(deftest test-wav-bytes->audio-array-wrong-sample-rate
+(deftest test-wav-bytes->audio-array-resampling
   (with-whisper-backend
     (fn []
-      (testing "wav-bytes->audio-array rejects non-16kHz audio"
-        (testing "44.1kHz audio"
-          (let [wav-bytes (create-test-wav 44100 44100)]
-            (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                                  #"Audio must be 16kHz"
-                                  (audio/wav-bytes->audio-array *module-cache* wav-bytes))
-                "Should throw exception for 44.1kHz audio")))
+      (testing "wav-bytes->audio-array resamples non-16kHz audio"
+        (testing "44.1kHz audio is resampled"
+          (let [wav-bytes (create-test-wav 44100 44100)
+                result (audio/wav-bytes->audio-array *module-cache* wav-bytes)]
+            (is (some? result) "Should return resampled audio for 44.1kHz input")))
 
-        (testing "8kHz audio"
-          (let [wav-bytes (create-test-wav 8000 8000)]
-            (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                                  #"Audio must be 16kHz"
-                                  (audio/wav-bytes->audio-array *module-cache* wav-bytes))
-                "Should throw exception for 8kHz audio")))
+        (testing "22.05kHz audio is resampled (Piper TTS output)"
+          (let [wav-bytes (create-test-wav 22050 22050)
+                result (audio/wav-bytes->audio-array *module-cache* wav-bytes)]
+            (is (some? result) "Should return resampled audio for 22.05kHz input (Piper TTS)")))
 
-        (testing "48kHz audio"
-          (let [wav-bytes (create-test-wav 48000 48000)]
-            (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                                  #"Audio must be 16kHz"
-                                  (audio/wav-bytes->audio-array *module-cache* wav-bytes))
-                "Should throw exception for 48kHz audio")))))))
+        (testing "8kHz audio is resampled"
+          (let [wav-bytes (create-test-wav 8000 8000)
+                result (audio/wav-bytes->audio-array *module-cache* wav-bytes)]
+            (is (some? result) "Should return resampled audio for 8kHz input")))
+
+        (testing "48kHz audio is resampled"
+          (let [wav-bytes (create-test-wav 48000 48000)
+                result (audio/wav-bytes->audio-array *module-cache* wav-bytes)]
+            (is (some? result) "Should return resampled audio for 48kHz input")))
+
+        (testing "16kHz audio passes through unchanged"
+          (let [wav-bytes (create-test-wav 16000 16000)
+                result (audio/wav-bytes->audio-array *module-cache* wav-bytes)]
+            (is (some? result) "Should return audio for 16kHz input")))))))
 
 (deftest test-wav-bytes->audio-array-edge-cases
   (with-whisper-backend
