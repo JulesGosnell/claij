@@ -183,18 +183,18 @@
     \"results\": {\"github\": [<response>, ...],
                  \"tools\": [<response>, ...]}}
    
-   Each server's responses are in the same order as the requests."
+   Each server's responses are in the same order as the requests.
+   Uses discriminated union (result vs error key) for JSON-RPC responses."
   [context {xid "id" :as _xition}]
   (let [servers (get-in context [:hats :mcp :servers] {})
-        ;; Merge all caches to build combined response schema
-        all-caches (map :cache (vals servers))
-        merged-cache {"tools" (vec (mapcat #(get % "tools" []) all-caches))}
-        single-response-schema (mcp-schema/mcp-cache->response-schema merged-cache)
-        batch-response-schema [:vector single-response-schema]]
+        server-names (keys servers)
+        server-enum (if (seq server-names)
+                      (into [:enum] server-names)
+                      :string)]
     [:map {:closed true}
      ["id" [:= xid]]
      ["document" {:optional true} :string]
-     ["results" [:map-of :string batch-response-schema]]]))
+     ["results" [:map-of server-enum [:vector mcp-schema/tool-call-jsonrpc-response-schema]]]]))
 
 ;;==============================================================================
 ;; MCP Hat Maker

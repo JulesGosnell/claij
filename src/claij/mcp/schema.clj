@@ -76,6 +76,29 @@
    ["isError" {:optional true} :boolean]
    ["structuredContent" {:optional true} :map]])
 
+(def jsonrpc-error-schema
+  "JSON-RPC error object schema."
+  [:map
+   ["code" :int]
+   ["message" :string]
+   ["data" {:optional true} :any]])
+
+(def tool-call-jsonrpc-response-schema
+  "JSON-RPC response schema for tools/call - discriminated by result/error key.
+   Does not include notifications (handled separately by drain-notifications)."
+  [:multi {:dispatch (fn [m] (cond
+                               (contains? m "result") :success
+                               (contains? m "error") :error
+                               :else :unknown))}
+   [:success [:map {:closed true}
+              ["jsonrpc" [:= "2.0"]]
+              ["id" :int]
+              ["result" inlined-tool-response-schema]]]
+   [:error [:map {:closed true}
+            ["jsonrpc" [:= "2.0"]]
+            ["id" :int]
+            ["error" jsonrpc-error-schema]]]])
+
 (def inlined-resource-content
   "Resource content schema fully inlined."
   [:or
