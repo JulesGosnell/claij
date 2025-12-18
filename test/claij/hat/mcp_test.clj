@@ -101,9 +101,9 @@
           [ctx' fragment] (hat-fn {})]
       (try
         ;; Bridge should be initialized
-        (is (some? (get-in ctx' [:hats :mcp :bridge])))
+        (is (some? (get-in ctx' [:hats :mcp :servers "default" :bridge])))
         ;; Cache should have tools
-        (is (seq (get-in ctx' [:hats :mcp :cache "tools"])))
+        (is (seq (get-in ctx' [:hats :mcp :servers "default" :cache "tools"])))
         ;; Schema functions should be registered
         (is (fn? (get-in ctx' [:id->schema "mc-mcp-request"])))
         (is (fn? (get-in ctx' [:id->schema "mc-mcp-response"])))
@@ -125,8 +125,8 @@
           [ctx2 fragment2] (hat-fn2 ctx1)]
       (try
         ;; Same bridge object
-        (is (identical? (get-in ctx1 [:hats :mcp :bridge])
-                        (get-in ctx2 [:hats :mcp :bridge])))
+        (is (identical? (get-in ctx1 [:hats :mcp :servers "default" :bridge])
+                        (get-in ctx2 [:hats :mcp :servers "default" :bridge])))
         ;; But different service state ID
         (is (= "worker-mcp" (get-in fragment2 ["states" 0 "id"])))
         (finally
