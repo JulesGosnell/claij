@@ -22,6 +22,84 @@
             [claij.stt.whisper.audio :refer [wav-bytes->audio-array]]
             [claij.stt.whisper.multipart :refer [extract-bytes validate-audio]]))
 
+;;; OpenAPI Specification
+
+(def openapi-spec
+  "OpenAPI 3.0 specification for the STT service."
+  {"openapi" "3.0.0"
+   "info" {"title" "CLAIJ STT Service"
+           "description" "Speech-to-Text service using Whisper"
+           "version" "1.0.0"}
+   "paths"
+   {"/transcribe"
+    {"post"
+     {"operationId" "transcribe"
+      "summary" "Transcribe audio to text"
+      "description" "Accepts WAV audio and returns transcribed text"
+      "requestBody"
+      {"required" true
+       "content"
+       {"multipart/form-data"
+        {"schema"
+         {"type" "object"
+          "required" ["audio"]
+          "properties"
+          {"audio" {"type" "string"
+                    "format" "binary"
+                    "description" "WAV audio file to transcribe"}}}}}}
+      "responses"
+      {"200" {"description" "Successful transcription"
+              "content"
+              {"application/json"
+               {"schema"
+                {"type" "object"
+                 "properties"
+                 {"text" {"type" "string"
+                          "description" "Transcribed text"}
+                  "language" {"type" "string"
+                              "description" "Detected language code"}}}}}}
+       "500" {"description" "Transcription failed"
+              "content"
+              {"application/json"
+               {"schema"
+                {"$ref" "#/components/schemas/Error"}}}}}}}
+
+    "/health"
+    {"get"
+     {"operationId" "healthCheck"
+      "summary" "Health check"
+      "description" "Returns service health status and backend info"
+      "responses"
+      {"200" {"description" "Service healthy"
+              "content"
+              {"application/json"
+               {"schema"
+                {"type" "object"
+                 "properties"
+                 {"healthy?" {"type" "boolean"}
+                  "name" {"type" "string"}
+                  "version" {"type" "string"}}}}}}
+       "503" {"description" "Service unhealthy"}}}}
+
+    "/openapi.json"
+    {"get"
+     {"operationId" "getOpenApiSpec"
+      "summary" "Get OpenAPI specification"
+      "description" "Returns the OpenAPI 3.0 specification for this service"
+      "responses"
+      {"200" {"description" "OpenAPI specification"
+              "content"
+              {"application/json"
+               {"schema" {"type" "object"}}}}}}}}
+
+   "components"
+   {"schemas"
+    {"Error"
+     {"type" "object"
+      "properties"
+      {"error" {"type" "string"
+                "description" "Error message"}}}}}})
+
 ;;; Request Processing Helpers
 
 (defn- log-audio-info
@@ -93,6 +171,13 @@
         backend-info (backend-info backend)]
     (build-health-response health-result backend-info)))
 
+(defn- openapi-handler
+  "Serve the OpenAPI specification."
+  [_request]
+  {:status 200
+   :headers {"Content-Type" "application/json"}
+   :body (json/write-str openapi-spec)})
+
 (defn- not-found-handler
   "404 handler."
   [_request]
@@ -108,6 +193,7 @@
   (cond
     (and (= uri "/transcribe") (= method :post)) :transcribe
     (and (= uri "/health") (= method :get)) :health
+    (and (= uri "/openapi.json") (= method :get)) :openapi
     :else :not-found))
 
 (defn- dispatch-handler
@@ -121,6 +207,7 @@
   (case route
     :transcribe (transcribe-handler backend module-cache request)
     :health (health-handler backend request)
+    :openapi (openapi-handler request)
     :not-found (not-found-handler request)))
 
 ;;; Public API

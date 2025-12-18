@@ -79,6 +79,18 @@
               response (app request)]
           (is (= 404 (:status response))))))))
 
+(deftest test-openapi-endpoint
+  (testing "GET /openapi.json returns valid OpenAPI spec"
+    (let [app (create-test-app)
+          response (app {:uri "/openapi.json" :request-method :get})
+          body (json/read-str (:body response))]
+      (is (= 200 (:status response)))
+      (is (= "application/json" (get-in response [:headers "Content-Type"])))
+      (is (= "3.0.0" (get body "openapi")))
+      (is (= "CLAIJ TTS Service" (get-in body ["info" "title"])))
+      (is (contains? (get body "paths") "/synthesize"))
+      (is (contains? (get body "paths") "/health")))))
+
 (deftest test-synthesize-handler-with-plain-text
   (testing "synthesize handler with plain text body"
     (let [text "Hello world"
