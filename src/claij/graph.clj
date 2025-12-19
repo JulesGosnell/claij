@@ -33,7 +33,9 @@
         truncate-label (fn [s max-len]
                          (if (> (count s) max-len)
                            (str (subs s 0 max-len) "...")
-                           s))]
+                           s))
+        ;; Quote node IDs to handle hyphens and special chars
+        quote-id (fn [id] (str "\"" id "\""))]
     (str "digraph \"" fsm-id "\" {\n"
          "  rankdir=TB;\n"
          "  node [shape=box, style=rounded, fontname=\"Helvetica\", fontsize=10];\n"
@@ -43,9 +45,9 @@
                 (string-replace title-text "\n" "<BR/>")
                 "</FONT>>];\n"
                 "  { rank=same title }\n"
-                "  title -> start [style=invis];\n"))
-         "  start [shape=doublecircle, fillcolor=lightgreen, style=filled];\n"
-         "  end   [shape=doublecircle, fillcolor=lightcoral, style=filled];\n"
+                "  title -> \"start\" [style=invis];\n"))
+         "  \"start\" [shape=doublecircle, fillcolor=lightgreen, style=filled];\n"
+         "  \"end\"   [shape=doublecircle, fillcolor=lightcoral, style=filled];\n"
          "\n  // states\n"
          (apply str
                 (for [{id "id" action "action" prompts "prompts"} states
@@ -56,17 +58,16 @@
                             prompt-label (when prompt-text
                                            (str "\\n" (escape-label prompt-text)))]]
                   (format "  %s [label=\"%s%s%s\"];\n"
-                          id id (if action (str "\\n(" action ")") "") (or prompt-label ""))))
+                          (quote-id id) id (if action (str "\\n(" action ")") "") (or prompt-label ""))))
          "\n  // transitions\n"
          (apply str
                 (for [{[from to] "id" label "label" desc "description"} xitions
                       :let [texts (filter seq [label desc])
                             text (if (seq texts) (join "\\n" texts) to)
-                            label (escape-label text)]]
-                  (format "  %s -> %s [label=\"%s\"];\n"
-                          (if (= from "start") "start" from)
-                          (if (= to "end") "end" to)
-                          label)))
+                            label (escape-label text)
+                            from-id (quote-id (if (= from "start") "start" from))
+                            to-id (quote-id (if (= to "end") "end" to))]]
+                  (format "  %s -> %s [label=\"%s\"];\n" from-id to-id label)))
          "}\n")))
 
 (defn fsm->dot-with-hats

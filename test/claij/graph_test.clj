@@ -28,10 +28,10 @@
             "Should use digraph declaration")
         (is (includes? dot "\"test-fsm\"")
             "FSM id should be quoted in digraph name")
-        ;; Special start/end nodes
-        (is (includes? dot (str "start [" dot-special-node-shape))
+        ;; Special start/end nodes (quoted IDs)
+        (is (includes? dot (str "\"start\" [" dot-special-node-shape))
             "Start node should have doublecircle shape")
-        (is (includes? dot (str "end   [" dot-special-node-shape))
+        (is (includes? dot (str "\"end\"   [" dot-special-node-shape))
             "End node should have doublecircle shape")))
 
     (testing "FSM description appears in output"
@@ -51,11 +51,11 @@
                  "states" [{"id" "processing" "action" "process"}
                            {"id" "waiting"}]}
             dot (fsm->dot fsm)]
-        (is (includes? dot "processing [label=\"processing")
+        (is (includes? dot "\"processing\" [label=\"processing")
             "State should have label with its id")
         (is (includes? dot "(process)")
             "Action should appear in state label")
-        (is (includes? dot "waiting [label=\"waiting")
+        (is (includes? dot "\"waiting\" [label=\"waiting")
             "States without action also render")))
 
     (testing "state prompts appear in labels"
@@ -69,9 +69,9 @@
       (let [fsm {"id" "special-fsm"
                  "states" [{"id" "start"} {"id" "end"} {"id" "middle"}]}
             dot (fsm->dot fsm)]
-        (is (includes? dot "middle [label=")
+        (is (includes? dot "\"middle\" [label=")
             "Regular states should render")
-        (is (= 1 (count (re-seq #"start \[shape=doublecircle" dot)))
+        (is (= 1 (count (re-seq #"\"start\" \[shape=doublecircle" dot)))
             "Start should appear exactly once (as special node)")))
 
     (testing "transitions render as edges"
@@ -79,9 +79,9 @@
                  "xitions" [{"id" ["start" "processing"]}
                             {"id" ["processing" "end"]}]}
             dot (fsm->dot fsm)]
-        (is (includes? dot (str "start " dot-edge-arrow " processing"))
+        (is (includes? dot (str "\"start\" " dot-edge-arrow " \"processing\""))
             "Transition should render as DOT edge")
-        (is (includes? dot (str "processing " dot-edge-arrow " end"))
+        (is (includes? dot (str "\"processing\" " dot-edge-arrow " \"end\""))
             "Multiple transitions should all render")))
 
     (testing "transition label appears as edge attribute"
@@ -123,14 +123,14 @@
                  "xitions" [{"id" ["start" "mc"]}
                             {"id" ["mc" "end"]}]}
             dot (fsm->dot-with-hats fsm registry)]
-        ;; Should have original state
-        (is (includes? dot "mc [label=")
+        ;; Should have original state (quoted)
+        (is (includes? dot "\"mc\" [label=")
             "Original state should appear")
-        ;; Should have hat-generated state
-        (is (includes? dot "mc-svc [label=")
+        ;; Should have hat-generated state (quoted)
+        (is (includes? dot "\"mc-svc\" [label=")
             "Hat-generated state should appear")
-        ;; Should have hat-generated transitions
-        (is (includes? dot "mc -> mc-svc")
+        ;; Should have hat-generated transitions (quoted)
+        (is (includes? dot "\"mc\" -> \"mc-svc\"")
             "Hat-generated transition should appear")
-        (is (includes? dot "mc-svc -> mc")
+        (is (includes? dot "\"mc-svc\" -> \"mc\"")
             "Hat loopback transition should appear")))))
