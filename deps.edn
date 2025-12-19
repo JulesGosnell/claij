@@ -70,4 +70,8 @@
                             clj-python/libpython-clj {:mvn/version "2.025"}}}
 
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
-          :ns-default build}}}
+          :ns-default build}
+
+  :cljs {:extra-deps {org.clojure/clojurescript {:mvn/version "1.11.132"}
+                      thheller/shadow-cljs {:mvn/version "2.28.20"}}
+         :extra-paths ["src-cljs"]}}}
