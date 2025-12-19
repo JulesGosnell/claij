@@ -15,6 +15,7 @@
    {\"id\" \"stt\"
     \"action\" \"openapi-call\"
     \"config\" {:spec-url \"http://prognathodon:8000/openapi.json\"
+               :base-url \"http://prognathodon:8000\"
                :operation \"transcribe\"}}
    ```"
   (:require
@@ -234,7 +235,7 @@
    Config:
    - :spec-url - URL to fetch OpenAPI spec (required)
    - :operation - operationId to call (required)
-   - :base-url - Override base URL (optional, defaults to spec's server)
+   - :base-url - Base URL for API calls (required)
    - :auth - Auth config {:type :api-key/:bearer, ...} (optional)
    - :timeout-ms - Request timeout in ms (optional, default 30000)
    
@@ -251,7 +252,7 @@
   {:config [:map
             [:spec-url :string]
             [:operation :string]
-            [:base-url {:optional true} :string]
+            [:base-url :string]
             [:auth {:optional true} :any]
             [:timeout-ms {:optional true} :int]]
    :input :any
@@ -271,17 +272,13 @@
                              :operation operation
                              :available (mapv :operation-id tools)})))
 
-        ;; Resolve base URL
-        effective-base-url (or base-url
-                               (get-in spec ["servers" 0 "url"])
-                               (throw (ex-info "No base-url provided and none in spec"
-                                               {:spec-url spec-url})))
+        ;; base-url is required by schema
 
         ;; Get content types from spec
         request-content-type (get-request-content-type spec operation)
         response-content-type (get-response-content-type spec operation)
 
-        exec-config {:base-url effective-base-url
+        exec-config {:base-url base-url
                      :auth auth
                      :timeout-ms (or timeout-ms 30000)}
 
@@ -291,7 +288,7 @@
     (log/info "OpenAPI call action configured:"
               {:state-id state-id
                :operation operation
-               :base-url effective-base-url
+               :base-url base-url
                :request-content-type request-content-type
                :response-content-type response-content-type})
 

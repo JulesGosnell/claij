@@ -101,6 +101,7 @@
     {"id" "stt"
      "action" "openapi-call"
      "config" {:spec-url (str default-stt-url "/openapi.json")
+               :base-url default-stt-url
                :operation "transcribe"}}
 
     ;; MC: LLM with MCP hat for GitHub and Clojure tools
@@ -147,6 +148,7 @@
     {"id" "tts"
      "action" "openapi-call"
      "config" {:spec-url (str default-tts-url "/openapi.json")
+               :base-url default-tts-url
                :operation "synthesize"}}
 
     {"id" "end"
