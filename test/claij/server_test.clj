@@ -7,7 +7,8 @@
                          fsm-document-handler fsm-graph-dot-handler
                          fsm-graph-svg-handler dot->svg wrap-auth
                          llm-handler claij-api-key api-base api-url
-                         state routes app voice-handler]])
+                         state routes app voice-handler]]
+   [claij.fsm :as fsm])
   (:import
    [java.net URL]))
 
@@ -235,8 +236,34 @@
       (let [response (voice-handler {:multipart-params {"audio" (byte-array 0)}})]
         (is (= 500 (:status response)))))
 
-    ;; Note: Tests with valid audio would run the real BDD FSM which calls
-    ;; external STT/TTS services - those belong in integration tests.
+    ;; Mock FSM execution to test response handling without external services
+    (testing "returns 504 on FSM timeout"
+      (with-redefs [fsm/run-sync (fn [_ _ _ _] :timeout)]
+        (let [response (voice-handler {:multipart-params {"audio" (byte-array [1 2 3 4])}})]
+          (is (= 504 (:status response))))))
+
+    (testing "returns audio/wav on successful FSM completion"
+      (let [fake-audio (byte-array [82 73 70 70])] ;; RIFF header start
+        (with-redefs [fsm/run-sync (fn [_ _ _ _]
+                                     [{} [{"body" fake-audio}]])]
+          (let [response (voice-handler {:multipart-params {"audio" fake-audio}})]
+            (is (= 200 (:status response)))
+            (is (= "audio/wav" (get-in response [:headers "Content-Type"])))))))
+
+    (testing "returns 500 when FSM response has no audio"
+      (with-redefs [fsm/run-sync (fn [_ _ _ _]
+                                   [{} [{"body" "not bytes"}]])]
+        (let [response (voice-handler {:multipart-params {"audio" (byte-array [1 2 3 4])}})]
+          (is (= 500 (:status response))))))
+
+    (testing "accepts file map in multipart params"
+      (let [fake-audio (byte-array [82 73 70 70])]
+        (with-redefs [fsm/run-sync (fn [_ _ _ _]
+                                     [{} [{"body" fake-audio}]])]
+          (let [response (voice-handler {:multipart-params {"audio" {:bytes fake-audio
+                                                                     :filename "test.wav"
+                                                                     :content-type "audio/wav"}}})]
+            (is (= 200 (:status response)))))))
 
     (testing "routes include /voice endpoint"
       (let [voice-route (some #(when (= "/voice" (first %)) %) routes)]
