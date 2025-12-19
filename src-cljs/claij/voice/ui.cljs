@@ -176,8 +176,10 @@
                         :noiseSuppression true}})
       (.then
        (fn [stream]
-         (let [;; Create AudioContext - use webkit prefix for older iOS
-               AudioContext (or js/AudioContext js/webkitAudioContext)
+         ;; Create AudioContext - use webkit prefix for older iOS
+         ;; Access via window object to avoid ClojureScript compile errors
+         (let [AudioContext (or (.-AudioContext js/window)
+                                (.-webkitAudioContext js/window))
                audio-ctx (AudioContext. #js {:sampleRate 22050})]
 
            ;; iOS requires explicit resume after user gesture
@@ -301,31 +303,33 @@
              (.blob response))))
         (.then
          (fn [audio-blob]
-           (update-status! "Playing response..." "success")
-           (show-playback! true)
-           (swap! state assoc :status :playing)
-
+           ;; Create visible audio player - iOS allows user-initiated playback
            (let [audio-url (.createObjectURL js/URL audio-blob)
-                 audio (js/Audio. audio-url)]
-
-             (set! (.-onended audio)
-                   (fn []
-                     (show-playback! false)
-                     (swap! state assoc :status :idle)
-                     (update-button-state! :idle)
-                     (update-status! "Click to start recording")
-                     (.revokeObjectURL js/URL audio-url)))
-
-             (set! (.-onerror audio)
-                   (fn [e]
-                     (js/console.error "Audio playback error:" e)
-                     (show-playback! false)
-                     (swap! state assoc :status :idle :error "Playback error")
-                     (update-button-state! :idle)
-                     (update-status! "Error playing response" "error")))
-
-             (.play audio)
-             (append-transcript! "Voice exchange completed"))))
+                 container (by-id "audioPlayer")
+                 reset-ui (fn []
+                            (show-playback! false)
+                            (swap! state assoc :status :idle)
+                            (update-button-state! :idle)
+                            (update-status! "Click to start recording")
+                            (set! (.-innerHTML container) ""))]
+             ;; Insert audio element with controls
+             (set! (.-innerHTML container)
+                   (str "<audio controls autoplay playsinline style='width:100%'>"
+                        "<source src='" audio-url "' type='audio/wav'>"
+                        "</audio>"))
+             (let [audio (.querySelector container "audio")]
+               ;; Set up event handlers BEFORE trying to play
+               (.addEventListener audio "ended" reset-ui)
+               (.addEventListener audio "error" (fn [e]
+                                                  (js/console.error "Audio error:" e)
+                                                  (reset-ui)))
+               ;; Try autoplay, but it's OK if it fails - user can tap play
+               (-> (.play audio)
+                   (.catch (fn [_] nil)))) ; Ignore autoplay failure
+             (show-playback! true)
+             (swap! state assoc :status :playing)
+             (update-status! "Tap ▶ to play response" "success")
+             (append-transcript! "Response received"))))
         (.catch
          (fn [err]
            (js/console.error "Error sending audio:" err)
@@ -338,10 +342,10 @@
 ;;-----------------------------------------------------------------------------
 
 (defn toggle-recording! []
-  (when-not (= (:status @state) :processing)
+  (when-not (#{:processing :playing} (:status @state))
     (case (:status @state)
       :recording (stop-recording!)
-      (:idle :playing) (start-recording!)
+      :idle (start-recording!)
       nil)))
 
 (defn handle-keydown! [e]

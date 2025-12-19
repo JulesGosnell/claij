@@ -4,14 +4,16 @@ This document details how to set up the STT (Speech-to-Text) and TTS (Text-to-Sp
 
 ## Overview
 
-CLAIJ uses two Python-based microservices:
+CLAIJ uses Python-based microservices and Ollama for the voice + LLM pipeline:
 
 | Service | Port | Technology | Purpose |
 |---------|------|------------|---------|
 | STT | 8000 | OpenAI Whisper | Speech → Text |
 | TTS | 8001 | Piper | Text → Speech |
+| LLM | 11434 | Ollama | Local AI inference |
 
-Both services use **libpython-clj** for Clojure/Python interop and expose HTTP/JSON APIs.
+STT and TTS use **libpython-clj** for Clojure/Python interop and expose HTTP/JSON APIs.
+Ollama provides an OpenAI-compatible REST API.
 
 ## Hardware Requirements
 
@@ -365,9 +367,213 @@ sudo firewall-cmd --reload
 
 - **OpenAI Whisper**: https://github.com/openai/whisper
 - **Piper TTS**: https://github.com/rhasspy/piper
+- **Ollama**: https://ollama.com
+- **Ollama Models**: https://ollama.com/library
 - **PyTorch Installation**: https://pytorch.org/get-started/locally/
 - **CUDA Installation**: https://docs.nvidia.com/cuda/
 - **libpython-clj**: https://github.com/clj-python/libpython-clj
+
+## Ollama Setup (Local LLM)
+
+Ollama runs open-source LLMs locally, eliminating API costs and enabling offline development.
+
+### Why Ollama?
+
+| Benefit | Description |
+|---------|-------------|
+| **Zero cost** | No API fees, unlimited local inference |
+| **Privacy** | Code never leaves your machine |
+| **Offline** | Works without internet |
+| **Fast iteration** | No rate limits during development |
+
+### Hardware Requirements
+
+Ollama runs on CPU but is much faster with GPU:
+
+| Model Size | VRAM Required | CPU Feasible? |
+|------------|---------------|---------------|
+| 3B params | ~2-3 GB | ✅ Yes |
+| 7B params | ~4-5 GB | ⚠️ Slow |
+| 13B params | ~8-10 GB | ❌ Too slow |
+
+**Combined VRAM with Whisper:**
+
+| Setup | VRAM | Notes |
+|-------|------|-------|
+| Whisper small + 7B model | ~7 GB | Fits RTX 3080 Ti (12GB) |
+| Whisper tiny + 7B model | ~6 GB | Fits RTX 3060 (8GB) |
+| Whisper small + 13B model | ~12 GB | Needs RTX 3090/4080+ |
+
+### Installation
+
+```bash
+# Install Ollama (Linux/macOS)
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Verify installation
+ollama --version
+
+# Start Ollama service (if not auto-started)
+ollama serve
+```
+
+**Windows:** Download from https://ollama.com/download
+
+### Pull Models
+
+Recommended models for coding:
+
+```bash
+# Excellent code model (recommended)
+ollama pull qwen2.5-coder:7b
+
+# Alternative code models
+ollama pull deepseek-coder:6.7b
+ollama pull codellama:7b
+
+# General purpose (good for conversation)
+ollama pull mistral:7b
+ollama pull llama3.2:latest
+```
+
+### Verify Ollama
+
+```bash
+# List downloaded models
+ollama list
+
+# Test chat locally
+ollama run qwen2.5-coder:7b "Write a Clojure function to reverse a string"
+
+# Check API is accessible
+curl http://localhost:11434/api/tags
+```
+
+### Test OpenAI-Compatible API
+
+Ollama exposes an OpenAI-compatible API at `/v1/chat/completions`:
+
+```bash
+curl http://localhost:11434/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen2.5-coder:7b",
+    "messages": [{"role": "user", "content": "Write a Clojure hello world"}]
+  }'
+```
+
+### Remote Access
+
+By default, Ollama only listens on localhost. To access from other machines:
+
+```bash
+# Set environment variable before starting
+export OLLAMA_HOST=0.0.0.0:11434
+ollama serve
+
+# Or edit systemd service (Linux)
+sudo systemctl edit ollama
+# Add:
+# [Service]
+# Environment="OLLAMA_HOST=0.0.0.0:11434"
+
+sudo systemctl restart ollama
+```
+
+Then access from CLAIJ/megalodon:
+```bash
+curl http://prognathodon:11434/api/tags
+```
+
+### Model Recommendations for CLAIJ
+
+| Use Case | Model | Notes |
+|----------|-------|-------|
+| Clojure coding | `qwen2.5-coder:7b` | Best code understanding |
+| General dev tasks | `mistral:7b` | Good balance |
+| Fast responses | `llama3.2:3b` | Lower quality, much faster |
+| Complex reasoning | `deepseek-coder:6.7b` | Strong on algorithms |
+
+### Memory and Performance
+
+```bash
+# Check GPU memory usage
+nvidia-smi
+
+# Keep model loaded (faster subsequent calls)
+# Ollama keeps models loaded for 5 min by default
+
+# Pre-load a model
+curl http://localhost:11434/api/generate -d '{"model": "qwen2.5-coder:7b"}'
+```
+
+### Systemd Service (Production)
+
+```ini
+# /etc/systemd/system/ollama.service
+# (Usually created automatically by installer)
+
+[Unit]
+Description=Ollama Service
+After=network.target
+
+[Service]
+Type=simple
+User=ollama
+Environment=OLLAMA_HOST=0.0.0.0:11434
+ExecStart=/usr/local/bin/ollama serve
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Using Ollama with CLAIJ
+
+Ollama's OpenAI-compatible API means it can be used with minimal configuration changes. Update the LLM configuration to point to your Ollama instance:
+
+```clojure
+;; In FSM configuration
+{:llm {:provider :ollama
+       :base-url "http://prognathodon:11434"
+       :model "qwen2.5-coder:7b"}}
+```
+
+Or via the OpenAPI hat (zero custom code):
+```clojure
+{:openapi {:spec-url "openai-compatible.json"
+           :base-url "http://prognathodon:11434/v1"}}
+```
+
+### Troubleshooting
+
+**"connection refused"**
+```bash
+# Check Ollama is running
+systemctl status ollama
+# Or start manually
+ollama serve
+```
+
+**"model not found"**
+```bash
+# Pull the model first
+ollama pull qwen2.5-coder:7b
+```
+
+**GPU not being used**
+```bash
+# Check CUDA is available
+nvidia-smi
+# Reinstall Ollama if needed
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+**Slow first inference**
+- First call loads model into GPU memory (~10-30 seconds)
+- Subsequent calls are fast (~1-5 seconds)
+- Keep Ollama running to avoid reload
 
 ## CLAIJ Server Setup
 
@@ -544,13 +750,19 @@ wget https://github.com/rhasspy/piper/releases/download/v1.2.0/voice-en_US-lessa
 tar xzf voice-en_US-lessac-medium.tar.gz
 export PIPER_VOICE_PATH=~/.local/share/piper-voices/en_US-lessac-medium.onnx
 
-# Start services (from claij directory)
+# Install Ollama and pull a coding model
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull qwen2.5-coder:7b
+
+# Start all services (from claij directory)
 ./bin/stt.sh &
 ./bin/tts.sh &
+ollama serve &   # or: systemctl start ollama
 
-# Verify STT/TTS
-curl http://localhost:8000/health
-curl http://localhost:8001/health
+# Verify all services
+curl http://localhost:8000/health   # STT
+curl http://localhost:8001/health   # TTS
+curl http://localhost:11434/api/tags # Ollama
 
 # Install CLAIJ JS dependencies and compile
 npm install

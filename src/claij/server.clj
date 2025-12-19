@@ -255,17 +255,48 @@
            :handler health-handler}}]
 
    ;; Certificate download for iOS
+   ["/install-cert"
+    {:get {:no-doc true
+           :handler (fn [_]
+                      {:status 200
+                       :headers {"Content-Type" "text/html"}
+                       :body "<!DOCTYPE html>
+<html><head><title>Install CLAIJ Certificate</title>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<style>body{font-family:system-ui;max-width:600px;margin:2em auto;padding:1em;background:#1a1a2e;color:#eee}
+a{color:#00ff88;font-size:1.2em}ol{line-height:2}</style></head>
+<body>
+<h1>📱 Install CLAIJ Certificate</h1>
+<p><a href='/claij.crt'>⬇️ Download Certificate</a></p>
+<h2>iOS Instructions:</h2>
+<ol>
+<li>Tap the download link above</li>
+<li>Tap 'Allow' when prompted</li>
+<li>Go to <b>Settings → General → VPN & Device Management</b></li>
+<li>Tap the downloaded profile and tap <b>Install</b></li>
+<li>Go to <b>Settings → General → About → Certificate Trust Settings</b></li>
+<li>Enable trust for the CLAIJ certificate</li>
+</ol>
+<p>Then visit: <a href='https://megalodon:8443'>https://megalodon:8443</a></p>
+</body></html>"})}}]
+
    ["/claij.crt"
     {:get {:no-doc true
            :handler (fn [_]
+                      (log/info "Certificate download requested")
                       (let [crt-file (clojure.java.io/file "claij-dev.crt")]
                         (if (.exists crt-file)
-                          {:status 200
-                           :headers {"Content-Type" "application/x-x509-ca-cert"
-                                     "Content-Disposition" "attachment; filename=\"claij.crt\""}
-                           :body (slurp crt-file)}
-                          {:status 404
-                           :body "Certificate not found. Run bin/gen-ssl-cert.sh first."})))}}]
+                          (do
+                            (log/info "Serving certificate:" (.getAbsolutePath crt-file))
+                            {:status 200
+                             :headers {"Content-Type" "application/x-pem-file"
+                                       "Content-Length" (str (.length crt-file))}
+                             :body (clojure.java.io/input-stream crt-file)})
+                          (do
+                            (log/warn "Certificate file not found")
+                            {:status 404
+                             :headers {"Content-Type" "text/plain"}
+                             :body "Certificate not found. Run bin/gen-ssl-cert.sh first."}))))}}]
 
    ["/fsms"
     ["/list"
