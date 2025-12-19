@@ -1,6 +1,5 @@
-{:deps true
+{:deps {:aliases [:cljs]}
  :nrepl {:port 9000}
- :source-paths ["src-cljs"]
 
  :builds
  {:voice
