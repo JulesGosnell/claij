@@ -235,18 +235,8 @@
       (let [response (voice-handler {:multipart-params {"audio" (byte-array 0)}})]
         (is (= 500 (:status response)))))
 
-    (testing "accepts bytes directly in multipart params"
-      ;; Full FSM run requires STT/TTS services, so we just test error handling
-      (let [fake-audio (byte-array [1 2 3 4])
-            response (voice-handler {:multipart-params {"audio" fake-audio}})]
-        (is (= 500 (:status response)))))
-
-    (testing "accepts file map in multipart params"
-      (let [fake-audio (byte-array [1 2 3 4])
-            response (voice-handler {:multipart-params {"audio" {:bytes fake-audio
-                                                                 :filename "test.wav"
-                                                                 :content-type "audio/wav"}}})]
-        (is (= 500 (:status response)))))
+    ;; Note: Tests with valid audio would run the real BDD FSM which calls
+    ;; external STT/TTS services - those belong in integration tests.
 
     (testing "routes include /voice endpoint"
       (let [voice-route (some #(when (= "/voice" (first %)) %) routes)]

@@ -1,5 +1,12 @@
 # Test Writing Skill
 
+## Unit vs Integration Tests
+- **Unit tests**: Fast, isolated, no external services. Default in `test/` dir.
+- **Integration tests**: Require external services (APIs, databases, MCP servers). 
+  Tag with `^:integration` and put in `test/integration/` or POC dirs.
+- Never call real network services in unit tests - mock or test error paths only.
+- If a test needs a running service (prognathodon, OpenRouter, etc.) it's integration.
+
 ## Coverage Requirement
 - Run `./bin/test-coverage.sh` before committing
 - Maintain 90%+ line coverage (script enforces this)
