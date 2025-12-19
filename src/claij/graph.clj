@@ -64,12 +64,14 @@
          "\n  // transitions\n"
          (apply str
                 (for [{[from to] "id" label "label" desc "description"} xitions
-                      :let [texts (filter seq [label desc])
-                            text (if (seq texts) (join "\\n" texts) to)
-                            label (escape-label text)
+                      :let [;; Only show label if explicitly provided (not just destination)
+                            texts (filter seq [label desc])
+                            edge-label (when (seq texts) (escape-label (join "\\n" texts)))
                             from-id (quote-id (if (= from "start") "start" from))
                             to-id (quote-id (if (= to "end") "end" to))]]
-                  (format "  %s -> %s [label=\"%s\"];\n" from-id to-id label)))
+                  (if edge-label
+                    (format "  %s -> %s [label=\"%s\"];\n" from-id to-id edge-label)
+                    (format "  %s -> %s;\n" from-id to-id))))
          "}\n")))
 
 (defn fsm->dot-with-hats
@@ -171,10 +173,12 @@
             "\n  // transitions\n"
             (apply str
                    (for [{[from to] "id" label "label" desc "description"} xitions
-                         :let [texts (filter seq [label desc])
-                               text (if (seq texts) (join "\\n" texts) to)
-                               label (escape-label text)
+                         :let [;; Only show label if explicitly provided
+                               texts (filter seq [label desc])
+                               edge-label (when (seq texts) (escape-label (join "\\n" texts)))
                                from-id (quote-id (if (= from "start") "start" from))
                                to-id (quote-id (if (= to "end") "end" to))]]
-                     (format "  %s -> %s [label=\"%s\"];\n" from-id to-id label)))
+                     (if edge-label
+                       (format "  %s -> %s [label=\"%s\"];\n" from-id to-id edge-label)
+                       (format "  %s -> %s;\n" from-id to-id))))
             "}\n")))))

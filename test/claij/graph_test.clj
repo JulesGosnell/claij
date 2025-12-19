@@ -105,12 +105,12 @@
         (is (includes? dot "transition desc")
             "Transition description should appear")))
 
-    (testing "transition uses 'to' state as fallback label"
+    (testing "transitions without labels have no label attribute"
       (let [fsm {"id" "fallback-fsm"
                  "xitions" [{"id" ["a" "done"]}]}
             dot (fsm->dot fsm)]
-        (is (includes? dot "[label=\"done\"]")
-            "Should use destination state as label when no explicit label"))))
+        (is (includes? dot "\"a\" -> \"done\";")
+            "Edge without label should have no label attribute"))))
 
   (testing "fsm->dot-with-hats"
 
