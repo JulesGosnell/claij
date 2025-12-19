@@ -207,3 +207,34 @@ Exit state = GC skill, keep summary
       output-id (extract-id-from-schema output-schema)]  ;; Schema tells us the route
   ...)
 ```
+
+## Action Schema Timing (Static vs Dynamic)
+
+Actions are asked for their I/O schemas at two different times:
+1. **Config time (factory)** - when the action is being configured/curried
+2. **Runtime** - potentially multiple times during FSM execution
+
+**Static APIs (OpenAPI, fixed schemas):**
+- Return the SAME schema at both config and runtime
+- Types are known upfront from the spec
+- Initialize schema registry at config time so refs resolve correctly later
+- Example: `openapi-call` always returns the same input/output schemas
+
+**Dynamic APIs (MCP, runtime-discovered capabilities):**
+- Return LOOSE typing (`:any`) at config time - service not yet running
+- Return TIGHTER typing at runtime - once process started and tool cache built
+- Schema becomes more precise as capabilities are discovered
+- Example: `mcp-call` returns `:any` initially, then specific tool schemas after init
+
+```clojure
+;; Static action (OpenAPI) - same schema always
+{:config [:map [:spec-url :string] [:operation :string] ...]
+ :input :any  ;; Could be tighter based on operation
+ :output :any} ;; Could be tighter based on response schema
+
+;; Dynamic action (MCP) - loose at config, tight at runtime
+;; Config time: {:input :any, :output :any}
+;; Runtime (after cache): {:input specific-tool-schema, :output specific-response-schema}
+```
+
+**Key insight:** The registry must be initialized at config time for ref resolution to work in subsequent schema lookups.

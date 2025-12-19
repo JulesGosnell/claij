@@ -210,10 +210,10 @@
          :headers {"Content-Type" "application/json"}
          :body (clj->json {:error "FSM timeout"})}
 
-        (let [[final-context trail] result
-              ;; Get the last event (TTS output)
-              last-event (last trail)
-              response-audio (get last-event "body")]
+        (let [[_final-context trail] result
+              ;; Get the last event (TTS output) using fsm/last-event helper
+              final-event (fsm/last-event trail)
+              response-audio (get final-event "body")]
 
           (if (bytes? response-audio)
             {:status 200
@@ -222,7 +222,9 @@
             {:status 500
              :headers {"Content-Type" "application/json"}
              :body (clj->json {:error "No audio in FSM response"
-                               :last-event (dissoc last-event "body" "audio")})}))))
+                               :last-event (-> final-event
+                                               (dissoc "body" "audio")
+                                               (update "body" (fn [b] (when b (str (type b))))))})}))))
 
     (catch Exception e
       (log/error e "Voice handler error")

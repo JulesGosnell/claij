@@ -31,7 +31,8 @@
    [clj-http.client :as http]
    [claij.action :refer [def-action]]
    [claij.hat.openapi :as openapi]
-   [claij.fsm :as fsm]))
+   [claij.fsm :as fsm]
+   [claij.malli :refer [expand-refs-for-llm]]))
 
 ;;------------------------------------------------------------------------------
 ;; Schema-derived Routing
@@ -201,22 +202,19 @@
         ;; Separate path params from others
         path-param-vals (select-keys params (map name path-params))
         query-param-vals (select-keys params (map name query-params))
-        body-val (or (get params "body") (get params :body))
 
-        ;; Determine if we have a body based on content-type (not tool's has-body)
-        has-request-body (or (multipart-content-type? request-content-type)
-                             (and request-content-type
-                                  (or body-val
-                                      (not-empty (apply dissoc params "id" :id
-                                                        (concat (map name path-params)
-                                                                (map name query-params)))))))
+        ;; Body params = everything except id, path params, query params
+        body-params (not-empty (apply dissoc params "id" :id
+                                      (concat (map name path-params)
+                                              (map name query-params))))
 
-        ;; For multipart, body is the params minus path/query params
-        multipart-body (when (multipart-content-type? request-content-type)
-                         (or body-val
-                             (apply dissoc params "id" :id
-                                    (concat (map name path-params)
-                                            (map name query-params)))))
+        ;; Explicit body takes precedence, otherwise use remaining params
+        body-val (or (get params "body") (get params :body) body-params)
+
+        ;; Determine if we have a body based on content-type
+        has-request-body (and request-content-type
+                              (or (multipart-content-type? request-content-type)
+                                  body-val))
 
         ;; Build URL
         url (str base-url (openapi/substitute-path-params path path-param-vals))
@@ -241,8 +239,8 @@
                (assoc :query-params query-param-vals)
 
                ;; Multipart request body
-               (and has-request-body multipart-body (multipart-content-type? request-content-type))
-               (assoc :multipart (build-multipart-body multipart-body))
+               (and has-request-body (multipart-content-type? request-content-type))
+               (assoc :multipart (build-multipart-body body-val))
 
                ;; JSON request body
                (and has-request-body body-val (not (multipart-content-type? request-content-type)))
@@ -264,6 +262,7 @@
                 :response-content-type response-content-type
                 :binary-response? binary-response?
                 :has-request-body has-request-body
+                :body-val body-val
                 :multipart? (multipart-content-type? request-content-type)})
 
     (try
@@ -330,10 +329,16 @@
                              :operation operation
                              :available (mapv :operation-id tools)})))
 
+        ;; Build registry to resolve refs in schemas
+        registry (fsm/build-fsm-registry fsm)
+
         ;; Compute output schema from outgoing xitions (same as llm-action)
         ;; This is THE CONTRACT - we derive routing from the schema
         output-xitions (filter (fn [{[from _to] "id"}] (= from state-id)) xs)
-        output-schema (fsm/state-schema {} fsm state output-xitions)
+        output-schema-raw (fsm/state-schema {} fsm state output-xitions)
+
+        ;; Expand refs so we can extract the id constraint
+        output-schema (expand-refs-for-llm output-schema-raw registry)
 
         ;; Extract the constrained id from the schema
         ;; For deterministic states, schema is [:or [:map ["id" [:= [from to]]] ...]]
