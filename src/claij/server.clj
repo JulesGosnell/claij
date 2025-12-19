@@ -8,6 +8,7 @@
    ;; Ring
    [ring.adapter.jetty :refer [run-jetty]]
    [ring.util.response :as resp]
+   [ring.middleware.multipart-params :refer [wrap-multipart-params]]
 
    ;; Reitit
    [reitit.ring :as ring]
@@ -25,7 +26,10 @@
    ;; Internal
    [claij.util :refer [assert-env-var clj->json json->clj]]
    [claij.graph :refer [fsm->dot]]
-   [claij.fsm.code-review-fsm :refer [code-review-fsm]])
+   [claij.fsm :as fsm]
+   [claij.fsm.code-review-fsm :refer [code-review-fsm]]
+   [claij.fsm.bdd-fsm :as bdd]
+   [claij.stt.whisper.multipart :refer [extract-bytes validate-audio]])
   (:import
    [java.net URL])
   (:gen-class))
@@ -87,7 +91,8 @@
 ;; FSM Registry
 
 (def fsms
-  {"code-review-fsm" code-review-fsm})
+  {"code-review-fsm" code-review-fsm
+   "bdd" bdd/bdd-fsm})
 
 ;;------------------------------------------------------------------------------
 ;; Handlers
@@ -171,6 +176,61 @@
                 :message "Valid Bearer token required"}}))))
 
 ;;------------------------------------------------------------------------------
+;; Voice Handler (BDD FSM)
+
+(defn voice-handler
+  "Handler for POST /voice endpoint.
+   Accepts multipart audio, runs BDD FSM (STT → LLM → TTS), returns audio.
+   
+   Request: multipart/form-data with 'audio' field (WAV bytes)
+   Response: audio/wav bytes"
+  [request]
+  (try
+    (let [;; Extract audio from multipart
+          audio-part (get-in request [:multipart-params "audio"])
+          _ (when-not audio-part
+              (throw (ex-info "Missing 'audio' field in multipart form" {})))
+          audio-bytes (extract-bytes audio-part)
+          _ (validate-audio audio-bytes)
+
+          ;; Create FSM context
+          context (bdd/make-bdd-context {})
+
+          ;; Run the BDD FSM synchronously
+          ;; Input: {"id" ["start" "stt"], "audio" <bytes>}
+          ;; Expected output: {"id" ["tts" "end"], "status" 200, "body" <audio-bytes>}
+          input {"id" ["start" "stt"]
+                 "audio" audio-bytes}
+
+          _ (log/info "Running BDD FSM with" (count audio-bytes) "bytes of audio")
+          result (fsm/run-sync bdd/bdd-fsm context input 120000)] ;; 2 min timeout
+
+      (if (= result :timeout)
+        {:status 504
+         :headers {"Content-Type" "application/json"}
+         :body (clj->json {:error "FSM timeout"})}
+
+        (let [[final-context trail] result
+              ;; Get the last event (TTS output)
+              last-event (last trail)
+              response-audio (get last-event "body")]
+
+          (if (bytes? response-audio)
+            {:status 200
+             :headers {"Content-Type" "audio/wav"}
+             :body (java.io.ByteArrayInputStream. response-audio)}
+            {:status 500
+             :headers {"Content-Type" "application/json"}
+             :body (clj->json {:error "No audio in FSM response"
+                               :last-event (dissoc last-event "body" "audio")})}))))
+
+    (catch Exception e
+      (log/error e "Voice handler error")
+      {:status 500
+       :headers {"Content-Type" "application/json"}
+       :body (clj->json {:error (.getMessage e)})})))
+
+;;------------------------------------------------------------------------------
 ;; Routes
 
 (def routes
@@ -216,6 +276,21 @@
             :parameters {:path {:fsm-id :string}}
             :produces ["text/vnd.graphviz"]
             :handler fsm-graph-dot-handler}}]]
+
+   ;; Voice endpoint (BDD FSM)
+   ["/voice"
+    {:post {:summary "Voice interaction (STT → LLM → TTS)"
+            :description "Submit audio, receive spoken response. Runs BDD FSM with MCP tools."
+            :middleware [wrap-multipart-params]
+            :consumes ["multipart/form-data"]
+            :produces ["audio/wav"]
+            :swagger {:parameters {:formData {:audio {:type "file"
+                                                      :description "WAV audio file"}}}}
+            :responses {200 {:description "Audio response (WAV)"}
+                        400 {:body {:error :string}}
+                        500 {:body {:error :string}}
+                        504 {:body {:error :string}}}
+            :handler voice-handler}}]
 
    ;; Protected endpoints (require Bearer token)
    ["/llm/:provider"

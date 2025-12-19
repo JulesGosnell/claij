@@ -7,7 +7,7 @@
                          fsm-document-handler fsm-graph-dot-handler
                          fsm-graph-svg-handler dot->svg wrap-auth
                          llm-handler claij-api-key api-base api-url
-                         state routes app]])
+                         state routes app voice-handler]])
   (:import
    [java.net URL]))
 
@@ -220,3 +220,40 @@
                 response (wrapped {:headers {}})]
             (is (= "Bearer realm=\"claij\""
                    (get-in response [:headers "WWW-Authenticate"])))))))))
+
+(deftest voice-handler-test
+  (testing "voice-handler"
+    (testing "returns 500 when audio field is missing"
+      (let [response (voice-handler {:multipart-params {}})]
+        (is (= 500 (:status response)))))
+
+    (testing "returns 500 when audio is nil"
+      (let [response (voice-handler {:multipart-params {"audio" nil}})]
+        (is (= 500 (:status response)))))
+
+    (testing "returns 500 when audio is empty bytes"
+      (let [response (voice-handler {:multipart-params {"audio" (byte-array 0)}})]
+        (is (= 500 (:status response)))))
+
+    (testing "accepts bytes directly in multipart params"
+      ;; Full FSM run requires STT/TTS services, so we just test error handling
+      (let [fake-audio (byte-array [1 2 3 4])
+            response (voice-handler {:multipart-params {"audio" fake-audio}})]
+        (is (= 500 (:status response)))))
+
+    (testing "accepts file map in multipart params"
+      (let [fake-audio (byte-array [1 2 3 4])
+            response (voice-handler {:multipart-params {"audio" {:bytes fake-audio
+                                                                 :filename "test.wav"
+                                                                 :content-type "audio/wav"}}})]
+        (is (= 500 (:status response)))))
+
+    (testing "routes include /voice endpoint"
+      (let [voice-route (some #(when (= "/voice" (first %)) %) routes)]
+        (is (some? voice-route) "Should have /voice route")
+        (is (contains? (second voice-route) :post) "Should support POST")))
+
+    (testing "fsms registry includes bdd fsm"
+      (is (contains? fsms "bdd") "Should have bdd FSM registered")
+      (is (map? (get fsms "bdd")) "BDD FSM should be a map")
+      (is (= "bdd" (get-in fsms ["bdd" "id"])) "BDD FSM should have correct id"))))
