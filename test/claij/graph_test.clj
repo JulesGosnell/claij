@@ -133,4 +133,9 @@
         (is (includes? dot "\"mc\" -> \"mc-svc\"")
             "Hat-generated transition should appear")
         (is (includes? dot "\"mc-svc\" -> \"mc\"")
-            "Hat loopback transition should appear")))))
+            "Hat loopback transition should appear")
+        ;; Should have cluster box around hat states
+        (is (includes? dot "subgraph cluster_mc")
+            "Hat states should be in a cluster")
+        (is (includes? dot "label=\"mc hat\"")
+            "Cluster should be labeled with parent state")))))
