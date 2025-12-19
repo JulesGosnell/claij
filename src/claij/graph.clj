@@ -39,6 +39,7 @@
     (str "digraph \"" fsm-id "\" {\n"
          "  rankdir=TB;\n"
          "  splines=curved;\n"
+         "  concentrate=false;\n"
          "  node [shape=box, style=rounded, fontname=\"Helvetica\", fontsize=10];\n"
          "  edge [fontname=\"Helvetica\", fontsize=9];\n"
          (when title-text
@@ -139,6 +140,7 @@
        (str "digraph \"" fsm-id "\" {\n"
             "  rankdir=TB;\n"
             "  splines=curved;\n"
+            "  concentrate=false;\n"
             "  node [shape=box, style=rounded, fontname=\"Helvetica\", fontsize=10];\n"
             "  edge [fontname=\"Helvetica\", fontsize=9];\n"
             (when title-text
