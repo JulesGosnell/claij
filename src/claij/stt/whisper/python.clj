@@ -127,7 +127,7 @@
     (initialize! this)
     (let [result (py-call-attr @model-atom "transcribe" audio-array)
           result-map (py->jvm result)]
-      (log/info "Transcription result:" (get result-map "text"))
+      (log/info (str "Transcription result: \"" (get result-map "text") "\""))
       {:text (get result-map "text")
        :language (get result-map "language")
        :segments (get result-map "segments")}))

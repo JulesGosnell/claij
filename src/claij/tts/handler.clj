@@ -146,7 +146,7 @@
     (let [text (extract-text request)]
       (when (or (nil? text) (empty? text))
         (throw (ex-info "Text is required" {:type :missing-text})))
-      (log/info "Synthesizing" (count text) "characters")
+      (log/info (str "Synthesizing: \"" text "\""))
       (let [result (synthesize backend text)]
         (build-success-response result)))
     (catch Exception e
