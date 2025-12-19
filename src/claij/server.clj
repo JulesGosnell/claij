@@ -254,6 +254,19 @@
            :responses {200 {:body string?}}
            :handler health-handler}}]
 
+   ;; Certificate download for iOS
+   ["/claij.crt"
+    {:get {:no-doc true
+           :handler (fn [_]
+                      (let [crt-file (clojure.java.io/file "claij-dev.crt")]
+                        (if (.exists crt-file)
+                          {:status 200
+                           :headers {"Content-Type" "application/x-x509-ca-cert"
+                                     "Content-Disposition" "attachment; filename=\"claij.crt\""}
+                           :body (slurp crt-file)}
+                          {:status 404
+                           :body "Certificate not found. Run bin/gen-ssl-cert.sh first."})))}}]
+
    ["/fsms"
     ["/list"
      {:get {:summary "List available FSMs"
