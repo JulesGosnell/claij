@@ -301,25 +301,28 @@
       (is (fn? handler) "Should have a handler function")
 
       (testing "returns 404 when certificate file doesn't exist"
-        (let [response (handler {})]
-          ;; We can't guarantee the cert exists in test environment
-          ;; so we test both possibilities
-          (is (#{200 404} (:status response))
-              "Should return 200 if cert exists or 404 if not")
-          (when (= 404 (:status response))
+        ;; Mock file to not exist
+        (with-redefs [clojure.java.io/file (fn [path]
+                                             (proxy [java.io.File] [path]
+                                               (exists [] false)))]
+          (let [response (handler {})]
+            (is (= 404 (:status response)))
             (is (= "text/plain" (get-in response [:headers "Content-Type"])))
             (is (re-find #"not found" (:body response))))))
 
       (testing "returns certificate with correct content-type when file exists"
-        ;; Create a temporary cert file for testing
-        (let [temp-dir (System/getProperty "user.dir")
-              cert-path (str temp-dir "/claij-dev.crt")
-              cert-exists? (.exists (clojure.java.io/file cert-path))]
-          (when cert-exists?
-            (let [response (handler {})]
-              (is (= 200 (:status response)))
-              (is (= "application/x-pem-file" (get-in response [:headers "Content-Type"])))
-              (is (some? (get-in response [:headers "Content-Length"]))))))))))
+        ;; Mock file to exist with specific length
+        (with-redefs [clojure.java.io/file (fn [path]
+                                             (proxy [java.io.File] [path]
+                                               (exists [] true)
+                                               (getAbsolutePath [] "/mock/claij-dev.crt")
+                                               (length [] 1234)))
+                      clojure.java.io/input-stream (fn [_] :mock-stream)]
+          (let [response (handler {})]
+            (is (= 200 (:status response)))
+            (is (= "application/x-pem-file" (get-in response [:headers "Content-Type"])))
+            (is (= "1234" (get-in response [:headers "Content-Length"])))
+            (is (= :mock-stream (:body response)))))))))
 
 (deftest start-function-test
   (testing "start function"
@@ -356,5 +359,15 @@
                                         :mock-server)]
           (start {:port nil :ssl-port 8443 :keystore "test.jks" :key-password "x"})
           (is (= -1 (:port @captured-opts)) "Should set port to -1 to disable HTTP"))))))
+
+(deftest app-routing-test
+  (testing "app root redirect"
+    (let [response (app {:request-method :get :uri "/"})]
+      (is (= 302 (:status response)) "Root should redirect")
+      (is (= "/voice.html" (get-in response [:headers "Location"])))))
+
+  (testing "app handles unknown routes"
+    (let [response (app {:request-method :get :uri "/nonexistent-path-xyz"})]
+      (is (= 404 (:status response))))))
 
 
