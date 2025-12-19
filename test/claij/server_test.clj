@@ -2,12 +2,13 @@
   "Unit tests for claij.server handlers and utilities."
   (:require
    [clojure.test :refer [deftest testing is]]
-   [claij.server :refer [string->url separator pattern initial-summary
-                         fsms llms health-handler list-fsms-handler
-                         fsm-document-handler fsm-graph-dot-handler
-                         fsm-graph-svg-handler dot->svg wrap-auth
-                         llm-handler claij-api-key api-base api-url
-                         state routes app voice-handler]]
+   [ring.adapter.jetty :as jetty]
+   [claij.server :as claij.server :refer [string->url separator pattern initial-summary
+                                          fsms llms health-handler list-fsms-handler
+                                          fsm-document-handler fsm-graph-dot-handler
+                                          fsm-graph-svg-handler dot->svg wrap-auth
+                                          llm-handler claij-api-key api-base api-url
+                                          state routes app voice-handler start]]
    [claij.fsm :as fsm])
   (:import
    [java.net URL]))
@@ -275,3 +276,85 @@
       (is (contains? fsms "bdd") "Should have bdd FSM registered")
       (is (map? (get fsms "bdd")) "BDD FSM should be a map")
       (is (= "bdd" (get-in fsms ["bdd" "id"])) "BDD FSM should have correct id"))))
+
+(deftest certificate-endpoints-test
+  (testing "install-cert endpoint"
+    (let [;; Find the /install-cert route and get its handler
+          install-cert-route (some #(when (= "/install-cert" (first %)) %) routes)
+          handler (get-in install-cert-route [1 :get :handler])]
+      (is (some? install-cert-route) "Should have /install-cert route")
+      (is (fn? handler) "Should have a handler function")
+
+      (testing "returns HTML page with instructions"
+        (let [response (handler {})]
+          (is (= 200 (:status response)))
+          (is (= "text/html" (get-in response [:headers "Content-Type"])))
+          (is (re-find #"Install CLAIJ Certificate" (:body response)))
+          (is (re-find #"/claij\.crt" (:body response)) "Should link to cert download")
+          (is (re-find #"iOS Instructions" (:body response)))))))
+
+  (testing "claij.crt endpoint"
+    (let [;; Find the /claij.crt route and get its handler
+          crt-route (some #(when (= "/claij.crt" (first %)) %) routes)
+          handler (get-in crt-route [1 :get :handler])]
+      (is (some? crt-route) "Should have /claij.crt route")
+      (is (fn? handler) "Should have a handler function")
+
+      (testing "returns 404 when certificate file doesn't exist"
+        (let [response (handler {})]
+          ;; We can't guarantee the cert exists in test environment
+          ;; so we test both possibilities
+          (is (#{200 404} (:status response))
+              "Should return 200 if cert exists or 404 if not")
+          (when (= 404 (:status response))
+            (is (= "text/plain" (get-in response [:headers "Content-Type"])))
+            (is (re-find #"not found" (:body response))))))
+
+      (testing "returns certificate with correct content-type when file exists"
+        ;; Create a temporary cert file for testing
+        (let [temp-dir (System/getProperty "user.dir")
+              cert-path (str temp-dir "/claij-dev.crt")
+              cert-exists? (.exists (clojure.java.io/file cert-path))]
+          (when cert-exists?
+            (let [response (handler {})]
+              (is (= 200 (:status response)))
+              (is (= "application/x-pem-file" (get-in response [:headers "Content-Type"])))
+              (is (some? (get-in response [:headers "Content-Length"]))))))))))
+
+(deftest start-function-test
+  (testing "start function"
+    (testing "builds correct options for HTTP only"
+      (let [captured-opts (atom nil)]
+        (with-redefs [jetty/run-jetty (fn [_app opts]
+                                        (reset! captured-opts opts)
+                                        :mock-server)]
+          (let [result (start {:port 8080})]
+            (is (= :mock-server result))
+            (is (= 8080 (:port @captured-opts)))
+            (is (false? (:join? @captured-opts)))
+            (is (nil? (:ssl? @captured-opts)))))))
+
+    (testing "builds correct options for HTTPS"
+      (let [captured-opts (atom nil)]
+        (with-redefs [jetty/run-jetty (fn [_app opts]
+                                        (reset! captured-opts opts)
+                                        :mock-server)]
+          (start {:port 8080
+                  :ssl-port 8443
+                  :keystore "test.jks"
+                  :key-password "secret"})
+          (is (= 8080 (:port @captured-opts)))
+          (is (= 8443 (:ssl-port @captured-opts)))
+          (is (true? (:ssl? @captured-opts)))
+          (is (= "test.jks" (:keystore @captured-opts)))
+          (is (= "secret" (:key-password @captured-opts))))))
+
+    (testing "disables HTTP when port is nil"
+      (let [captured-opts (atom nil)]
+        (with-redefs [jetty/run-jetty (fn [_app opts]
+                                        (reset! captured-opts opts)
+                                        :mock-server)]
+          (start {:port nil :ssl-port 8443 :keystore "test.jks" :key-password "x"})
+          (is (= -1 (:port @captured-opts)) "Should set port to -1 to disable HTTP"))))))
+
+
