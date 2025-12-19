@@ -38,12 +38,13 @@
 
 | Date | Feature | Description |
 |------|---------|-------------|
+| 2025-12-19 | **🛁 Bath Driven Development** | Voice UI working on iPhone! Record voice → STT → LLM → TTS → playback, all from Safari on iOS. HTTPS with self-signed certs, WebAudio fixes for iOS. Talk to Claude from the bathtub. |
 | 2025-12-18 | **OpenAPI Hat & Actions** | Direct OpenAPI endpoint invocation with binary support (audio/wav, multipart). Enables declarative voice pipelines—TTS and STT as simple FSM actions. |
 | 2025-12-17 | **Hat System** | Modular capability injection for FSM states. Hats wrap actions with cross-cutting concerns (MCP tools, OpenAPI specs, REPL access) without touching FSM structure. |
 | 2025-12-06 | **Malli Migration** | Replaced JSON Schema with Malli for native Clojure schemas—more token-efficient, better error messages, and enabling the reflexive m1→m2→m3→m3 hierarchy that grounds the architecture. |
 | 2025-11-14 | **MCP Integration** | Model Context Protocol support lets LLMs call external tools (GitHub, filesystem, databases) through a standardized interface. Multi-server batching for efficiency. |
 
-*Coming soon: Fully declarative Bath Driven Development (BDD) demo—voice in, FSM orchestration, voice out. All as pure data.*
+*Next up: Ollama integration for local LLM inference—zero API costs, code from the bath without internet.*
 
 ---
 
