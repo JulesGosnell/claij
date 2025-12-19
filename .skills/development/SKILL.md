@@ -37,3 +37,10 @@ Document reasoning
 - Always use `git mv` (not `mv`) to move/rename files - preserves history
 - Commit related changes together
 - Clear commit messages
+- **NEVER git push** - only Jules pushes. Claude commits locally, Jules reviews and pushes.
+
+## GitHub Issue Tracking
+- **IMMEDIATELY after committing**, update the GitHub issue to tick off completed tasks
+- Do not wait - context can be lost if conversation crashes
+- Update issue body with `[x]` for completed task checkboxes
+- Add `status:doing` label when starting work, `status:done` when closing
