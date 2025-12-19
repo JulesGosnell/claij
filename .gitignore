@@ -43,3 +43,6 @@ private/
 # Runtime files
 *.pid
 .shadow-cljs/
+node_modules/
+*.jks
+package-lock.json

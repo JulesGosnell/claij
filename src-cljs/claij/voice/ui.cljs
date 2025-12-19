@@ -176,42 +176,70 @@
                         :noiseSuppression true}})
       (.then
        (fn [stream]
-         (let [audio-ctx (js/AudioContext. #js {:sampleRate 22050})
-               source (.createMediaStreamSource audio-ctx stream)
-               analyser (.createAnalyser audio-ctx)
-               _ (set! (.-fftSize analyser) 2048)
-               _ (.connect source analyser)
+         (let [;; Create AudioContext - use webkit prefix for older iOS
+               AudioContext (or js/AudioContext js/webkitAudioContext)
+               audio-ctx (AudioContext. #js {:sampleRate 22050})]
 
-               ;; Use ScriptProcessor to capture raw audio
-               buffer-size 4096
-               processor (.createScriptProcessor audio-ctx buffer-size 1 1)]
+           ;; iOS requires explicit resume after user gesture
+           (-> (.resume audio-ctx)
+               (.then
+                (fn []
+                  (let [source (.createMediaStreamSource audio-ctx stream)
+                        analyser (.createAnalyser audio-ctx)
+                        _ (set! (.-fftSize analyser) 2048)
+                        _ (.connect source analyser)
 
-           (set! (.-onaudioprocess processor)
-                 (fn [e]
-                   (when (= (:status @state) :recording)
-                     (let [channel-data (.getChannelData (.-inputBuffer e) 0)]
-                       (swap! state update :audio-chunks conj (js/Float32Array. channel-data))))))
+                        ;; Use ScriptProcessor to capture raw audio
+                        ;; (deprecated but widely supported including iOS)
+                        buffer-size 4096
+                        processor (.createScriptProcessor audio-ctx buffer-size 1 1)]
 
-           (.connect source processor)
-           (.connect processor (.-destination audio-ctx))
+                    (set! (.-onaudioprocess processor)
+                          (fn [e]
+                            (when (= (:status @state) :recording)
+                              (let [channel-data (.getChannelData (.-inputBuffer e) 0)]
+                                (swap! state update :audio-chunks conj (js/Float32Array. channel-data))))))
 
-           (swap! state assoc
-                  :status :recording
-                  :media-stream stream
-                  :audio-context audio-ctx
-                  :analyser analyser
-                  :script-processor processor
-                  :audio-chunks []
-                  :error nil)
+                    (.connect source processor)
+                    (.connect processor (.-destination audio-ctx))
 
-           (update-button-state! :recording)
-           (update-status! "Recording... Click to stop")
-           (draw-waveform!))))
+                    (swap! state assoc
+                           :status :recording
+                           :media-stream stream
+                           :audio-context audio-ctx
+                           :analyser analyser
+                           :script-processor processor
+                           :audio-chunks []
+                           :error nil)
+
+                    (update-button-state! :recording)
+                    (update-status! "Recording... Click to stop")
+                    (draw-waveform!))))
+               (.catch
+                (fn [err]
+                  (js/console.error "AudioContext resume failed:" err)
+                  ;; Clean up stream
+                  (doseq [track (.getTracks stream)]
+                    (.stop track))
+                  (swap! state assoc :error "Audio initialization failed")
+                  (update-status! "Error: Audio initialization failed (try reloading)" "error")))))))
       (.catch
        (fn [err]
          (js/console.error "Error starting recording:" err)
-         (swap! state assoc :error (.-message err))
-         (update-status! (str "Error: " (.-message err)) "error")))))
+         (let [msg (cond
+                     (= (.-name err) "NotAllowedError")
+                     "Microphone access denied. Please allow microphone access."
+
+                     (= (.-name err) "NotFoundError")
+                     "No microphone found. Please connect a microphone."
+
+                     (not js/navigator.mediaDevices)
+                     "Microphone access requires HTTPS."
+
+                     :else
+                     (.-message err))]
+           (swap! state assoc :error msg)
+           (update-status! (str "Error: " msg) "error"))))))
 
 (defn stop-recording! []
   (let [{:keys [media-stream audio-context script-processor audio-chunks]} @state]

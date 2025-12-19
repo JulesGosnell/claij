@@ -597,6 +597,8 @@
    Optional timeout-ms parameter (default 30000ms/30s) prevents indefinite blocking.
    Returns :timeout keyword if timeout is reached.
    
+   Cleanup (stopping hats, etc.) happens asynchronously after the result is returned.
+   
    Usage:
      (let [[context trail] (run-sync fsm ctx input-data)]
        (println \"Final event:\" (last-event trail)))
@@ -613,9 +615,13 @@
    (let [{:keys [submit await stop]} (start-fsm context fsm)]
      (try
        (submit input-data)
-       (await timeout-ms)
-       (finally
-         (stop))))))
+       (let [result (await timeout-ms)]
+         ;; Stop asynchronously to avoid blocking the response
+         (future (stop))
+         result)
+       (catch Exception e
+         (stop) ; On error, stop synchronously
+         (throw e))))))
 
 ;;------------------------------------------------------------------------------
 ;; Action Lifting

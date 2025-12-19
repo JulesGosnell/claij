@@ -403,12 +403,33 @@ npx shadow-cljs release voice
 ```bash
 cd /path/to/claij
 
-# Default: port 8080
+# HTTP only (default: port 8080)
 clojure -M -m claij.server
 
-# Custom port
-clojure -M -m claij.server 9090
+# Custom HTTP port
+clojure -M -m claij.server -p 9090
+
+# HTTPS for mobile/iOS support
+# First generate a self-signed certificate:
+chmod +x bin/gen-ssl-cert.sh
+./bin/gen-ssl-cert.sh
+
+# Then start with HTTPS:
+clojure -M -m claij.server --ssl-port 8443 --keystore claij-dev.jks
+
+# Both HTTP and HTTPS:
+clojure -M -m claij.server -p 8080 --ssl-port 8443 --keystore claij-dev.jks
+
+# HTTPS only (disable HTTP):
+clojure -M -m claij.server -p 0 --ssl-port 8443 --keystore claij-dev.jks
 ```
+
+**Mobile/iOS Notes:**
+- iOS Safari requires HTTPS for microphone access
+- Access via `https://<your-ip>:8443` from mobile device
+- Accept the self-signed certificate warning
+- On iOS: Settings → General → About → Certificate Trust Settings
+  to fully trust the certificate
 
 ### Verify CLAIJ
 

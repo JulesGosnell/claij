@@ -341,8 +341,28 @@
 ;;------------------------------------------------------------------------------
 ;; Server
 
-(defn start [port]
-  (run-jetty app {:port port :join? false}))
+(defn start
+  "Start the Jetty server.
+   
+   Options:
+   - :port - HTTP port (default 8080, nil to disable HTTP)
+   - :ssl-port - HTTPS port (default nil, set to enable HTTPS)
+   - :keystore - Path to Java keystore file (required for HTTPS)
+   - :key-password - Keystore password (required for HTTPS)
+   - :join? - Block the calling thread (default false)"
+  [{:keys [port ssl-port keystore key-password join?]
+    :or {port 8080 join? false}}]
+  (let [opts (cond-> {:join? join?}
+               ;; HTTP
+               port (assoc :port port)
+               (nil? port) (assoc :port -1) ;; Disable HTTP if nil
+
+               ;; HTTPS
+               ssl-port (assoc :ssl? true
+                               :ssl-port ssl-port
+                               :keystore keystore
+                               :key-password key-password))]
+    (run-jetty app opts)))
 
 (defn string->url [s] (URL. s))
 
@@ -352,7 +372,25 @@
         (cli
          args
          "server: claij API server"
-         ["-p" "--port" "http port" :parse-fn #(Integer/parseInt %) :default 8080])
-        {:keys [port]} options]
-    (log/info (str "Starting claij server on port " port))
-    (start port)))
+         ["-p" "--port" "HTTP port (0 to disable)" :parse-fn #(Integer/parseInt %) :default 8080]
+         ["-s" "--ssl-port" "HTTPS port" :parse-fn #(Integer/parseInt %)]
+         ["-k" "--keystore" "Path to Java keystore (.jks) for HTTPS"]
+         ["-w" "--key-password" "Keystore password" :default "changeit"])
+        {:keys [port ssl-port keystore key-password]} options
+        ;; Convert port 0 to nil to disable HTTP
+        port (when (and port (pos? port)) port)]
+
+    (when (and ssl-port (not keystore))
+      (println "Error: --keystore required when using --ssl-port")
+      (println "Generate one with: bin/gen-ssl-cert.sh")
+      (System/exit 1))
+
+    (log/info (str "Starting claij server"
+                   (when port (str " HTTP:" port))
+                   (when ssl-port (str " HTTPS:" ssl-port))))
+
+    (start {:port port
+            :ssl-port ssl-port
+            :keystore keystore
+            :key-password key-password
+            :join? true})))
