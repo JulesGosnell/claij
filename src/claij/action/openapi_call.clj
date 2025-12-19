@@ -3,12 +3,18 @@
    
    Unlike the OpenAPI hat (which provides tools for LLM to choose from),
    this action directly calls a specific operation. Perfect for non-LLM
-   states in pipelines like voice processing.
+   states in FSMs like voice processing.
    
    Supports:
    - JSON request/response (standard REST)
    - Binary responses (audio/wav, etc.)
    - Multipart form-data with binary uploads (for file uploads)
+   
+   Routing:
+   This action derives its output event id from the output xition schema,
+   the same way llm-action does. For deterministic states with a single
+   output xition, the schema constrains the id to a constant value like
+   [:= [\"stt\" \"mc\"]], and we extract that constant.
    
    Usage in FSM:
    ```clojure
@@ -24,7 +30,58 @@
    [clojure.tools.logging :as log]
    [clj-http.client :as http]
    [claij.action :refer [def-action]]
-   [claij.hat.openapi :as openapi]))
+   [claij.hat.openapi :as openapi]
+   [claij.fsm :as fsm]))
+
+;;------------------------------------------------------------------------------
+;; Schema-derived Routing
+;;------------------------------------------------------------------------------
+
+(defn- extract-id-from-schema
+  "Extract the constrained id value from an output schema.
+   
+   For deterministic states, the output schema is [:or [:map [\"id\" [:= [from to]]] ...]]
+   with a single alternative. We extract [from to] from the [:=] constraint.
+   
+   Returns the id vector, or throws if schema doesn't have exactly one deterministic route."
+  [output-schema]
+  (let [;; Unwrap [:or ...] to get alternatives
+        alternatives (if (= :or (first output-schema))
+                       (rest output-schema)
+                       [output-schema])
+
+        _ (when (not= 1 (count alternatives))
+            (throw (ex-info "Deterministic action requires exactly one output xition"
+                            {:alternatives-count (count alternatives)
+                             :schema output-schema})))
+
+        ;; Get the single map schema
+        map-schema (first alternatives)
+
+        ;; Find the "id" key in the map schema
+        ;; Map schema is [:map opts? & key-schemas] where key-schemas are [key opts? schema]
+        map-entries (if (map? (second map-schema))
+                      (drop 2 map-schema) ; skip :map and opts
+                      (rest map-schema)) ; skip just :map
+
+        id-entry (first (filter #(= "id" (first %)) map-entries))
+
+        _ (when-not id-entry
+            (throw (ex-info "Schema missing 'id' key" {:schema output-schema})))
+
+        ;; id-entry is ["id" opts? schema] - get the schema part
+        id-schema (if (map? (second id-entry))
+                    (nth id-entry 2) ; ["id" {:opts} schema]
+                    (second id-entry)) ; ["id" schema]
+
+        ;; id-schema should be [:= [from to]] or [:tuple [:= from] [:= to]]
+        _ (when-not (and (vector? id-schema) (= := (first id-schema)))
+            (throw (ex-info "Expected [:= id] constraint for deterministic routing"
+                            {:id-schema id-schema})))
+
+        id-value (second id-schema)]
+
+    id-value))
 
 ;;------------------------------------------------------------------------------
 ;; Spec Cache (memoized per URL)
@@ -245,6 +302,7 @@
    - Or \"body\" key for request body
    
    Event output:
+   - \"id\" - Derived from output xition schema (e.g., [\"stt\" \"mc\"])
    - \"status\" - HTTP status code
    - \"body\" - Response body (parsed JSON or byte array for binary)
    - \"content-type\" - Response content type
@@ -257,7 +315,7 @@
             [:timeout-ms {:optional true} :int]]
    :input :any
    :output :any}
-  [config _fsm _ix {state-id "id" :as _state}]
+  [config {xs "xitions" :as fsm} _ix {state-id "id" :as state}]
 
   ;; Factory time: fetch spec and find operation
   (let [{:keys [spec-url operation base-url auth timeout-ms]} config
@@ -272,7 +330,14 @@
                              :operation operation
                              :available (mapv :operation-id tools)})))
 
-        ;; base-url is required by schema
+        ;; Compute output schema from outgoing xitions (same as llm-action)
+        ;; This is THE CONTRACT - we derive routing from the schema
+        output-xitions (filter (fn [{[from _to] "id"}] (= from state-id)) xs)
+        output-schema (fsm/state-schema {} fsm state output-xitions)
+
+        ;; Extract the constrained id from the schema
+        ;; For deterministic states, schema is [:or [:map ["id" [:= [from to]]] ...]]
+        output-id (extract-id-from-schema output-schema)
 
         ;; Get content types from spec
         request-content-type (get-request-content-type spec operation)
@@ -289,13 +354,13 @@
               {:state-id state-id
                :operation operation
                :base-url base-url
+               :output-id output-id
                :request-content-type request-content-type
                :response-content-type response-content-type})
 
     ;; Runtime function
     (fn [context event _trail handler]
-      (let [[from-state _] (get event "id")
-            ;; Get params from event - support multiple conventions
+      (let [;; Get params from event - support multiple conventions
             params (or (get event "params")
                        (dissoc event "id"))
 
@@ -311,9 +376,9 @@
                          :body-type (type (get result "body"))
                          :has-error (contains? result "error")})]
 
-        ;; Call handler with result
+        ;; Call handler with result - id derived from output schema
         (handler context
-                 (merge {"id" [state-id from-state]}
+                 (merge {"id" output-id}
                         result))))))
 
 ;;------------------------------------------------------------------------------

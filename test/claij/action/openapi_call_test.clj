@@ -23,6 +23,28 @@
 (use-fixtures :each with-test-server)
 
 ;;------------------------------------------------------------------------------
+;; Test FSM Helper
+;;------------------------------------------------------------------------------
+
+(defn make-test-fsm
+  "Create a minimal FSM for testing openapi-call action.
+   
+   The action derives its output id from the output xition schema,
+   so we need to provide an FSM with proper xition structure."
+  [state-id next-state]
+  {"id" "test-fsm"
+   "states" [{"id" state-id "action" "openapi-call"}
+             {"id" next-state "action" "end"}]
+   "xitions" [{"id" ["start" state-id]
+               "schema" [:map ["id" [:= ["start" state-id]]]]}
+              {"id" [state-id next-state]
+               "schema" [:map
+                         ["id" [:= [state-id next-state]]]
+                         ["status" :int]
+                         ["body" :any]
+                         ["content-type" {:optional true} :string]]}]})
+
+;;------------------------------------------------------------------------------
 ;; Content Type Detection Tests
 ;;------------------------------------------------------------------------------
 
@@ -71,22 +93,24 @@
 
 (deftest test-action-creation
   (testing "creates action for valid operation"
-    (let [action (openapi-call/openapi-call-action
+    (let [fsm (make-test-fsm "test" "next")
+          action (openapi-call/openapi-call-action
                   {:spec-url "http://localhost:8765/openapi.json"
                    :base-url "http://localhost:8765"
                    :operation "listItems"}
-                  nil 0 {"id" "test"})]
+                  fsm 0 {"id" "test"})]
       (is (fn? action))))
 
   (testing "throws for unknown operation"
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"Operation not found"
-         (openapi-call/openapi-call-action
-          {:spec-url "http://localhost:8765/openapi.json"
-           :base-url "http://localhost:8765"
-           :operation "nonexistent"}
-          nil 0 {"id" "test"})))))
+    (let [fsm (make-test-fsm "test" "next")]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"Operation not found"
+           (openapi-call/openapi-call-action
+            {:spec-url "http://localhost:8765/openapi.json"
+             :base-url "http://localhost:8765"
+             :operation "nonexistent"}
+            fsm 0 {"id" "test"}))))))
 
 ;;------------------------------------------------------------------------------
 ;; HTTP Call Tests
@@ -94,26 +118,29 @@
 
 (deftest test-get-request
   (testing "GET request returns JSON response"
-    (let [action (openapi-call/openapi-call-action
+    (let [fsm (make-test-fsm "test-state" "next")
+          action (openapi-call/openapi-call-action
                   {:spec-url "http://localhost:8765/openapi.json"
                    :base-url "http://localhost:8765"
                    :operation "listItems"}
-                  nil 0 {"id" "test-state"})
+                  fsm 0 {"id" "test-state"})
           result (promise)
           handler (fn [_ctx event] (deliver result event))]
       (action {} {"id" ["start" "test-state"]} [] handler)
       (let [r (deref result 5000 :timeout)]
         (is (= 200 (get r "status")))
         (is (map? (get r "body")))
-        (is (= ["test-state" "start"] (get r "id")))))))
+        ;; id now comes from output schema, not reversed input
+        (is (= ["test-state" "next"] (get r "id")))))))
 
 (deftest test-post-request-with-json-body
   (testing "POST request with JSON body creates item"
-    (let [action (openapi-call/openapi-call-action
+    (let [fsm (make-test-fsm "test-state" "next")
+          action (openapi-call/openapi-call-action
                   {:spec-url "http://localhost:8765/openapi.json"
                    :base-url "http://localhost:8765"
                    :operation "createItem"}
-                  nil 0 {"id" "test-state"})
+                  fsm 0 {"id" "test-state"})
           result (promise)
           handler (fn [_ctx event] (deliver result event))]
       (action {}
@@ -128,11 +155,12 @@
 (deftest test-get-with-path-params
   (testing "GET request with path parameter"
     ;; First create an item
-    (let [create-action (openapi-call/openapi-call-action
+    (let [fsm (make-test-fsm "create" "next")
+          create-action (openapi-call/openapi-call-action
                          {:spec-url "http://localhost:8765/openapi.json"
                           :base-url "http://localhost:8765"
                           :operation "createItem"}
-                         nil 0 {"id" "create"})
+                         fsm 0 {"id" "create"})
           create-result (promise)]
       (create-action {}
                      {"id" ["s" "create"] "body" {"name" "Fetch Me"}}
@@ -142,11 +170,12 @@
             item-id (get-in created ["body" "id"])]
 
         ;; Now fetch it by ID
-        (let [get-action (openapi-call/openapi-call-action
+        (let [get-fsm (make-test-fsm "get" "done")
+              get-action (openapi-call/openapi-call-action
                           {:spec-url "http://localhost:8765/openapi.json"
                            :base-url "http://localhost:8765"
                            :operation "getItemById"}
-                          nil 0 {"id" "get"})
+                          get-fsm 0 {"id" "get"})
               get-result (promise)]
           (get-action {}
                       {"id" ["s" "get"] "params" {"id" item-id}}
@@ -164,21 +193,23 @@
   (testing "spec is cached between action creations"
     (openapi-call/clear-spec-cache!)
     ;; Create first action - should fetch spec
-    (openapi-call/openapi-call-action
-     {:spec-url "http://localhost:8765/openapi.json"
-      :base-url "http://localhost:8765"
-      :operation "listItems"}
-     nil 0 {"id" "test1"})
+    (let [fsm (make-test-fsm "test1" "next")]
+      (openapi-call/openapi-call-action
+       {:spec-url "http://localhost:8765/openapi.json"
+        :base-url "http://localhost:8765"
+        :operation "listItems"}
+       fsm 0 {"id" "test1"}))
 
     ;; Stop server - second creation should use cache
     (server/stop-server)
 
     ;; This should succeed using cached spec
-    (let [action (openapi-call/openapi-call-action
+    (let [fsm (make-test-fsm "test2" "next")
+          action (openapi-call/openapi-call-action
                   {:spec-url "http://localhost:8765/openapi.json"
                    :base-url "http://localhost:8765"
                    :operation "listItems"}
-                  nil 0 {"id" "test2"})]
+                  fsm 0 {"id" "test2"})]
       (is (fn? action) "Second action created from cache"))))
 
 ;;------------------------------------------------------------------------------

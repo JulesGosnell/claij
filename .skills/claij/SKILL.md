@@ -154,3 +154,56 @@ Cache helpers in claij.mcp:
 Enter state = Load skill
 Perform actions = Use skill
 Exit state = GC skill, keep summary
+
+## Schema-Derived Routing (Critical Architecture)
+
+**Core principle:** States know NOTHING about the next state. States are only connected by XITIONS. The SCHEMA is the contract.
+
+**How routing works:**
+1. Actions surface I/O requirements via schemas
+2. Actions surface these to their STATE
+3. STATE surfaces them to input and output XITIONS
+4. XITIONS have schemas that constrain valid events (including the `id` field)
+5. FSM machinery validates events against xition schemas and routes accordingly
+
+**For LLM actions:**
+- LLM sees output schema (aggregated from outgoing xition schemas)
+- LLM "chooses" route by producing an `id` that matches one of the xition schemas
+- Multiple outgoing xitions = multiple choices for LLM
+
+**For deterministic actions (openapi-call, mcp-call, etc):**
+- Same pattern: compute output schema from outgoing xitions
+- For single-output states, schema constrains `id` to a constant: `["id" [:= ["stt" "mc"]]]`
+- Action extracts this constant from the schema at factory time
+- No hardcoded routing - it's derived from the schema contract
+
+**Implementation pattern (from llm-action):**
+```clojure
+;; In action factory - compute output schema same way for ALL actions
+(let [output-xitions (filter (fn [{[from _to] "id"}] (= from state-id)) xs)
+      output-schema (fsm/state-schema context fsm state output-xitions)]
+  ;; LLM action: pass schema to LLM for structured output
+  ;; Deterministic action: extract constrained id from schema
+  ...)
+```
+
+**Why this matters:**
+- Actions are decoupled from FSM topology
+- Xition schemas are the single source of truth for routing
+- Type safety: schema validation ensures event matches xition contract
+- Same pattern works for any action type
+
+**Anti-pattern (NEVER do this):**
+```clojure
+;; BAD: Hardcoding routes or peeking at FSM structure
+:next-state "mc"  ;; Action shouldn't know next state name
+(first (filter #(= from (first (get % "id"))) xitions))  ;; Peeking at xitions directly
+```
+
+**Correct pattern:**
+```clojure
+;; GOOD: Derive routing from schema contract
+(let [output-schema (fsm/state-schema context fsm state output-xitions)
+      output-id (extract-id-from-schema output-schema)]  ;; Schema tells us the route
+  ...)
+```
