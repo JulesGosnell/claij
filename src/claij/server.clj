@@ -9,6 +9,7 @@
    [ring.adapter.jetty :refer [run-jetty]]
    [ring.util.response :as resp]
    [ring.middleware.multipart-params :refer [wrap-multipart-params]]
+   [ring.middleware.resource :refer [wrap-resource]]
 
    ;; Reitit
    [reitit.ring :as ring]
@@ -310,24 +311,32 @@
 ;; App
 
 (def app
-  (ring/ring-handler
-   (ring/router
-    routes
-    {:data {:coercion malli-coercion/coercion
-            :muuntaja m/instance
-            :middleware [swagger/swagger-feature
-                         parameters/parameters-middleware
-                         muuntaja/format-negotiate-middleware
-                         muuntaja/format-response-middleware
-                         muuntaja/format-request-middleware
-                         coercion/coerce-exceptions-middleware
-                         coercion/coerce-request-middleware
-                         coercion/coerce-response-middleware]}})
-   (ring/routes
-    (swagger-ui/create-swagger-ui-handler
-     {:path "/swagger"
-      :config {:validatorUrl nil}})
-    (ring/create-default-handler))))
+  (-> (ring/ring-handler
+       (ring/router
+        routes
+        {:data {:coercion malli-coercion/coercion
+                :muuntaja m/instance
+                :middleware [swagger/swagger-feature
+                             parameters/parameters-middleware
+                             muuntaja/format-negotiate-middleware
+                             muuntaja/format-response-middleware
+                             muuntaja/format-request-middleware
+                             coercion/coerce-exceptions-middleware
+                             coercion/coerce-request-middleware
+                             coercion/coerce-response-middleware]}})
+       (ring/routes
+        ;; Redirect root to voice UI
+        (ring/create-resource-handler {:path "/"})
+        (swagger-ui/create-swagger-ui-handler
+         {:path "/swagger"
+          :config {:validatorUrl nil}})
+        ;; Redirect / to /voice.html
+        (fn [request]
+          (if (= "/" (:uri request))
+            (resp/redirect "/voice.html")
+            nil))
+        (ring/create-default-handler)))
+      (wrap-resource "public")))
 
 ;;------------------------------------------------------------------------------
 ;; Server
