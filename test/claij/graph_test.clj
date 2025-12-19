@@ -58,6 +58,13 @@
         (is (includes? dot "\"waiting\" [label=\"waiting")
             "States without action also render")))
 
+    (testing "state description takes precedence over id"
+      (let [fsm {"id" "desc-state-fsm"
+                 "states" [{"id" "stt" "description" "Speech to Text" "action" "openapi-call"}]}
+            dot (fsm->dot fsm)]
+        (is (includes? dot "\"stt\" [label=\"Speech to Text")
+            "Description should be used as label instead of id")))
+
     (testing "state prompts appear in labels"
       (let [fsm {"id" "prompted-fsm"
                  "states" [{"id" "reviewer" "prompts" ["Review code"]}]}
@@ -108,11 +115,13 @@
   (testing "fsm->dot-with-hats"
 
     (testing "expands hat-generated states"
-      (let [;; Mock hat-maker that adds a service state
+      (let [;; Mock hat-maker that adds a service state with description
             mock-hat-maker (fn [state-id _config]
                              (fn [context]
                                [context
-                                {"states" [{"id" (str state-id "-svc") "action" "service"}]
+                                {"states" [{"id" (str state-id "-svc")
+                                            "description" "Mock Service"
+                                            "action" "service"}]
                                  "xitions" [{"id" [state-id (str state-id "-svc")]}
                                             {"id" [(str state-id "-svc") state-id]}]
                                  "prompts" []}]))
@@ -126,16 +135,16 @@
         ;; Should have original state (quoted)
         (is (includes? dot "\"mc\" [label=")
             "Original state should appear")
-        ;; Should have hat-generated state (quoted)
-        (is (includes? dot "\"mc-svc\" [label=")
-            "Hat-generated state should appear")
+        ;; Should have hat-generated state with description as label
+        (is (includes? dot "\"mc-svc\" [label=\"Mock Service")
+            "Hat-generated state should use description as label")
         ;; Should have hat-generated transitions (quoted)
         (is (includes? dot "\"mc\" -> \"mc-svc\"")
             "Hat-generated transition should appear")
         (is (includes? dot "\"mc-svc\" -> \"mc\"")
             "Hat loopback transition should appear")
-        ;; Should have cluster box around hat states
+        ;; Should have cluster box with description as label
         (is (includes? dot "subgraph cluster_mc")
             "Hat states should be in a cluster")
-        (is (includes? dot "label=\"mc hat\"")
-            "Cluster should be labeled with parent state")))))
+        (is (includes? dot "label=\"Mock Service\"")
+            "Cluster should use hat state description as label")))))

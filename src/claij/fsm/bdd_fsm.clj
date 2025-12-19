@@ -99,6 +99,7 @@
    "states"
    [;; STT: audio → text
     {"id" "stt"
+     "description" "Speech to Text"
      "action" "openapi-call"
      "config" {:spec-url (str default-stt-url "/openapi.json")
                :base-url default-stt-url
@@ -106,6 +107,7 @@
 
     ;; MC: LLM with MCP hat for GitHub and Clojure tools
     {"id" "mc"
+     "description" "Master of Ceremonies"
      "action" "llm"
      "hats" [{"mcp" {:servers {"github" {:config github-mcp-config}
                                "clojure" {:config clojure-tools-config}}}}]
@@ -146,6 +148,7 @@
 
     ;; TTS: text → audio
     {"id" "tts"
+     "description" "Text to Speech"
      "action" "openapi-call"
      "config" {:spec-url (str default-tts-url "/openapi.json")
                :base-url default-tts-url

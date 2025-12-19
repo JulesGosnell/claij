@@ -50,15 +50,17 @@
          "  \"end\"   [shape=doublecircle, fillcolor=lightcoral, style=filled];\n"
          "\n  // states\n"
          (apply str
-                (for [{id "id" action "action" prompts "prompts"} states
+                (for [{id "id" desc "description" action "action" prompts "prompts"} states
                       :when (and id (not= id "start") (not= id "end"))
-                      :let [;; Truncate long prompts for graph readability
+                      :let [;; Use description if available, otherwise id
+                            display-name (or desc id)
+                            ;; Truncate long prompts for graph readability
                             prompt-text (when (seq prompts)
                                           (truncate-label (join " " prompts) 80))
                             prompt-label (when prompt-text
                                            (str "\\n" (escape-label prompt-text)))]]
                   (format "  %s [label=\"%s%s%s\"];\n"
-                          (quote-id id) id (if action (str "\\n(" action ")") "") (or prompt-label ""))))
+                          (quote-id id) display-name (if action (str "\\n(" action ")") "") (or prompt-label ""))))
          "\n  // transitions\n"
          (apply str
                 (for [{[from to] "id" label "label" desc "description"} xitions
@@ -120,13 +122,15 @@
                               s))
            quote-id (fn [id] (str "\"" id "\""))
            hat-state-ids (set (map #(get % "id") hat-states))
-           render-state (fn [{id "id" action "action" prompts "prompts"}]
-                          (let [prompt-text (when (seq prompts)
+           render-state (fn [{id "id" desc "description" action "action" prompts "prompts"}]
+                          (let [;; Use description if available, otherwise id
+                                display-name (or desc id)
+                                prompt-text (when (seq prompts)
                                               (truncate-label (join " " prompts) 80))
                                 prompt-label (when prompt-text
                                                (str "\\n" (escape-label prompt-text)))]
                             (format "    %s [label=\"%s%s%s\"];\n"
-                                    (quote-id id) id
+                                    (quote-id id) display-name
                                     (if action (str "\\n(" action ")") "")
                                     (or prompt-label ""))))]
        (str "digraph \"" fsm-id "\" {\n"
@@ -153,9 +157,12 @@
             "\n  // hat clusters\n"
             (apply str
                    (for [[parent-id hat-states] hat-groups
-                         :let [cluster-name (str "cluster_" (string-replace parent-id "-" "_"))]]
+                         :let [cluster-name (str "cluster_" (string-replace parent-id "-" "_"))
+                               ;; Use first hat state's description for cluster label if available
+                               cluster-label (or (some #(get % "description") hat-states)
+                                                 (str parent-id " hat"))]]
                      (str "  subgraph " cluster-name " {\n"
-                          "    label=\"" parent-id " hat\";\n"
+                          "    label=\"" cluster-label "\";\n"
                           "    style=dashed;\n"
                           "    color=gray60;\n"
                           "    fontcolor=gray40;\n"

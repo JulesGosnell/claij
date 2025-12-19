@@ -291,6 +291,7 @@
 
         [ctx'
          {"states" [{"id" service-id
+                     "description" "Model Context Protocol"
                      "action" "mcp-service"}]
           "xitions" [{"id" [state-id service-id]
                       "schema" request-schema-id}
