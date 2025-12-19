@@ -24,7 +24,16 @@
          states "states"
          xitions "xitions"
          :or {fsm-id "fsm" states [] xitions []}} fsm
-        title-text (or fsm-desc (some->> fsm-prompts (join "\\n")))]
+        title-text (or fsm-desc (some->> fsm-prompts (join "\\n")))
+        ;; Escape quotes and limit label length for readability
+        escape-label (fn [s]
+                       (-> s
+                           (string-replace "\"" "\\\"")
+                           (string-replace "\n" "\\n")))
+        truncate-label (fn [s max-len]
+                         (if (> (count s) max-len)
+                           (str (subs s 0 max-len) "...")
+                           s))]
     (str "digraph \"" fsm-id "\" {\n"
          "  rankdir=TB;\n"
          "  node [shape=box, style=rounded, fontname=\"Helvetica\", fontsize=10];\n"
@@ -41,8 +50,11 @@
          (apply str
                 (for [{id "id" action "action" prompts "prompts"} states
                       :when (and id (not= id "start") (not= id "end"))
-                      :let [prompt-label (when (seq prompts)
-                                           (str "\\n" (string-replace (join "\\n" prompts) "\n" "\\n")))]]
+                      :let [;; Truncate long prompts for graph readability
+                            prompt-text (when (seq prompts)
+                                          (truncate-label (join " " prompts) 80))
+                            prompt-label (when prompt-text
+                                           (str "\\n" (escape-label prompt-text)))]]
                   (format "  %s [label=\"%s%s%s\"];\n"
                           id id (if action (str "\\n(" action ")") "") (or prompt-label ""))))
          "\n  // transitions\n"
@@ -50,7 +62,7 @@
                 (for [{[from to] "id" label "label" desc "description"} xitions
                       :let [texts (filter seq [label desc])
                             text (if (seq texts) (join "\\n" texts) to)
-                            label (string-replace text "\n" "\\n")]]
+                            label (escape-label text)]]
                   (format "  %s -> %s [label=\"%s\"];\n"
                           (if (= from "start") "start" from)
                           (if (= to "end") "end" to)

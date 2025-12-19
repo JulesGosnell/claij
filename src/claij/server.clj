@@ -26,7 +26,8 @@
 
    ;; Internal
    [claij.util :refer [assert-env-var clj->json json->clj]]
-   [claij.graph :refer [fsm->dot]]
+   [claij.graph :as graph]
+   [claij.hat :as hat]
    [claij.fsm :as fsm]
    [claij.fsm.code-review-fsm :refer [code-review-fsm]]
    [claij.fsm.bdd-fsm :as bdd]
@@ -120,19 +121,37 @@
     {:status 404
      :body {:error (str "FSM not found: " fsm-id)}}))
 
-(defn fsm-graph-svg-handler [{{:keys [fsm-id]} :path-params}]
+(defn fsm-graph-svg-handler [{{:keys [fsm-id]} :path-params
+                              {:strs [hats]} :query-params}]
   (if-let [fsm (get fsms fsm-id)]
-    {:status 200
-     :headers {"content-type" "image/svg+xml"}
-     :body (dot->svg (fsm->dot fsm))}
+    (let [dot-str (if hats
+                    ;; Expand hats - need context with hat registry
+                    (let [ctx (case fsm-id
+                                "bdd" (bdd/make-bdd-context {})
+                                ;; Default: no hats available
+                                {:hats {:registry (hat/make-hat-registry)}})
+                          registry (get-in ctx [:hats :registry])]
+                      (graph/fsm->dot-with-hats fsm registry ctx))
+                    (graph/fsm->dot fsm))]
+      {:status 200
+       :headers {"content-type" "image/svg+xml"}
+       :body (dot->svg dot-str)})
     {:status 404
      :body {:error (str "FSM not found: " fsm-id)}}))
 
-(defn fsm-graph-dot-handler [{{:keys [fsm-id]} :path-params}]
+(defn fsm-graph-dot-handler [{{:keys [fsm-id]} :path-params
+                              {:strs [hats]} :query-params}]
   (if-let [fsm (get fsms fsm-id)]
-    {:status 200
-     :headers {"content-type" "text/vnd.graphviz"}
-     :body (fsm->dot fsm)}
+    (let [dot-str (if hats
+                    (let [ctx (case fsm-id
+                                "bdd" (bdd/make-bdd-context {})
+                                {:hats {:registry (hat/make-hat-registry)}})
+                          registry (get-in ctx [:hats :registry])]
+                      (graph/fsm->dot-with-hats fsm registry ctx))
+                    (graph/fsm->dot fsm))]
+      {:status 200
+       :headers {"content-type" "text/vnd.graphviz"}
+       :body dot-str})
     {:status 404
      :body {:error (str "FSM not found: " fsm-id)}}))
 
