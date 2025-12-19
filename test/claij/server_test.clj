@@ -244,22 +244,23 @@
 
     (testing "returns audio/wav on successful FSM completion"
       (let [fake-audio (byte-array [82 73 70 70])] ;; RIFF header start
+        ;; Trail entries have :event key containing the actual event
         (with-redefs [fsm/run-sync (fn [_ _ _ _]
-                                     [{} [{"body" fake-audio}]])]
+                                     [{} [{:from "tts" :to "end" :event {"body" fake-audio}}]])]
           (let [response (voice-handler {:multipart-params {"audio" fake-audio}})]
             (is (= 200 (:status response)))
             (is (= "audio/wav" (get-in response [:headers "Content-Type"])))))))
 
     (testing "returns 500 when FSM response has no audio"
       (with-redefs [fsm/run-sync (fn [_ _ _ _]
-                                   [{} [{"body" "not bytes"}]])]
+                                   [{} [{:from "tts" :to "end" :event {"body" "not bytes"}}]])]
         (let [response (voice-handler {:multipart-params {"audio" (byte-array [1 2 3 4])}})]
           (is (= 500 (:status response))))))
 
     (testing "accepts file map in multipart params"
       (let [fake-audio (byte-array [82 73 70 70])]
         (with-redefs [fsm/run-sync (fn [_ _ _ _]
-                                     [{} [{"body" fake-audio}]])]
+                                     [{} [{:from "tts" :to "end" :event {"body" fake-audio}}]])]
           (let [response (voice-handler {:multipart-params {"audio" {:bytes fake-audio
                                                                      :filename "test.wav"
                                                                      :content-type "audio/wav"}}})]
