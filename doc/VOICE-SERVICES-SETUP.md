@@ -369,6 +369,147 @@ sudo firewall-cmd --reload
 - **CUDA Installation**: https://docs.nvidia.com/cuda/
 - **libpython-clj**: https://github.com/clj-python/libpython-clj
 
+## CLAIJ Server Setup
+
+The CLAIJ server orchestrates the voice pipeline and provides the web UI.
+
+### Prerequisites
+
+- Java 17+ (Temurin/Adoptium recommended)
+- Clojure CLI (1.11+)
+- Node.js 18+ (for ClojureScript compilation)
+
+```bash
+# Check versions
+java -version
+clojure --version
+node --version
+```
+
+### Install Dependencies
+
+```bash
+cd /path/to/claij
+
+# Install Node dependencies for ClojureScript
+npm install
+
+# Compile ClojureScript voice UI
+npx shadow-cljs release voice
+```
+
+### Start CLAIJ Server
+
+```bash
+cd /path/to/claij
+
+# Default: port 8080
+clojure -M -m claij.server
+
+# Custom port
+clojure -M -m claij.server 9090
+```
+
+### Verify CLAIJ
+
+```bash
+# Health check
+curl http://localhost:8080/health
+
+# List FSMs
+curl http://localhost:8080/fsms/list
+
+# OpenAPI docs
+open http://localhost:8080/swagger
+```
+
+### Voice Web UI
+
+Open http://localhost:8080 in a browser. The voice UI provides:
+
+- Click-to-record (or press spacebar)
+- Live waveform visualization
+- Automatic WAV encoding (22kHz mono PCM)
+- Audio playback of responses
+
+### Configuration
+
+The BDD FSM connects to STT/TTS services. By default it expects:
+
+| Service | Default URL |
+|---------|-------------|
+| STT | http://prognathodon:8000 |
+| TTS | http://prognathodon:8001 |
+
+To customize, edit `src/claij/fsm/bdd_fsm.clj`:
+
+```clojure
+(def default-stt-url "http://localhost:8000")
+(def default-tts-url "http://localhost:8001")
+```
+
+Or pass options when creating the context:
+
+```clojure
+(bdd/make-bdd-context {:stt-url "http://localhost:8000"
+                       :tts-url "http://localhost:8001"})
+```
+
+### Systemd Service (Production)
+
+```ini
+# /etc/systemd/system/claij.service
+[Unit]
+Description=CLAIJ Server
+After=network.target claij-stt.service claij-tts.service
+
+[Service]
+Type=simple
+User=jules
+WorkingDirectory=/home/jules/src/claij
+Environment=OPENROUTER_API_KEY=sk-...
+ExecStart=/usr/bin/clojure -M -m claij.server 8080
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### ClojureScript Development
+
+For live reloading during UI development:
+
+```bash
+# Start shadow-cljs in watch mode
+npx shadow-cljs watch voice
+
+# Opens dev server at http://localhost:8090
+# Changes to src-cljs/ will hot-reload
+```
+
+### Test Full Voice Pipeline
+
+```bash
+# Generate test audio
+curl -X POST http://localhost:8001/synthesize \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Hello, what can you help me with?"}' \
+  --output test-input.wav
+
+# Send through CLAIJ voice endpoint
+curl -X POST http://localhost:8080/voice \
+  -F "audio=@test-input.wav;type=audio/wav" \
+  --output response.wav
+
+# Play response
+aplay response.wav
+
+# Verify response content (send back to STT)
+curl -X POST http://localhost:8000/transcribe \
+  -F "audio=@response.wav" | jq .text
+```
+
 ## Quick Reference
 
 ```bash
@@ -386,7 +527,17 @@ export PIPER_VOICE_PATH=~/.local/share/piper-voices/en_US-lessac-medium.onnx
 ./bin/stt.sh &
 ./bin/tts.sh &
 
-# Verify
+# Verify STT/TTS
 curl http://localhost:8000/health
 curl http://localhost:8001/health
+
+# Install CLAIJ JS dependencies and compile
+npm install
+npx shadow-cljs release voice
+
+# Start CLAIJ server
+clojure -M -m claij.server
+
+# Open voice UI
+open http://localhost:8080
 ```
