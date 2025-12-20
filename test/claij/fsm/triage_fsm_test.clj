@@ -84,7 +84,7 @@
           llm-called (atom nil)
           handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
           f2 (triage-action {} {} {"schema" [:map ["fsm-id" :string]]} {})
-          context {:store nil :llm/service "openrouter" :llm/model "openai/gpt-5.2-chat"}
+          context {:store nil :llm/service "openrouter" :llm/model "openai/gpt-4o"}
           event {"document" "Please review my code"}
           mock-fsms [{"id" "code-review" "version" 1 "description" "Reviews code"}
                      {"id" "test-gen" "version" 2 "description" "Generates tests"}]]
@@ -101,7 +101,7 @@
 
       (is (some? @llm-called))
       (is (= "openrouter" (:service @llm-called)))
-      (is (= "openai/gpt-5.2-chat" (:model @llm-called)))
+      (is (= "openai/gpt-4o" (:model @llm-called)))
 
       (let [prompt-content (get-in @llm-called [:prompts 0 "content"])]
         (is (str/includes? prompt-content "code-review"))

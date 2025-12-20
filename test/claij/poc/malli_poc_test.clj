@@ -27,12 +27,13 @@
 ;;==============================================================================
 
 (def test-providers
-  "LLM providers to test. Each must understand Malli schema format."
-  [["anthropic" "claude-opus-4.5"]
-   ["google" "gemini-3-pro-preview"]
-   ["openai" "gpt-5.2-chat"]
-   ["x-ai" "grok-code-fast-1"]
-   ["meta-llama" "llama-4-scout"]])
+  "LLM providers to test via OpenRouter. Each entry is [provider model].
+   Note: These are OpenRouter model identifiers."
+  [["anthropic" "claude-sonnet-4-20250514"]
+   ["google" "gemini-2.0-flash"]
+   ["openai" "gpt-4o"]
+   ["x-ai" "grok-3-beta"]
+   ["meta-llama" "llama-3.3-70b-instruct"]])
 
 (def test-timeout-ms
   "Timeout for each LLM call in milliseconds."

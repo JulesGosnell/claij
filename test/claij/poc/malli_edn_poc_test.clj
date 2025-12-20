@@ -28,14 +28,15 @@
 
 ;; LLMs ordered by reliability
 (def reliable-llms
-  [{:provider "google" :model "gemini-3-pro-preview"}
-   {:provider "anthropic" :model "claude-sonnet-4.5"}
-   {:provider "openai" :model "gpt-5.1-codex"}
-   {:provider "x-ai" :model "grok-code-fast-1"}])
+  [{:provider "google" :model "gemini-2.0-flash"}
+   {:provider "anthropic" :model "claude-sonnet-4-20250514"}
+   {:provider "openai" :model "gpt-4o"}
+   {:provider "x-ai" :model "grok-3-beta"}])
 
 (def all-llms
+  "All LLMs including experimental ones - OpenRouter model identifiers."
   (conj reliable-llms
-        {:provider "meta-llama" :model "llama-4-maverick"}))
+        {:provider "meta-llama" :model "llama-3.3-70b-instruct"}))
 
 ;;------------------------------------------------------------------------------
 ;; EDN Parsing
@@ -70,7 +71,7 @@
         _ (println "\n========== POC RESPONSE ==========")
         _ (println "Raw content:")
         _ (println content)
-        _ (println "==================================")] 
+        _ (println "==================================")]
     content))
 
 ;;------------------------------------------------------------------------------
@@ -111,7 +112,7 @@ CRITICAL:
    ["id" [:= ["user" "agree"]]]
    ["message" :string]])
 
-(def output-schema-disagree  
+(def output-schema-disagree
   [:map {:closed true}
    ["id" [:= ["user" "disagree"]]]
    ["reason" :string]])
@@ -131,10 +132,10 @@ CRITICAL:
   [{:keys [provider model]}]
   (let [input-doc {"question" "Is 2 + 2 = 4?"}
         _ (when-not (m/validate input-schema input-doc)
-            (throw (ex-info "Input validation failed" 
-                           {:input input-doc 
-                            :schema input-schema
-                            :errors (m/explain input-schema input-doc)})))
+            (throw (ex-info "Input validation failed"
+                            {:input input-doc
+                             :schema input-schema
+                             :errors (m/explain input-schema input-doc)})))
         tuple-3 [input-schema input-doc output-schema]
         messages [{"role" "system" "content" system-prompt}
                   {"role" "user" "content" (pr-str tuple-3)}]]
@@ -147,11 +148,11 @@ CRITICAL:
             valid? (m/validate output-schema parsed)]
         (if valid?
           {:success true :response parsed :time-ms time-ms}
-          {:success false 
-           :response parsed 
+          {:success false
+           :response parsed
            :time-ms time-ms
-           :error (str "Schema validation failed: " 
-                      (m/explain output-schema parsed))}))
+           :error (str "Schema validation failed: "
+                       (m/explain output-schema parsed))}))
       (catch Exception e
         {:success false :error (.getMessage e)}))))
 
@@ -163,33 +164,33 @@ CRITICAL:
         times (keep :time-ms results)
         avg-time-ms (when (seq times) (/ (reduce + times) (count times)))]
     {:llm (str provider "/" model)
-     :passed passed 
-     :total n 
+     :passed passed
+     :total n
      :avg-time-ms (when avg-time-ms (Math/round (double avg-time-ms)))
      :results results}))
 
 ;;------------------------------------------------------------------------------
 ;; REPL helpers
 
-(defn test-gemini 
+(defn test-gemini
   ([] (test-gemini 1))
-  ([n] (test-llm-n-times {:provider "google" :model "gemini-3-pro-preview"} n)))
+  ([n] (test-llm-n-times {:provider "google" :model "gemini-2.0-flash"} n)))
 
-(defn test-claude 
+(defn test-claude
   ([] (test-claude 1))
-  ([n] (test-llm-n-times {:provider "anthropic" :model "claude-sonnet-4.5"} n)))
+  ([n] (test-llm-n-times {:provider "anthropic" :model "claude-sonnet-4-20250514"} n)))
 
-(defn test-gpt 
+(defn test-gpt
   ([] (test-gpt 1))
-  ([n] (test-llm-n-times {:provider "openai" :model "gpt-5.1-codex"} n)))
+  ([n] (test-llm-n-times {:provider "openai" :model "gpt-4o"} n)))
 
-(defn test-grok 
+(defn test-grok
   ([] (test-grok 1))
-  ([n] (test-llm-n-times {:provider "x-ai" :model "grok-code-fast-1"} n)))
+  ([n] (test-llm-n-times {:provider "x-ai" :model "grok-3-beta"} n)))
 
-(defn test-llama 
+(defn test-llama
   ([] (test-llama 1))
-  ([n] (test-llm-n-times {:provider "meta-llama" :model "llama-4-maverick"} n)))
+  ([n] (test-llm-n-times {:provider "meta-llama" :model "llama-3.3-70b-instruct"} n)))
 
 (defn test-all-llms
   "Test all LLMs n times each. Returns summary with reliability ranking."
@@ -205,13 +206,13 @@ CRITICAL:
     (println (format "%-35s %8s %10s" "LLM" "Score" "Avg (ms)"))
     (println (apply str (repeat 55 "-")))
     (doseq [{:keys [llm passed total avg-time-ms]} ranked]
-      (println (format "%-35s %3d/%-3d %8s" 
-                       llm 
+      (println (format "%-35s %3d/%-3d %8s"
+                       llm
                        passed total
                        (if avg-time-ms (str avg-time-ms) "n/a"))))
     (println (apply str (repeat 55 "-")))
-    (println (format "TOTAL: %d/%d (%.0f%%)" 
-                     total-passed total-tests 
+    (println (format "TOTAL: %d/%d (%.0f%%)"
+                     total-passed total-tests
                      (* 100.0 (/ total-passed total-tests))))
     {:results ranked :total-passed total-passed :total-tests total-tests}))
 
@@ -220,18 +221,18 @@ CRITICAL:
 
 (deftest ^:long-running malli-edn-poc-single-test
   (testing "Single LLM (Gemini) can respond with valid EDN matching Malli schema"
-    (let [{:keys [success response error]} (test-single {:provider "google" 
-                                                          :model "gemini-3-pro-preview"})]
+    (let [{:keys [success response error]} (test-single {:provider "google"
+                                                         :model "gemini-2.0-flash"})]
       (is success (str "Should succeed. Error: " error))
       (when success
-        (is (= ["user" "agree"] (get response "id")) 
+        (is (= ["user" "agree"] (get response "id"))
             "Should choose 'agree' for 2+2=4")))))
 
 (deftest ^:long-running malli-edn-poc-all-reliable-llms-test
   (testing "All reliable LLMs (4) pass at least once"
     (let [results (mapv #(test-llm-n-times % 3) reliable-llms)
           all-passed? (every? #(pos? (:passed %)) results)]
-      (is all-passed? 
+      (is all-passed?
           (str "All reliable LLMs should pass at least once. Results: "
                (mapv #(select-keys % [:llm :passed :total]) results))))))
 
@@ -240,7 +241,7 @@ CRITICAL:
     (let [{:keys [total-passed total-tests]} (test-all-llms 10)
           pass-rate (/ total-passed total-tests)]
       (is (>= pass-rate 0.90)
-          (str "Should achieve 90%+ reliability. Got: " 
+          (str "Should achieve 90%+ reliability. Got: "
                (int (* 100 pass-rate)) "%")))))
 
 ;; Quick test at REPL:

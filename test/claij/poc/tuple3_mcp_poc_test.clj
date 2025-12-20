@@ -1,5 +1,20 @@
 (ns claij.poc.tuple3-mcp-poc-test
-  "PoC test: MCP tool calling with CLAIJ's tuple-3 protocol."
+  "PoC test: MCP tool calling with CLAIJ's tuple-3 protocol.
+   
+   PURPOSE: Validates full tuple-3 conversation flow:
+   - LLM receives [input-schema input-doc output-schema]
+   - LLM emits tool_calls conforming to output-schema
+   - Tools execute, results fed back
+   - LLM emits final answer
+   
+   GOING FORWARD: Use this to validate new LLMs support
+   multi-turn schema-guided conversations with tool execution.
+   
+   Current validated services:
+   - anthropic / claude-sonnet-4-20250514
+   - google / gemini-2.0-flash
+   - openrouter / openai/gpt-4o
+   - xai / grok-3-beta"
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
@@ -124,15 +139,15 @@ CRITICAL: Your entire response must be ONLY the EDN data structure.")
      [{"role" "user" "content" (pr-str tuple3)}])))
 
 (defn call-llm-sync
-  [provider model messages]
+  [service model messages]
   (let [result (promise)]
-    (llm/call provider model messages
+    (llm/call service model messages
               (fn [r] (deliver result {:ok r}))
               {:error (fn [e] (deliver result {:error e}))})
     (let [r (deref result 60000 {:error {:timeout true}})]
       (if (:ok r)
         (:ok r)
-        (throw (ex-info "LLM call failed" {:provider provider :model model :error (:error r)}))))))
+        (throw (ex-info "LLM call failed" {:service service :model model :error (:error r)}))))))
 
 (defn execute-tool
   [{:strs [id arguments]}]
@@ -159,7 +174,7 @@ CRITICAL: Your entire response must be ONLY the EDN data structure.")
                     TaskInput
                     input-doc
                     OutputSchema)
-          response (call-llm-sync "anthropic" "claude-opus-4.5" messages)]
+          response (call-llm-sync "anthropic" "claude-sonnet-4-20250514" messages)]
       (is (m/validate OutputSchema response)
           (str "Response should match OutputSchema: " (pr-str response)))
       (is (= "tool_calls" (get response "id"))
@@ -180,7 +195,7 @@ CRITICAL: Your entire response must be ONLY the EDN data structure.")
                     TaskInput
                     input-doc
                     OutputSchema)
-          response (call-llm-sync "google" "gemini-3-pro-preview" messages)]
+          response (call-llm-sync "google" "gemini-2.0-flash" messages)]
       (is (m/validate OutputSchema response)
           (str "Response should match OutputSchema: " (pr-str response)))
       (is (= "tool_calls" (get response "id"))
@@ -201,7 +216,7 @@ CRITICAL: Your entire response must be ONLY the EDN data structure.")
                     TaskInput
                     input-doc
                     OutputSchema)
-          response (call-llm-sync "openai" "gpt-5.2" messages)]
+          response (call-llm-sync "openrouter" "openai/gpt-4o" messages)]
       (is (m/validate OutputSchema response)
           (str "Response should match OutputSchema: " (pr-str response)))
       (is (= "tool_calls" (get response "id"))
@@ -222,7 +237,7 @@ CRITICAL: Your entire response must be ONLY the EDN data structure.")
                     TaskInput
                     input-doc
                     OutputSchema)
-          response (call-llm-sync "x-ai" "grok-code-fast-1" messages)]
+          response (call-llm-sync "xai" "grok-3-beta" messages)]
       (is (m/validate OutputSchema response)
           (str "Response should match OutputSchema: " (pr-str response)))
       (is (= "tool_calls" (get response "id"))
@@ -247,7 +262,7 @@ CRITICAL: Your entire response must be ONLY the EDN data structure.")
                       TaskInput
                       input-doc-1
                       OutputSchema)
-          response-1 (call-llm-sync "anthropic" "claude-opus-4.5" messages-1)
+          response-1 (call-llm-sync "anthropic" "claude-sonnet-4-20250514" messages-1)
           _ (is (= "tool_calls" (get response-1 "id")) "Turn 1 should be tool_calls")
           tool-results (mapv execute-tool (get response-1 "calls"))
           trail [{"role" "user" "content" (pr-str [TaskInput input-doc-1 OutputSchema])}
@@ -262,7 +277,7 @@ CRITICAL: Your entire response must be ONLY the EDN data structure.")
                       ToolResultsInput
                       input-doc-2
                       OutputSchema)
-          response-2 (call-llm-sync "anthropic" "claude-opus-4.5" messages-2)]
+          response-2 (call-llm-sync "anthropic" "claude-sonnet-4-20250514" messages-2)]
       (is (m/validate OutputSchema response-2)
           (str "Response 2 should match OutputSchema: " (pr-str response-2)))
       (is (= "answer" (get response-2 "id"))
