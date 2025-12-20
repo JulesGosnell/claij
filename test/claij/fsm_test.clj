@@ -976,8 +976,8 @@
 (defn test-minimal-fsm []
   (let [actions {"llm" #'claij.fsm/llm-action "end" #'actions/end-action}
         context {:id->action actions
-                 :llm/provider "anthropic"
-                 :llm/model "claude-sonnet-4.5"}
+                 :llm/service "anthropic"
+                 :llm/model "claude-sonnet-4-20250514"}
         input {"question" "Is 2 + 2 = 4?"}
         result (run-sync minimal-fsm context input 60000)]
     (if (= result :timeout)

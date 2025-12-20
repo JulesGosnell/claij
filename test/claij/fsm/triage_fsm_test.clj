@@ -67,7 +67,7 @@
     (let [result (atom nil)
           handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
           f2 (triage-action {} {} {"schema" [:map]} {})
-          context {:store nil :provider "test" :model "test"}
+          context {:store nil :service "test" :model "test"}
           event {"document" "Please review my code"}]
       (with-redefs [store/fsm-list-all (fn [_] [])]
         (f2 context event [] handler))
@@ -84,13 +84,13 @@
           llm-called (atom nil)
           handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
           f2 (triage-action {} {} {"schema" [:map ["fsm-id" :string]]} {})
-          context {:store nil :provider "openai" :model "gpt-5.2-chat"}
+          context {:store nil :service "openrouter" :model "openai/gpt-5.2-chat"}
           event {"document" "Please review my code"}
           mock-fsms [{"id" "code-review" "version" 1 "description" "Reviews code"}
                      {"id" "test-gen" "version" 2 "description" "Generates tests"}]]
       (with-redefs [store/fsm-list-all (fn [_] mock-fsms)
-                    llm/call (fn [provider model prompts handler & _]
-                               (reset! llm-called {:provider provider
+                    llm/call (fn [service model prompts handler & _]
+                               (reset! llm-called {:service service
                                                    :model model
                                                    :prompts prompts})
                                (handler {"id" ["triage" "reuse"]
@@ -100,8 +100,8 @@
         (f2 context event [] handler))
 
       (is (some? @llm-called))
-      (is (= "openai" (:provider @llm-called)))
-      (is (= "gpt-5.2-chat" (:model @llm-called)))
+      (is (= "openrouter" (:service @llm-called)))
+      (is (= "openai/gpt-5.2-chat" (:model @llm-called)))
 
       (let [prompt-content (get-in @llm-called [:prompts 0 "content"])]
         (is (str/includes? prompt-content "code-review"))

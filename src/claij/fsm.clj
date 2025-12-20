@@ -10,6 +10,7 @@
    [claij.malli :refer [def-fsm fsm-registry base-registry expand-refs-for-llm]]
    [claij.action :refer [def-action action-input-schema action-output-schema]]
    [claij.llm :refer [call]]
+   [claij.llm.service :as llm-service]
    [claij.hat :as hat]))
 
 ;;------------------------------------------------------------------------------
@@ -767,11 +768,13 @@
 ;;------------------------------------------------------------------------------
 
 (def llm-configs
-  "Configuration for different LLM providers and models.
-   Each entry maps [provider model] to a config map with:
+  "Configuration for different LLM services and models.
+   Each entry maps [service model] to a config map with:
    - :prompts - vector of prompt maps with :role and :content
-   - Future: could include :temperature, :max-tokens, etc."
-  {["anthropic" "claude-sonnet-4.5"]
+   - Future: could include :temperature, :max-tokens, etc.
+   
+   Note: 'service' is the registry key (e.g., 'anthropic', 'google', 'ollama:local')."
+  {["anthropic" "claude-sonnet-4-20250514"]
    {:prompts [{:role "system"
                :content "CRITICAL: Your response must be ONLY valid EDN - no explanatory text before or after."}
               {:role "system"
@@ -779,14 +782,15 @@
               {:role "system"
                :content "CRITICAL: Be concise in your response to avoid hitting token limits."}]}
 
-   ;; OpenAI models - generally work well with standard prompts
-   ["openai" "gpt-5.2-chat"] {}
+   ;; OpenAI models via OpenRouter
+   ["openrouter" "openai/gpt-5.2-chat"] {}
 
    ;; xAI models
-   ["x-ai" "grok-code-fast-1"] {}
-   ["x-ai" "grok-4"] {}
+   ["xai" "grok-code-fast-1"] {}
+   ["xai" "grok-4"] {}
 
    ;; Google models
+   ["google" "gemini-2.0-flash"] {}
    ["google" "gemini-3-pro-preview"] {}})
 
 (defn trail->prompts
@@ -843,17 +847,17 @@
 
 (defn make-prompts
   "Build prompt messages from FSM configuration and conversation trail.
-   Optionally accepts provider/model for LLM-specific prompts."
+   Optionally accepts service/model for LLM-specific prompts."
   ([fsm ix state trail]
    (make-prompts fsm ix state trail nil nil))
   ([{fsm-schemas "schemas" fsm-prompts "prompts" :as _fsm}
     {ix-prompts "prompts" :as _ix}
     {state-prompts "prompts"}
     trail
-    provider
+    service
     model]
    (let [;; Look up LLM-specific configuration
-         llm-config (get llm-configs [provider model] {})
+         llm-config (get llm-configs [service model] {})
          llm-prompts (get llm-config :prompts [])
 
          ;; Separate system and user prompts from LLM config
@@ -904,24 +908,29 @@
   "FSM action: call LLM with prompts built from FSM config and trail.
    
    Config schema (all optional):
-   - \"provider\" - LLM provider (anthropic, google, openai, xai)
-   - \"model\" - Model identifier string
+   - \"service\" - LLM service name (anthropic, google, openrouter, ollama:local, xai)
+   - \"model\" - Model identifier string (native to service)
    
-   Provider/model precedence: config → event → context → defaults
+   Service/model precedence: config → event → context → defaults
+   
+   Service registry is taken from context :llm/registry or uses default-registry.
    
    Passes the output schema (Malli :or of valid output transitions) to call
    for structured output enforcement."
   [:map
-   ["provider" {:optional true} [:enum "anthropic" "google" "openai" "xai"]]
+   ["service" {:optional true} :string]
    ["model" {:optional true} :string]]
   [config {xs "xitions" :as fsm} ix {sid "id" :as state}]
   (fn [context event trail handler]
     (log/info "llm-action entry, trail-count:" (count trail))
-    (let [{event-provider "provider" event-model "model"} (get event "llm")
-          {config-provider "provider" config-model "model"} config
+    (let [{event-service "service" event-model "model"} (get event "llm")
+          {config-service "service" config-model "model"} config
           ;; Precedence: config → event → context → defaults
-          provider (or config-provider event-provider (:llm/provider context) "google")
-          model (or config-model event-model (:llm/model context) "gemini-3-pro-preview")
+          service (or config-service event-service (:llm/service context) "google")
+          model (or config-model event-model (:llm/model context) "gemini-2.0-flash")
+
+          ;; Get LLM service registry from context or use default
+          llm-registry (or (:llm/registry context) llm-service/default-registry)
 
           ;; Compute output transitions from current state
           output-xitions (filter (fn [{[from _to] "id"}] (= from sid)) xs)
@@ -949,15 +958,16 @@
                        initial-message
                        prompt-trail)
 
-          prompts (make-prompts fsm ix state full-trail provider model)]
-      (log/info (str "   Using LLM: " provider "/" model " with " (count prompts) " prompts"))
+          prompts (make-prompts fsm ix state full-trail service model)]
+      (log/info (str "   Using LLM: " service "/" model " with " (count prompts) " prompts"))
       (call
-       provider model
+       service model
        prompts
        (fn [output]
          (log/info "llm-action got output, id:" (get output "id") ":" (pr-str output))
          (handler context output))
-       {:schema output-schema
+       {:registry llm-registry
+        :schema output-schema
         :error (fn [error-info]
                  (log/error "LLM action failed:" (pr-str error-info))
                  ;; Return error to handler so FSM can see it
