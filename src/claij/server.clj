@@ -127,24 +127,36 @@
           [:head
            [:meta {:charset "UTF-8"}]
            [:title "CLAIJ FSM Catalogue"]
-           [:style "body { font-family: system-ui; max-width: 800px; margin: 2em auto; padding: 1em; }
+           [:style "body { font-family: system-ui; max-width: 900px; margin: 2em auto; padding: 1em; }
                     table { border-collapse: collapse; width: 100%; }
                     th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
                     th { background: #f9f9f9; }
                     tr:hover { background: #f5f5f5; }
                     a { color: #0066cc; }
                     h1 { margin-bottom: 0.5em; }
-                    .subtitle { color: #666; margin-bottom: 1.5em; }"]]
+                    .subtitle { color: #666; margin-bottom: 1.5em; }
+                    .count { color: #666; font-size: 0.9em; }
+                    td.numeric { text-align: center; }"]]
           [:body
            [:h1 "FSM Catalogue"]
            [:p.subtitle (str (count fsms) " finite state machines")]
            [:table
-            [:thead [:tr [:th "ID"] [:th "Links"]]]
+            [:thead [:tr
+                     [:th "ID"]
+                     [:th "States"]
+                     [:th "Transitions"]
+                     [:th "Schemas"]
+                     [:th "Links"]]]
             [:tbody
-             (for [id (sort (keys fsms))]
+             (for [id (sort (keys fsms))
+                   :let [fsm (get fsms id)]]
                [:tr
                 [:td [:a {:href (str "/fsm/" id)} id]]
-                [:td [:a {:href (str "/fsm/" id "/graph.svg")} "SVG"]
+                [:td.numeric (count (get fsm "states"))]
+                [:td.numeric (count (get fsm "xitions"))]
+                [:td.numeric (count (get fsm "schemas"))]
+                [:td
+                 [:a {:href (str "/fsm/" id "/graph.svg")} "SVG"]
                  " | "
                  [:a {:href (str "/fsm/" id "/document")} "JSON"]]])]]])})
 
@@ -180,7 +192,10 @@
                       .schema-link { text-decoration: none; }
                       .schema-link:hover { text-decoration: underline; }
                       code { background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-size: 0.9em; }
-                      ol { line-height: 1.6; }"]]
+                      ol { line-height: 1.6; }
+                      .graph-container { background: #fafafa; border: 1px solid #ddd; border-radius: 4px;
+                                         padding: 1em; text-align: center; }
+                      .graph-container object { max-width: 100%; height: auto; }"]]
             [:body
              [:div.nav
               [:a {:href "/fsms"} "\u2190 Back to Catalogue"]
@@ -189,6 +204,15 @@
               " | "
               [:a {:href (str "/fsm/" fsm-id "/document")} "JSON"]]
              [:h1 fsm-id]
+
+             ;; Graph section - inline SVG
+             [:div.section
+              [:h2 "Graph"]
+              [:div.graph-container
+               [:object {:type "image/svg+xml"
+                         :data (str "/fsm/" fsm-id "/graph.svg")
+                         :style "max-height: 400px;"}
+                "Your browser does not support SVG"]]]
 
              ;; Prompts section
              (when-let [prompts (get fsm "prompts")]
