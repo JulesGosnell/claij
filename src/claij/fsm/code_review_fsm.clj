@@ -35,11 +35,10 @@
 
    ;; LLM specification
    "llm" [:map {:closed true
-                :description "LLM provider and model specification"}
-          ["provider" {:description "The LLM provider"}
-           [:enum "anthropic" "google" "openai" "x-ai"]]
-          ["model" {:description "The specific model to use"}
-           [:enum "claude-opus-4.5" "gemini-3-pro-preview" "gpt-5.2-chat" "grok-code-fast-1"]]]
+                :description "LLM service and model specification"}
+          ["service" {:description "The LLM service"}
+           [:enum "anthropic" "google" "openrouter" "ollama:local" "xai"]]
+          ["model" {:description "The specific model to use (native to service)"} :string]]
 
    ;; List of available LLMs (min 1)
    "llms" [:vector {:min 1 :description "List of available LLMs to choose from"}
@@ -104,7 +103,7 @@
       ""
       "CRITICAL - LLM SELECTION:"
       "- You MUST only use LLMs from the 'llms' list provided in the entry message"
-      "- Copy the exact 'provider' and 'model' strings from that list"
+      "- Copy the exact 'service' and 'model' strings from that list"
       "- DO NOT invent or guess model names - only use what was provided"
       "- If you use a model not in the list, the request will fail"
       ""
@@ -113,7 +112,7 @@
       "- Identify which concerns are most relevant to the code being reviewed"
       "- Distribute 2-3 relevant concerns to each LLM when requesting a review"
       "- You can assign different concerns to different LLMs based on their strengths"
-      "- When you request a review, include the specific concerns in the 'concerns' field along with the 'llm' field specifying provider and model"
+      "- When you request a review, include the specific concerns in the 'concerns' field along with the 'llm' field specifying service and model"
       ""
       "ITERATION STRATEGY:"
       "- Continue requesting reviews until all important concerns have been addressed"
@@ -205,10 +204,10 @@
            context# {:id->action code-review-actions#}
            {:keys [~'submit ~'await ~'stop]} (fsm/start-fsm context# code-review-fsm)
            ;; Available LLMs - must match schema enum exactly
-           llms# [{"provider" "anthropic" "model" "claude-opus-4.5"}
-                  {"provider" "google" "model" "gemini-3-pro-preview"}
-                  {"provider" "openai" "model" "gpt-5.2-chat"}
-                  {"provider" "x-ai" "model" "grok-code-fast-1"}]
+           llms# [{"service" "anthropic" "model" "claude-sonnet-4-20250514"}
+                  {"service" "google" "model" "gemini-2.0-flash"}
+                  {"service" "openrouter" "model" "openai/gpt-4o"}
+                  {"service" "xai" "model" "grok-3-beta"}]
            ;; Construct entry message with document and llms
            entry-msg# {"id" ["start" "mc"]
                        "document" (str "Please review this code: " ~code-str)

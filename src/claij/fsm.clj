@@ -451,7 +451,7 @@
    
    Context should contain:
    - :id->action - Map of action-id to action function
-   - Other keys as needed by actions (e.g. :store, :provider, :model)
+   - Other keys as needed by actions (e.g. :store, :llm/service, :llm/model)
    
    Optional context keys:
    - [:hats :registry] - Map of hat-name -> hat-maker. If present, don-hats is called

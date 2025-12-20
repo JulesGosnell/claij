@@ -115,7 +115,7 @@
   (testing "formats FSM list correctly in prompt"
     (let [llm-prompts (atom nil)
           f2 (triage-action {} {} {"schema" [:map]} {})
-          context {:store nil :provider "p" :model "m"}
+          context {:store nil :llm/service "p" :llm/model "m"}
           event {"document" "user request"}
           mock-fsms [{"id" "fsm-a" "version" 3 "description" "Does A things"}
                      {"id" "fsm-b" "version" 7 "description" "Does B things"}]]
@@ -162,7 +162,7 @@
                                   "notes" "Please review this fibonacci implementation"
                                   "concerns" ["Performance: Consider algorithmic efficiency"
                                               "Functional style: Use pure functions"]
-                                  "llm" {"provider" "openai" "model" "gpt-5.2-chat"}})
+                                  "llm" {"service" "openrouter" "model" "openai/gpt-4o"}})
 
                 ;; Reviewer responds
                 (= xid ["mc" "reviewer"])
@@ -182,8 +182,8 @@
           ;; Create context with mock actions
           context (actions/make-context
                    {:store *store*
-                    :provider "mock"
-                    :model "mock"
+                    :llm/service "mock"
+                    :llm/model "mock"
                     :id->action (merge actions/default-actions
                                        {"triage" mock-triage-llm
                                         "llm" mock-review-llm})})
@@ -212,8 +212,8 @@
     (let [;; No FSMs in store - triage action should route to generate
           context (actions/make-context
                    {:store *store*
-                    :provider "mock"
-                    :model "mock"})
+                    :llm/service "mock"
+                    :llm/model "mock"})
           ;; Use real actions - no need to mock since triage-action handles empty store
 
           {:keys [submit await stop]} (start-triage context)]

@@ -2,9 +2,14 @@
   "Tests for LLM integration including EDN parse retry."
   (:require
    [clojure.test :refer [deftest testing is]]
-   [clojure.tools.logging :as log]
+   [clojure.data.json :as json]
    [claij.llm :as llm]
-   [claij.llm :as llm-dispatch]))
+   [claij.llm.service :as svc]))
+
+(def test-registry
+  {"test-service" {:strategy "openai-compat"
+                   :url "http://test.local/v1/chat/completions"
+                   :auth nil}})
 
 (deftest edn-parse-retry-mock-test
   (testing "EDN parse errors trigger retries with error feedback"
@@ -13,7 +18,7 @@
 
           ;; Mock HTTP post that simulates LLM behavior
           mock-post (fn [_url {:keys [body]} success-callback _error-callback]
-                      (let [parsed-body (clojure.data.json/read-str body)
+                      (let [parsed-body (json/read-str body)
                             messages (get parsed-body "messages")
                             attempt-num (count @attempts)]
                         (swap! attempts conj messages)
@@ -21,24 +26,24 @@
                         (cond
                           ;; First attempt: return malformed EDN (unbalanced braces)
                           (= attempt-num 0)
-                          (success-callback {:body (clojure.data.json/write-str
+                          (success-callback {:body (json/write-str
                                                     {"choices" [{"message" {"content" "{\"id\" [\"a\" \"b\"] :bad"}}]})})
 
                           ;; Second attempt: return valid EDN
                           :else
-                          (success-callback {:body (clojure.data.json/write-str
+                          (success-callback {:body (json/write-str
                                                     {"choices" [{"message" {"content" "{\"id\" [\"a\" \"b\"] \"data\" \"ok\"}"}}]})}))))
 
           result (promise)]
 
-      ;; Temporarily replace HTTP post and API key
-      (with-redefs [clj-http.client/post mock-post
-                    llm-dispatch/openrouter-api-key (fn [] "mock-key")]
+      ;; Temporarily replace HTTP post
+      (with-redefs [clj-http.client/post mock-post]
         (llm/call
-         "test" "model"
+         "test-service" "model"
          [{"role" "user" "content" "test"}]
          (partial deliver result)
-         {:max-retries 3}))
+         {:registry test-registry
+          :max-retries 3}))
 
       ;; Wait for result
       (let [final-result (deref result 5000 ::timeout)]
@@ -65,16 +70,16 @@
           ;; Mock HTTP post that always returns bad EDN
           mock-post (fn [_url _opts success-callback _error-callback]
                       (swap! attempt-count inc)
-                      (success-callback {:body (clojure.data.json/write-str
+                      (success-callback {:body (json/write-str
                                                 {"choices" [{"message" {"content" "{:bad edn {"}}]})}))]
 
-      (with-redefs [clj-http.client/post mock-post
-                    llm-dispatch/openrouter-api-key (fn [] "mock-key")]
+      (with-redefs [clj-http.client/post mock-post]
         (llm/call
-         "test" "model"
+         "test-service" "model"
          [{"role" "user" "content" "test"}]
          (fn [_] nil) ; success handler (won't be called)
-         {:max-retries 2
+         {:registry test-registry
+          :max-retries 2
           :error (fn [_] (deliver error-promise true))}))
 
       ;; Wait for error handler with timeout

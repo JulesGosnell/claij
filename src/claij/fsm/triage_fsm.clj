@@ -64,7 +64,9 @@
   [_config _fsm ix _state]
   (fn [context event _trail handler]
     ;; Extract user's problem description from the event
-    (let [{:keys [store provider model]} context
+    (let [{:keys [store]} context
+          service (:llm/service context)
+          model (:llm/model context)
           user-text (get event "document")
 
           ;; Query store for all FSM [id, version, description] triples
@@ -94,7 +96,7 @@
           (handler context {"id" ["triage" "generate"]
                             "requirements" (str "No existing FSMs found. Need to implement: " user-text)}))
         ;; Query LLM for selection
-        (call provider model prompts (partial handler context) {:schema (get ix "schema")})))))
+        (call service model prompts (partial handler context) {:schema (get ix "schema")})))))
 
 ;;------------------------------------------------------------------------------
 ;; Triage FSM Definition
@@ -172,10 +174,11 @@
   "Start the triage FSM with the given context.
    
    Context should contain:
-   - :store      - Database connection  
-   - :provider   - LLM provider (e.g. 'openai')
-   - :model      - LLM model (e.g. 'gpt-4o')
-   - :id->action - (Optional) Override default actions
+   - :store        - Database connection  
+   - :llm/service  - LLM service (e.g. 'anthropic', 'ollama:local')
+   - :llm/model    - LLM model (e.g. 'claude-sonnet-4-20250514')
+   - :llm/registry - (Optional) Service registry
+   - :id->action   - (Optional) Override default actions
    
    Returns a map with :submit, :await, :stop, :input-schema, :output-schema."
   [context]
@@ -187,8 +190,8 @@
 
   (let [context (actions/make-context
                  {:store nil ;; TODO: real store connection
-                  :provider "openai"
-                  :model "gpt-4o"})
+                  :llm/service "openrouter"
+                  :llm/model "openai/gpt-4o"})
         {:keys [submit await stop]} (start-triage context)]
 
     (submit "Please review my fibonacci code")

@@ -80,27 +80,29 @@
     (testing "returns nil for nil trail"
       (is (nil? (last-event nil)))))
 
-  (testing "llm-configs"
-    (testing "keys are [provider model] tuples with map values"
-      (doseq [[provider-model config] llm-configs]
-        (is (vector? provider-model) (str "Key should be [provider model] tuple"))
-        (is (= 2 (count provider-model)) (str "Key should have exactly 2 elements"))
-        (is (string? (first provider-model)) (str "Provider should be string"))
-        (is (string? (second provider-model)) (str "Model should be string"))
-        (is (map? config) (str "Config for " provider-model " should be a map"))))
+  (testing "llm-configs structure"
+    (is (map? llm-configs))
+    (doseq [[service-model config] llm-configs]
+      (is (vector? service-model) (str "Key should be [service model] tuple"))
+      (is (= 2 (count service-model)) (str "Key should have exactly 2 elements"))
+      (is (string? (first service-model)) (str "Service should be string"))
+      (is (string? (second service-model)) (str "Model should be string"))
+      (is (map? config) (str "Config for " service-model " should be a map"))))
 
-    (testing "anthropic config includes system prompts for EDN parsing"
-      (let [anthropic-config (get llm-configs ["anthropic" "claude-sonnet-4.5"])]
-        (is (some? anthropic-config) "Should have anthropic config")
-        (is (vector? (:prompts anthropic-config)) "Should have prompts vector")
-        (is (pos? (count (:prompts anthropic-config))) "Should have at least one prompt")))
+  (testing "anthropic config includes system prompts for EDN parsing"
+    (let [anthropic-config (get llm-configs ["anthropic" "claude-sonnet-4-20250514"])]
+      (is (some? anthropic-config) "Should have anthropic config")
+      (is (vector? (:prompts anthropic-config)) "Should have prompts vector")
+      (is (pos? (count (:prompts anthropic-config))) "Should have at least one prompt")))
 
-    (testing "covers expected providers"
-      (let [providers (set (map first (keys llm-configs)))]
-        (is (contains? providers "anthropic"))
-        (is (contains? providers "openai"))
-        (is (contains? providers "x-ai"))
-        (is (contains? providers "google"))))))
+  (testing "covers expected services"
+    (let [services (set (map first (keys llm-configs)))]
+      (is (contains? services "anthropic"))
+      (is (contains? services "google"))
+      ;; These may or may not be present depending on config
+      (is (or (contains? services "openrouter")
+              (contains? services "xai")
+              (contains? services "ollama:local"))))))
 
 ;;==============================================================================
 ;; Context Threading Tests

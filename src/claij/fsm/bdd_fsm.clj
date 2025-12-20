@@ -191,18 +191,18 @@
   "Create context for running BDD FSM.
    
    Options:
-   - :provider - LLM provider (default: openrouter)
-   - :model - LLM model (default: claude-sonnet)
+   - :service - LLM service (default: openrouter)
+   - :model - LLM model (default: anthropic/claude-sonnet-4-20250514)
    - :stt-url - STT service URL (default: prognathodon:8000)
    - :tts-url - TTS service URL (default: prognathodon:8001)"
-  [{:keys [provider model stt-url tts-url]
-    :or {provider "openrouter"
+  [{:keys [service model stt-url tts-url]
+    :or {service "openrouter"
          model "anthropic/claude-sonnet-4-20250514"
          stt-url default-stt-url
          tts-url default-tts-url}}]
   {:id->action bdd-actions
-   :provider provider
-   :model model
+   :llm/service service
+   :llm/model model
    ;; Register MCP hat maker
    :hats {:registry (-> (hat/make-hat-registry)
                         (hat/register-hat "mcp" mcp-hat/mcp-hat-maker))}

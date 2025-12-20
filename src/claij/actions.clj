@@ -73,7 +73,9 @@
           original-text (when (seq trail)
                           (get-in (first trail) ["content" 1 "document"]))
 
-          {:keys [store provider model]} context]
+          {:keys [store]} context
+          service (:llm/service context)
+          model (:llm/model context)]
 
       (log/info (str "   Reuse: " fsm-id " v" fsm-version))
 
@@ -91,7 +93,7 @@
         (let [entry-msg (if (= fsm-id "code-review")
                           {"id" ["start" "mc"]
                            "document" original-text
-                           "llms" [{"provider" provider "model" model}]
+                           "llms" [{"service" service "model" model}]
                            "concerns" ["Simplicity: Can this be simpler?"
                                        "Performance: Consider efficiency and avoid reflection"
                                        "Functional style: Use pure functions and immutable data"
@@ -334,12 +336,13 @@
   "Create a context for FSM execution.
    
    Required keys:
-   - :store      - Database connection
-   - :provider   - LLM provider (e.g. 'openai')
-   - :model      - LLM model (e.g. 'gpt-4o')
+   - :store        - Database connection
+   - :llm/service  - LLM service (e.g. 'anthropic', 'ollama:local')
+   - :llm/model    - LLM model (e.g. 'claude-sonnet-4-20250514')
    
    Optional keys:
-   - :id->action      - Override action implementations (defaults to default-actions)"
+   - :llm/registry - Service registry (defaults to claij.llm.service/default-registry)
+   - :id->action   - Override action implementations (defaults to default-actions)"
   [opts]
   (merge {:id->action default-actions}
          opts))

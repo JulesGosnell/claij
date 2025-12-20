@@ -128,25 +128,4 @@
            (catch Throwable t
              (log/error t "Error handling LLM failure"))))))))
 
-;;------------------------------------------------------------------------------
-;; Backward Compatibility - Provider to Service Mapping
-;;------------------------------------------------------------------------------
 
-(def provider->service
-  "Maps old provider names to new service names for backward compatibility.
-   Only needed during migration - callers should update to use service names directly."
-  {"anthropic" "anthropic"
-   "google" "google"
-   "openai" "openai"
-   "x-ai" "xai"
-   "xai" "xai"})
-
-(defn call-compat
-  "Backward-compatible call using old provider names.
-   DEPRECATED: Use `call` with service names directly.
-   
-   Maps provider names to services and routes through OpenRouter
-   when no direct API key is available."
-  [provider model prompts handler & [opts]]
-  (let [service (get provider->service provider "openrouter")]
-    (call service model prompts handler opts)))

@@ -122,16 +122,16 @@
     (let [ctx (make-bdd-context {})]
       (is (map? ctx))
       (is (contains? ctx :id->action))
-      (is (contains? ctx :provider))
-      (is (contains? ctx :model))
+      (is (contains? ctx :llm/service))
+      (is (contains? ctx :llm/model))
       (is (contains? ctx :hats))
-      (is (= "openrouter" (:provider ctx)))))
+      (is (= "openrouter" (:llm/service ctx)))))
 
   (testing "Creates context with custom values"
-    (let [ctx (make-bdd-context {:provider "anthropic"
+    (let [ctx (make-bdd-context {:service "anthropic"
                                  :model "claude-3-opus"})]
-      (is (= "anthropic" (:provider ctx)))
-      (is (= "claude-3-opus" (:model ctx)))))
+      (is (= "anthropic" (:llm/service ctx)))
+      (is (= "claude-3-opus" (:llm/model ctx)))))
 
   (testing "Context includes hat registry"
     (let [ctx (make-bdd-context {})]
