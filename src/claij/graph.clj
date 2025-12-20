@@ -18,7 +18,15 @@
          xitions "xitions"
          :or {fsm-id "fsm" states [] xitions []}} fsm
         title-text (or fsm-desc (some->> fsm-prompts (join "\\n")))
-        quote-id (fn [id] (str "\"" id "\""))]
+        quote-id (fn [id] (str "\"" id "\""))
+        escape-label (fn [s]
+                       (-> s
+                           (string-replace "\"" "\\\"")
+                           (string-replace "\n" "\\n")))
+        truncate-label (fn [s max-len]
+                         (if (> (count s) max-len)
+                           (str (subs s 0 max-len) "...")
+                           s))]
     (str "digraph \"" fsm-id "\" {\n"
          "  rankdir=TB;\n"
          "  node [shape=box, style=rounded, fontname=\"Helvetica\", fontsize=10];\n"
@@ -36,8 +44,10 @@
                 (for [{id "id" desc "description" action "action" prompts "prompts"} states
                       :when (and id (not= id "start") (not= id "end"))
                       :let [display-name (or desc id)
-                            prompt-label (when (seq prompts)
-                                           (str "\\n" (string-replace (join "\\n" prompts) "\n" "\\n")))]]
+                            prompt-text (when (seq prompts)
+                                          (truncate-label (join " " prompts) 80))
+                            prompt-label (when prompt-text
+                                           (str "\\n" (escape-label prompt-text)))]]
                   (format "  %s [label=\"%s%s%s\"];\n"
                           (quote-id id) display-name (if action (str "\\n(" action ")") "") (or prompt-label ""))))
          "\n  // transitions\n"
@@ -45,7 +55,7 @@
                 (for [{[from to] "id" label "label" desc "description"} xitions
                       :let [texts (filter seq [label desc])
                             text (if (seq texts) (join "\\n" texts) to)
-                            edge-label (string-replace text "\n" "\\n")]]
+                            edge-label (escape-label text)]]
                   (format "  %s -> %s [label=\"%s\"];\n"
                           (quote-id (if (= from "start") "start" from))
                           (quote-id (if (= to "end") "end" to))
@@ -93,11 +103,21 @@
             :or {fsm-id "fsm" states [] xitions []}} expanded-fsm
            title-text (or fsm-desc (some->> fsm-prompts (join "\\n")))
            quote-id (fn [id] (str "\"" id "\""))
+           escape-label (fn [s]
+                          (-> s
+                              (string-replace "\"" "\\\"")
+                              (string-replace "\n" "\\n")))
+           truncate-label (fn [s max-len]
+                            (if (> (count s) max-len)
+                              (str (subs s 0 max-len) "...")
+                              s))
            hat-state-ids (set (map #(get % "id") hat-states))
            render-state (fn [{id "id" desc "description" action "action" prompts "prompts"}]
                           (let [display-name (or desc id)
-                                prompt-label (when (seq prompts)
-                                               (str "\\n" (string-replace (join "\\n" prompts) "\n" "\\n")))]
+                                prompt-text (when (seq prompts)
+                                              (truncate-label (join " " prompts) 80))
+                                prompt-label (when prompt-text
+                                               (str "\\n" (escape-label prompt-text)))]
                             (format "    %s [label=\"%s%s%s\"];\n"
                                     (quote-id id) display-name
                                     (if action (str "\\n(" action ")") "")
@@ -142,7 +162,7 @@
                    (for [{[from to] "id" label "label" desc "description"} xitions
                          :let [texts (filter seq [label desc])
                                text (if (seq texts) (join "\\n" texts) to)
-                               edge-label (string-replace text "\n" "\\n")]]
+                               edge-label (escape-label text)]]
                      (format "  %s -> %s [label=\"%s\"];\n"
                              (quote-id (if (= from "start") "start" from))
                              (quote-id (if (= to "end") "end" to))
