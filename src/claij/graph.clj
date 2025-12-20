@@ -38,7 +38,6 @@
         quote-id (fn [id] (str "\"" id "\""))]
     (str "digraph \"" fsm-id "\" {\n"
          "  rankdir=TB;\n"
-         "  splines=curved;\n"
          "  node [shape=box, style=rounded, fontname=\"Helvetica\", fontsize=10];\n"
          "  edge [fontname=\"Helvetica\", fontsize=9];\n"
          (when title-text
@@ -138,7 +137,6 @@
                                     (or prompt-label ""))))]
        (str "digraph \"" fsm-id "\" {\n"
             "  rankdir=TB;\n"
-            "  splines=curved;\n"
             "  node [shape=box, style=rounded, fontname=\"Helvetica\", fontsize=10];\n"
             "  edge [fontname=\"Helvetica\", fontsize=9];\n"
             (when title-text
