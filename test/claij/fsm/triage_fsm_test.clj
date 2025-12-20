@@ -67,7 +67,7 @@
     (let [result (atom nil)
           handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
           f2 (triage-action {} {} {"schema" [:map]} {})
-          context {:store nil :service "test" :model "test"}
+          context {:store nil :llm/service "test" :llm/model "test"}
           event {"document" "Please review my code"}]
       (with-redefs [store/fsm-list-all (fn [_] [])]
         (f2 context event [] handler))
@@ -84,7 +84,7 @@
           llm-called (atom nil)
           handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
           f2 (triage-action {} {} {"schema" [:map ["fsm-id" :string]]} {})
-          context {:store nil :service "openrouter" :model "openai/gpt-5.2-chat"}
+          context {:store nil :llm/service "openrouter" :llm/model "openai/gpt-5.2-chat"}
           event {"document" "Please review my code"}
           mock-fsms [{"id" "code-review" "version" 1 "description" "Reviews code"}
                      {"id" "test-gen" "version" 2 "description" "Generates tests"}]]

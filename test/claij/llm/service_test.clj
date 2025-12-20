@@ -3,6 +3,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [cheshire.core :as json]
+   [clj-http.client :as http]
    [claij.llm.service :as svc]))
 
 ;;------------------------------------------------------------------------------
@@ -242,6 +243,67 @@
 ;;------------------------------------------------------------------------------
 ;; Integration Test (requires Ollama running)
 ;;------------------------------------------------------------------------------
+
+(deftest test-call-llm-sync
+  (testing "Synchronous call with mocked HTTP"
+    (with-redefs [svc/get-env (constantly "test-key")
+                  http/post (fn [url opts]
+                                         (is (= "http://prognathodon:11434/v1/chat/completions" url))
+                                         {:body {:choices [{:message {:content "Mocked response"}}]}})]
+      (let [response (svc/call-llm-sync test-registry
+                                        "ollama:local"
+                                        "mistral:7b"
+                                        simple-messages)]
+        (is (= "Mocked response" response)))))
+
+  (testing "Anthropic strategy parsing"
+    (with-redefs [svc/get-env (constantly "test-key")
+                  http/post (fn [_url _opts]
+                                         {:body {:content [{:type "text" :text "Anthropic response"}]}})]
+      (let [response (svc/call-llm-sync test-registry
+                                        "anthropic"
+                                        "claude-sonnet-4-20250514"
+                                        simple-messages)]
+        (is (= "Anthropic response" response)))))
+
+  (testing "Google strategy parsing"
+    (with-redefs [svc/get-env (constantly "test-key")
+                  http/post (fn [_url _opts]
+                                         {:body {:candidates [{:content {:parts [{:text "Google response"}]}}]}})]
+      (let [response (svc/call-llm-sync test-registry
+                                        "google"
+                                        "gemini-2.0-flash"
+                                        simple-messages)]
+        (is (= "Google response" response))))))
+
+(deftest test-call-llm-async
+  (testing "Async call with mocked HTTP - success"
+    (let [result (promise)]
+      (with-redefs [svc/get-env (constantly "test-key")
+                    http/post (fn [_url opts success-fn _error-fn]
+                                           (success-fn {:body "{\"choices\":[{\"message\":{\"content\":\"Async response\"}}]}"}))]
+        (svc/call-llm-async test-registry
+                            "ollama:local"
+                            "mistral:7b"
+                            simple-messages
+                            (fn [content] (deliver result content))))
+      (is (= "Async response" (deref result 1000 :timeout)))))
+
+  (testing "Async call with mocked HTTP - error callback"
+    (let [result (promise)
+          test-exception (Exception. "Connection refused")]
+      (with-redefs [svc/get-env (constantly "test-key")
+                    http/post (fn [_url _opts _success-fn error-fn]
+                                           (error-fn test-exception))]
+        (svc/call-llm-async test-registry
+                            "ollama:local"
+                            "mistral:7b"
+                            simple-messages
+                            (fn [_] (deliver result :should-not-happen))
+                            {:error (fn [err] (deliver result err))}))
+      (let [err (deref result 1000 :timeout)]
+        (is (= "request-failed" (:error err)))
+        (is (= test-exception (:exception err)))))))
 
 (deftest ^:integration test-ollama-live
   (testing "Live call to Ollama"
