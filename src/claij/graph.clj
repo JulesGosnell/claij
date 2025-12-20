@@ -123,8 +123,8 @@
                                     (quote-id id) display-name
                                     (if action (str "\\n(" action ")") "")
                                     (or prompt-label ""))))
-           ;; Find reverse edges (for bidirectional detection)
-           edge-pairs (set (map (fn [{[from to] "id"}] #{from to}) xitions))
+           ;; Build set of reverse edges for bidirectional detection
+           edge-set (set (map #(get % "id") xitions))
            seen-pairs (atom #{})]
        (str "digraph \"" fsm-id "\" {\n"
             "  rankdir=TB;\n"
@@ -170,17 +170,21 @@
                                edge-label (escape-label text)
                                pair #{from to}
                                ;; Check if reverse edge exists (bidirectional)
-                               has-reverse? (some #(= (get % "id") [to from]) xitions)
-                               ;; Add constraint=false to second edge of bidirectional pair
+                               has-reverse? (edge-set [to from])
+                               ;; Use ports for second edge of bidirectional pair
                                is-second? (and has-reverse? (@seen-pairs pair))
-                               _ (swap! seen-pairs conj pair)]]
+                               _ (swap! seen-pairs conj pair)
+                               from-id (if (= from "start") "start" from)
+                               to-id (if (= to "end") "end" to)]]
                      (if is-second?
-                       (format "  %s -> %s [label=\"%s\", constraint=false];\n"
-                               (quote-id (if (= from "start") "start" from))
-                               (quote-id (if (= to "end") "end" to))
+                       ;; Second edge: use west ports and constraint=false
+                       (format "  %s:w -> %s:w [label=\"%s\", constraint=false];\n"
+                               (quote-id from-id)
+                               (quote-id to-id)
                                edge-label)
+                       ;; First edge or non-bidirectional: normal
                        (format "  %s -> %s [label=\"%s\"];\n"
-                               (quote-id (if (= from "start") "start" from))
-                               (quote-id (if (= to "end") "end" to))
+                               (quote-id from-id)
+                               (quote-id to-id)
                                edge-label))))
             "}\n")))))
