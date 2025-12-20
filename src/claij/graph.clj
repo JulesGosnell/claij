@@ -126,6 +126,10 @@
                               s))
            quote-id (fn [id] (str "\"" id "\""))
            hat-state-ids (set (map #(get % "id") hat-states))
+           ;; Find bidirectional edge pairs (A->B and B->A)
+           edge-set (set (map #(get % "id") xitions))
+           bidirectional? (fn [[from to]]
+                            (contains? edge-set [to from]))
            render-state (fn [{id "id" desc "description" action "action" prompts "prompts"}]
                           (let [;; Use description if available, otherwise id
                                 display-name (or desc id)
@@ -176,13 +180,21 @@
                           "  }\n")))
             "\n  // transitions\n"
             (apply str
-                   (for [{[from to] "id" label "label" desc "description"} xitions
+                   (for [{[from to :as edge-id] "id" label "label" desc "description"} xitions
                          :let [;; Only show label if explicitly provided
                                texts (filter seq [label desc])
                                edge-label (when (seq texts) (escape-label (join "\\n" texts)))
                                from-id (quote-id (if (= from "start") "start" from))
-                               to-id (quote-id (if (= to "end") "end" to))]]
+                               to-id (quote-id (if (= to "end") "end" to))
+                               ;; For bidirectional edges, use ports to separate them
+                               ;; "Forward" edge (alphabetically first) uses east, "back" uses west
+                               bidir (bidirectional? edge-id)
+                               forward-edge (when bidir (neg? (compare from to)))
+                               port-suffix (cond
+                                             (not bidir) ""
+                                             forward-edge ":e"
+                                             :else ":w")]]
                      (if edge-label
-                       (format "  %s -> %s [label=\"%s\"];\n" from-id to-id edge-label)
-                       (format "  %s -> %s;\n" from-id to-id))))
+                       (format "  %s%s -> %s%s [label=\"%s\"];\n" from-id port-suffix to-id port-suffix edge-label)
+                       (format "  %s%s -> %s%s;\n" from-id port-suffix to-id port-suffix))))
             "}\n")))))
