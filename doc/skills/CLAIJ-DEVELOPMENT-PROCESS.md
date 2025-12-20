@@ -80,12 +80,30 @@ Comprehensive guide for developing CLAIJ features. Covers story-driven workflow,
 
 ### Phase 6: Documentation
 
-1. Update README announcements table
-2. Update story with final commits
-3. Close story: remove `status:doing`, add `status:done`
-4. Comment closing any unchecked items in story comments
+1. Update README announcements table with major advances
+2. Update any affected documentation (ARCHITECTURE.md, API docs, etc.)
+3. Update story with final commits
+4. Close story: remove `status:doing`, add `status:done`
+5. Comment closing any unchecked items in story comments
 
 **Commit:** `#<issue> docs: <description>`
+
+### Phase 7: Retrospective
+
+At the end of every story, Claude performs a brief retro:
+
+**Questions to answer:**
+1. What went well?
+2. What went badly or was harder than expected?
+3. How could we have done it better?
+4. What changes should be made to skills/processes?
+
+**Actions:**
+- Add retro notes as final comment on the GitHub issue
+- Propose skill updates if patterns emerged
+- Note any technical debt created
+
+**This is automatic** - Claude initiates this without being asked.
 
 ---
 
