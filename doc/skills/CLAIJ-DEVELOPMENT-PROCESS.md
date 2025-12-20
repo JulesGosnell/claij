@@ -121,9 +121,29 @@ At the end of every story, Claude performs a brief retro:
 ### Critical Rules
 
 1. **NEVER git push** - Claude commits locally, Jules reviews and pushes
-2. **Use `git mv`** not `mv` for file moves (preserves history)
-3. **Atomic commits** - one logical change per commit
-4. **Reference issue number** in every commit
+2. **NEVER git merge** - Claude works on branches, Jules merges
+3. **Use `git mv`** not `mv` for file moves (preserves history)
+4. **Atomic commits** - one logical change per commit
+5. **Reference issue number** in every commit
+
+### Incremental Change Strategy
+
+**Always prefer small, tested increments over big-bang changes.**
+
+1. **Default approach**: Make small change → test → commit → repeat
+   - Each step should leave tests passing
+   - If tests break, the change is too big
+
+2. **If incremental is impossible**: Drop into a "rabbit hole"
+   - Improve production code structure first (small incremental steps)
+   - This is an opportunity to improve testing and coverage
+   - Once structure allows, return to original task
+
+3. **If still impossible**: Feature branch approach
+   - Create feature branch: `git checkout -b feature/<name>`
+   - Do the work on branch with commits
+   - Ask Jules to merge and push at end of story
+   - **Only Jules merges branches**
 
 ### Pre-Push Checklist
 
