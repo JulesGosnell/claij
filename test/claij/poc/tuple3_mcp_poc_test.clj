@@ -22,6 +22,27 @@
    [claij.llm :as llm]))
 
 ;;------------------------------------------------------------------------------
+;; Service Availability Checks
+;;------------------------------------------------------------------------------
+
+(defn env-key-set? [key]
+  (not (str/blank? (System/getenv key))))
+
+(defn google-available? [] (env-key-set? "GOOGLE_API_KEY"))
+(defn anthropic-available? [] (env-key-set? "ANTHROPIC_API_KEY"))
+(defn openrouter-available? [] (env-key-set? "OPENROUTER_API_KEY"))
+(defn xai-available? [] (env-key-set? "XAI_API_KEY"))
+
+(defmacro when-service-available
+  "Run test body only if service is available, otherwise log warning and skip"
+  [available-fn service-name env-var & body]
+  `(if (~available-fn)
+     (do ~@body)
+     (do
+       (println (str "\n⚠️  SKIPPING: " ~service-name " - " ~env-var " not set"))
+       (is true "Skipped - API key not configured"))))
+
+;;------------------------------------------------------------------------------
 ;; Tuple-3 System Prompt (extracted from fsm.clj for reuse)
 ;;------------------------------------------------------------------------------
 
@@ -163,87 +184,91 @@ CRITICAL: Your entire response must be ONLY the EDN data structure.")
 
 (deftest ^:integration test-tuple3-tool-calls-claude
   (testing "Claude emits tool_calls via tuple-3 protocol"
-    (let [input-doc {"task" "Calculate: 42+17, 6*7, 100+23. Then sum all results."
-                     "available_tools" [calculator-mcp-tool]}
-          messages (make-tuple3-messages
-                    ["You are a calculator assistant."
-                     "Use the available tools to compute values."
-                     "When you need to compute, emit tool_calls."
-                     "When you have all results, emit final answer with the sum."]
-                    []
-                    TaskInput
-                    input-doc
-                    OutputSchema)
-          response (call-llm-sync "anthropic" "claude-sonnet-4-20250514" messages)]
-      (is (m/validate OutputSchema response)
-          (str "Response should match OutputSchema: " (pr-str response)))
-      (is (= "tool_calls" (get response "id"))
-          "First response should be tool_calls")
-      (is (>= (count (get response "calls")) 3)
-          "Should request at least 3 tool calls"))))
+    (when-service-available anthropic-available? "Anthropic/Claude" "ANTHROPIC_API_KEY"
+                            (let [input-doc {"task" "Calculate: 42+17, 6*7, 100+23. Then sum all results."
+                                             "available_tools" [calculator-mcp-tool]}
+                                  messages (make-tuple3-messages
+                                            ["You are a calculator assistant."
+                                             "Use the available tools to compute values."
+                                             "When you need to compute, emit tool_calls."
+                                             "When you have all results, emit final answer with the sum."]
+                                            []
+                                            TaskInput
+                                            input-doc
+                                            OutputSchema)
+                                  response (call-llm-sync "anthropic" "claude-sonnet-4-20250514" messages)]
+                              (is (m/validate OutputSchema response)
+                                  (str "Response should match OutputSchema: " (pr-str response)))
+                              (is (= "tool_calls" (get response "id"))
+                                  "First response should be tool_calls")
+                              (is (>= (count (get response "calls")) 3)
+                                  "Should request at least 3 tool calls")))))
 
 (deftest ^:integration test-tuple3-tool-calls-gemini
   (testing "Gemini emits tool_calls via tuple-3 protocol"
-    (let [input-doc {"task" "Calculate: 42+17, 6*7, 100+23. Then sum all results."
-                     "available_tools" [calculator-mcp-tool]}
-          messages (make-tuple3-messages
-                    ["You are a calculator assistant."
-                     "Use the available tools to compute values."
-                     "When you need to compute, emit tool_calls."
-                     "When you have all results, emit final answer with the sum."]
-                    []
-                    TaskInput
-                    input-doc
-                    OutputSchema)
-          response (call-llm-sync "google" "gemini-2.0-flash" messages)]
-      (is (m/validate OutputSchema response)
-          (str "Response should match OutputSchema: " (pr-str response)))
-      (is (= "tool_calls" (get response "id"))
-          "First response should be tool_calls")
-      (is (>= (count (get response "calls")) 3)
-          "Should request at least 3 tool calls"))))
+    (when-service-available google-available? "Google/Gemini" "GOOGLE_API_KEY"
+                            (let [input-doc {"task" "Calculate: 42+17, 6*7, 100+23. Then sum all results."
+                                             "available_tools" [calculator-mcp-tool]}
+                                  messages (make-tuple3-messages
+                                            ["You are a calculator assistant."
+                                             "Use the available tools to compute values."
+                                             "When you need to compute, emit tool_calls."
+                                             "When you have all results, emit final answer with the sum."]
+                                            []
+                                            TaskInput
+                                            input-doc
+                                            OutputSchema)
+                                  response (call-llm-sync "google" "gemini-2.0-flash" messages)]
+                              (is (m/validate OutputSchema response)
+                                  (str "Response should match OutputSchema: " (pr-str response)))
+                              (is (= "tool_calls" (get response "id"))
+                                  "First response should be tool_calls")
+                              (is (>= (count (get response "calls")) 3)
+                                  "Should request at least 3 tool calls")))))
 
 (deftest ^:integration test-tuple3-tool-calls-openai
   (testing "OpenAI emits tool_calls via tuple-3 protocol"
-    (let [input-doc {"task" "Calculate: 42+17, 6*7, 100+23. Then sum all results."
-                     "available_tools" [calculator-mcp-tool]}
-          messages (make-tuple3-messages
-                    ["You are a calculator assistant."
-                     "Use the available tools to compute values."
-                     "When you need to compute, emit tool_calls."
-                     "When you have all results, emit final answer with the sum."]
-                    []
-                    TaskInput
-                    input-doc
-                    OutputSchema)
-          response (call-llm-sync "openrouter" "openai/gpt-4o" messages)]
-      (is (m/validate OutputSchema response)
-          (str "Response should match OutputSchema: " (pr-str response)))
-      (is (= "tool_calls" (get response "id"))
-          "First response should be tool_calls")
-      (is (>= (count (get response "calls")) 3)
-          "Should request at least 3 tool calls"))))
+    (when-service-available openrouter-available? "OpenRouter/OpenAI" "OPENROUTER_API_KEY"
+                            (let [input-doc {"task" "Calculate: 42+17, 6*7, 100+23. Then sum all results."
+                                             "available_tools" [calculator-mcp-tool]}
+                                  messages (make-tuple3-messages
+                                            ["You are a calculator assistant."
+                                             "Use the available tools to compute values."
+                                             "When you need to compute, emit tool_calls."
+                                             "When you have all results, emit final answer with the sum."]
+                                            []
+                                            TaskInput
+                                            input-doc
+                                            OutputSchema)
+                                  response (call-llm-sync "openrouter" "openai/gpt-4o" messages)]
+                              (is (m/validate OutputSchema response)
+                                  (str "Response should match OutputSchema: " (pr-str response)))
+                              (is (= "tool_calls" (get response "id"))
+                                  "First response should be tool_calls")
+                              (is (>= (count (get response "calls")) 3)
+                                  "Should request at least 3 tool calls")))))
 
 (deftest ^:integration test-tuple3-tool-calls-grok
   (testing "Grok emits tool_calls via tuple-3 protocol"
-    (let [input-doc {"task" "Calculate: 42+17, 6*7, 100+23. Then sum all results."
-                     "available_tools" [calculator-mcp-tool]}
-          messages (make-tuple3-messages
-                    ["You are a calculator assistant."
-                     "Use the available tools to compute values."
-                     "When you need to compute, emit tool_calls."
-                     "When you have all results, emit final answer with the sum."]
-                    []
-                    TaskInput
-                    input-doc
-                    OutputSchema)
-          response (call-llm-sync "xai" "grok-3-beta" messages)]
-      (is (m/validate OutputSchema response)
-          (str "Response should match OutputSchema: " (pr-str response)))
-      (is (= "tool_calls" (get response "id"))
-          "First response should be tool_calls")
-      (is (>= (count (get response "calls")) 3)
-          "Should request at least 3 tool calls"))))
+    (when-service-available xai-available? "xAI/Grok" "XAI_API_KEY"
+                            (let [input-doc {"task" "Calculate: 42+17, 6*7, 100+23. Then sum all results."
+                                             "available_tools" [calculator-mcp-tool]}
+                                  messages (make-tuple3-messages
+                                            ["You are a calculator assistant."
+                                             "Use the available tools to compute values."
+                                             "When you need to compute, emit tool_calls."
+                                             "When you have all results, emit final answer with the sum."]
+                                            []
+                                            TaskInput
+                                            input-doc
+                                            OutputSchema)
+                                  response (call-llm-sync "xai" "grok-3-beta" messages)]
+                              (is (m/validate OutputSchema response)
+                                  (str "Response should match OutputSchema: " (pr-str response)))
+                              (is (= "tool_calls" (get response "id"))
+                                  "First response should be tool_calls")
+                              (is (>= (count (get response "calls")) 3)
+                                  "Should request at least 3 tool calls")))))
 
 ;;------------------------------------------------------------------------------
 ;; Multi-turn Piggyback Test
@@ -251,36 +276,37 @@ CRITICAL: Your entire response must be ONLY the EDN data structure.")
 
 (deftest ^:integration test-tuple3-piggyback-conversation
   (testing "Full conversation: tool_calls -> execute -> final answer (Claude)"
-    (let [input-doc-1 {"task" "Calculate: 42+17, 6*7, 100+23. Then sum all results."
-                       "available_tools" [calculator-mcp-tool]}
-          messages-1 (make-tuple3-messages
-                      ["You are a calculator assistant."
-                       "Use the available tools to compute values."
-                       "When you need to compute, emit tool_calls."
-                       "When you have all results, emit final answer with the sum."]
-                      []
-                      TaskInput
-                      input-doc-1
-                      OutputSchema)
-          response-1 (call-llm-sync "anthropic" "claude-sonnet-4-20250514" messages-1)
-          _ (is (= "tool_calls" (get response-1 "id")) "Turn 1 should be tool_calls")
-          tool-results (mapv execute-tool (get response-1 "calls"))
-          trail [{"role" "user" "content" (pr-str [TaskInput input-doc-1 OutputSchema])}
-                 {"role" "assistant" "content" (pr-str response-1)}]
-          input-doc-2 {"task" "Here are your tool results. Now provide the final sum."
-                       "tool_results" tool-results}
-          messages-2 (make-tuple3-messages
-                      ["You are a calculator assistant."
-                       "The tool results are provided."
-                       "Sum up all the results and provide the final answer."]
-                      trail
-                      ToolResultsInput
-                      input-doc-2
-                      OutputSchema)
-          response-2 (call-llm-sync "anthropic" "claude-sonnet-4-20250514" messages-2)]
-      (is (m/validate OutputSchema response-2)
-          (str "Response 2 should match OutputSchema: " (pr-str response-2)))
-      (is (= "answer" (get response-2 "id"))
-          "Turn 2 should be final answer")
-      (is (= 224 (get response-2 "value"))
-          "Final answer should be 224 (59 + 42 + 123)"))))
+    (when-service-available anthropic-available? "Anthropic/Claude" "ANTHROPIC_API_KEY"
+                            (let [input-doc-1 {"task" "Calculate: 42+17, 6*7, 100+23. Then sum all results."
+                                               "available_tools" [calculator-mcp-tool]}
+                                  messages-1 (make-tuple3-messages
+                                              ["You are a calculator assistant."
+                                               "Use the available tools to compute values."
+                                               "When you need to compute, emit tool_calls."
+                                               "When you have all results, emit final answer with the sum."]
+                                              []
+                                              TaskInput
+                                              input-doc-1
+                                              OutputSchema)
+                                  response-1 (call-llm-sync "anthropic" "claude-sonnet-4-20250514" messages-1)
+                                  _ (is (= "tool_calls" (get response-1 "id")) "Turn 1 should be tool_calls")
+                                  tool-results (mapv execute-tool (get response-1 "calls"))
+                                  trail [{"role" "user" "content" (pr-str [TaskInput input-doc-1 OutputSchema])}
+                                         {"role" "assistant" "content" (pr-str response-1)}]
+                                  input-doc-2 {"task" "Here are your tool results. Now provide the final sum."
+                                               "tool_results" tool-results}
+                                  messages-2 (make-tuple3-messages
+                                              ["You are a calculator assistant."
+                                               "The tool results are provided."
+                                               "Sum up all the results and provide the final answer."]
+                                              trail
+                                              ToolResultsInput
+                                              input-doc-2
+                                              OutputSchema)
+                                  response-2 (call-llm-sync "anthropic" "claude-sonnet-4-20250514" messages-2)]
+                              (is (m/validate OutputSchema response-2)
+                                  (str "Response 2 should match OutputSchema: " (pr-str response-2)))
+                              (is (= "answer" (get response-2 "id"))
+                                  "Turn 2 should be final answer")
+                              (is (= 224 (get response-2 "value"))
+                                  "Final answer should be 224 (59 + 42 + 123)")))))

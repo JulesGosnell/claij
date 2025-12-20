@@ -22,12 +22,16 @@
    - Fine-tuned models
    - Smaller/faster models for cost optimization
    
+   PREREQUISITES:
+   - Ollama must be running on localhost:11434
+   - Cloud provider tests require respective API keys
+   
    Current validated services:
    - anthropic / claude-sonnet-4-20250514
    - google / gemini-2.0-flash
    - openrouter / openai/gpt-4o
    - xai / grok-3-beta
-   - ollama:local / mistral:7b (if running)"
+   - ollama:local / mistral:7b, qwen2.5-coder:7b"
   (:require
    [clojure.test :refer [deftest testing is]]
    [malli.core :as m]
@@ -55,6 +59,29 @@
   "Schema for LLM response containing tool calls"
   [:map
    [:tool_calls [:vector ToolCall]]])
+
+;;------------------------------------------------------------------------------
+;; Service Availability Checks
+;;------------------------------------------------------------------------------
+
+(defn env-key-set?
+  "Check if an environment variable is set and non-empty"
+  [key]
+  (not (clojure.string/blank? (System/getenv key))))
+
+(defn google-available? [] (env-key-set? "GOOGLE_API_KEY"))
+(defn anthropic-available? [] (env-key-set? "ANTHROPIC_API_KEY"))
+(defn openrouter-available? [] (env-key-set? "OPENROUTER_API_KEY"))
+(defn xai-available? [] (env-key-set? "XAI_API_KEY"))
+
+(defmacro when-service-available
+  "Run test body only if service is available, otherwise log warning and skip"
+  [available-fn service-name env-var & body]
+  `(if (~available-fn)
+     (do ~@body)
+     (do
+       (println (str "\n⚠️  SKIPPING: " ~service-name " - " ~env-var " not set"))
+       (is true "Skipped - API key not configured"))))
 
 ;;------------------------------------------------------------------------------
 ;; Test Prompt
@@ -86,7 +113,7 @@ Respond ONLY with an EDN data structure containing your tool calls. No prose. Ex
 {:tool_calls [{:id \"call_1\" :name \"calculator\" :arguments {:op \"add\" :a 1 :b 2}}]}")
 
 ;;------------------------------------------------------------------------------
-;; Helper
+;; Helpers
 ;;------------------------------------------------------------------------------
 
 (defn call-llm-sync
@@ -118,53 +145,61 @@ Respond ONLY with an EDN data structure containing your tool calls. No prose. Ex
     (is (contains? ops "multiply") "Should include multiply operation")))
 
 ;;------------------------------------------------------------------------------
-;; Integration Tests
+;; Cloud Provider Integration Tests (skip if API key missing)
 ;;------------------------------------------------------------------------------
 
 (deftest ^:integration test-claude-tool-calling
   (testing "Claude emits valid tool calls from MCP schema"
-    (let [response (call-llm-sync "anthropic" "claude-sonnet-4-20250514")]
-      (validate-tool-calls response))))
+    (when-service-available anthropic-available? "Anthropic/Claude" "ANTHROPIC_API_KEY"
+                            (let [response (call-llm-sync "anthropic" "claude-sonnet-4-20250514")]
+                              (validate-tool-calls response)))))
 
 (deftest ^:integration test-gemini-tool-calling
   (testing "Gemini emits valid tool calls from MCP schema"
-    (let [response (call-llm-sync "google" "gemini-2.0-flash")]
-      (validate-tool-calls response))))
+    (when-service-available google-available? "Google/Gemini" "GOOGLE_API_KEY"
+                            (let [response (call-llm-sync "google" "gemini-2.0-flash")]
+                              (validate-tool-calls response)))))
 
 (deftest ^:integration test-openai-tool-calling
   (testing "OpenAI (via OpenRouter) emits valid tool calls from MCP schema"
-    (let [response (call-llm-sync "openrouter" "openai/gpt-4o")]
-      (validate-tool-calls response))))
+    (when-service-available openrouter-available? "OpenRouter/OpenAI" "OPENROUTER_API_KEY"
+                            (let [response (call-llm-sync "openrouter" "openai/gpt-4o")]
+                              (validate-tool-calls response)))))
 
 (deftest ^:integration test-grok-tool-calling
   (testing "Grok emits valid tool calls from MCP schema (no native tool API!)"
-    (let [response (call-llm-sync "xai" "grok-3-beta")]
-      (validate-tool-calls response))))
+    (when-service-available xai-available? "xAI/Grok" "XAI_API_KEY"
+                            (let [response (call-llm-sync "xai" "grok-3-beta")]
+                              (validate-tool-calls response)))))
 
 (deftest ^:integration test-all-providers-consistent
   (testing "All providers produce structurally identical responses"
-    (let [claude (call-llm-sync "anthropic" "claude-sonnet-4-20250514")
-          gemini (call-llm-sync "google" "gemini-2.0-flash")
-          openai (call-llm-sync "openrouter" "openai/gpt-4o")
-          grok (call-llm-sync "xai" "grok-3-beta")]
+    (when-service-available
+     #(and (anthropic-available?) (google-available?)
+           (openrouter-available?) (xai-available?))
+     "All cloud providers" "ANTHROPIC_API_KEY, GOOGLE_API_KEY, OPENROUTER_API_KEY, XAI_API_KEY"
+     (let [claude (call-llm-sync "anthropic" "claude-sonnet-4-20250514")
+           gemini (call-llm-sync "google" "gemini-2.0-flash")
+           openai (call-llm-sync "openrouter" "openai/gpt-4o")
+           grok (call-llm-sync "xai" "grok-3-beta")]
 
-      ;; All should have same structure
-      (is (= (count (:tool_calls claude))
-             (count (:tool_calls gemini))
-             (count (:tool_calls openai))
-             (count (:tool_calls grok)))
-          "All providers should return same number of tool calls")
+        ;; All should have same structure
+       (is (= (count (:tool_calls claude))
+              (count (:tool_calls gemini))
+              (count (:tool_calls openai))
+              (count (:tool_calls grok)))
+           "All providers should return same number of tool calls")
 
-      ;; All should use same tool
-      (is (every? #(= "calculator" (:name %))
-                  (concat (:tool_calls claude)
-                          (:tool_calls gemini)
-                          (:tool_calls openai)
-                          (:tool_calls grok)))
-          "All tool calls should reference 'calculator' tool"))))
+        ;; All should use same tool
+       (is (every? #(= "calculator" (:name %))
+                   (concat (:tool_calls claude)
+                           (:tool_calls gemini)
+                           (:tool_calls openai)
+                           (:tool_calls grok)))
+           "All tool calls should reference 'calculator' tool")))))
 
 ;;------------------------------------------------------------------------------
-;; Ollama Tests (Local Inference)
+;; Ollama Tests (Local Inference - Ollama must be running!)
 ;;------------------------------------------------------------------------------
 
 (deftest ^:integration test-ollama-mistral-tool-calling
