@@ -119,13 +119,16 @@
            (catch Throwable t
              (log/error t "Error processing LLM response"))))
        (fn [exception]
-         (try
-           (let [data (.getData exception)
-                 body (when data (:body data))
-                 m (when body (json/parse-string body true))]
-             (log/error (str "      [X] LLM Request Failed: " (or (get m :error) exception)))
-             (when error (error (or m {:error "request-failed" :exception exception}))))
-           (catch Throwable t
-             (log/error t "Error handling LLM failure"))))))))
+         (let [data (ex-data exception)
+               body (when data (:body data))
+               m (when body
+                   (try (json/parse-string body true)
+                        (catch Exception _ nil)))]
+           (log/error (str "      [X] LLM Request Failed: "
+                           (or (:error m) (.getMessage exception))))
+           (when error
+             (error (or m {:error "request-failed"
+                           :message (.getMessage exception)
+                           :exception-type (type exception)})))))))))
 
 

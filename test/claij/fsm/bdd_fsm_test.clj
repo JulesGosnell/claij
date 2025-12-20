@@ -125,13 +125,14 @@
       (is (contains? ctx :llm/service))
       (is (contains? ctx :llm/model))
       (is (contains? ctx :hats))
-      (is (= "openrouter" (:llm/service ctx)))))
+      (is (= "ollama:local" (:llm/service ctx)))
+      (is (= "qwen2.5-coder:7b" (:llm/model ctx)))))
 
   (testing "Creates context with custom values"
     (let [ctx (make-bdd-context {:service "anthropic"
-                                 :model "claude-3-opus"})]
+                                 :model "claude-sonnet-4-20250514"})]
       (is (= "anthropic" (:llm/service ctx)))
-      (is (= "claude-3-opus" (:llm/model ctx)))))
+      (is (= "claude-sonnet-4-20250514" (:llm/model ctx)))))
 
   (testing "Context includes hat registry"
     (let [ctx (make-bdd-context {})]
@@ -140,8 +141,8 @@
   (testing "Context includes required actions"
     (let [ctx (make-bdd-context {})]
       (is (contains? (:id->action ctx) "llm"))
-      (is (contains? (:id->action ctx) "end"))
-      (is (contains? (:id->action ctx) "openapi-call")))))
+      (is (contains? (:id->action ctx) "openapi-call"))
+      (is (contains? (:id->action ctx) "end")))))
 
 ;;; ============================================================
 ;;; Actions Tests
