@@ -181,8 +181,10 @@
              ;; Prompts section
              (when-let [prompts (get fsm "prompts")]
                [:div.section
-                [:h2 "Prompts"]
-                [:pre (with-out-str (clojure.pprint/pprint prompts))]])
+                [:h2 (str "Prompts (" (count prompts) ")")]
+                [:ol
+                 (for [prompt prompts]
+                   [:li prompt])]])
 
              ;; Schemas section
              (when-let [schemas (get fsm "schemas")]
