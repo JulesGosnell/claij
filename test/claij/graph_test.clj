@@ -114,13 +114,55 @@
 
   (testing "fsm->dot-with-hats"
 
-    (testing "expands hat-generated states"
-      (let [;; Mock hat-maker that adds a service state with description
+    (testing "expands hat-generated states with prompts"
+      (let [;; Mock hat-maker that adds a service state with prompts (long to trigger truncation)
             mock-hat-maker (fn [state-id _config]
                              (fn [context]
                                [context
                                 {"states" [{"id" (str state-id "-svc")
                                             "description" "Mock Service"
+                                            "action" "service"
+                                            "prompts" [(apply str (repeat 100 "Long prompt text. "))]}]
+                                 "xitions" [{"id" [state-id (str state-id "-svc")] "label" "to svc"}
+                                            {"id" [(str state-id "-svc") state-id] "description" "back to parent"}]
+                                 "prompts" []}]))
+            registry (-> (claij.hat/make-hat-registry)
+                         (claij.hat/register-hat "mock" mock-hat-maker))
+            fsm {"id" "hat-fsm"
+                 "description" "Test FSM with hats"
+                 "states" [{"id" "mc" "hats" ["mock"]}]
+                 "xitions" [{"id" ["start" "mc"]}
+                            {"id" ["mc" "end"]}]}
+            dot (fsm->dot-with-hats fsm registry)]
+        ;; Should have original state (quoted)
+        (is (includes? dot "\"mc\" [label=")
+            "Original state should appear")
+        ;; Should have hat-generated state with description as label
+        (is (includes? dot "\"mc-svc\" [label=\"Mock Service")
+            "Hat-generated state should use description as label")
+        ;; Prompts should be truncated
+        (is (includes? dot "...")
+            "Long prompts should be truncated")
+        ;; Should have hat-generated transitions with labels
+        (is (includes? dot "[label=\"to svc\"]")
+            "Hat transition label should appear")
+        (is (includes? dot "[label=\"back to parent\"]")
+            "Hat transition description should appear")
+        ;; Should have cluster box with description as label
+        (is (includes? dot "subgraph cluster_mc")
+            "Hat states should be in a cluster")
+        (is (includes? dot "label=\"Mock Service\"")
+            "Cluster should use hat state description as label")
+        ;; FSM description should appear
+        (is (includes? dot "Test FSM with hats")
+            "FSM description should appear in title")))
+
+    (testing "falls back to hat label when no description"
+      (let [;; Mock hat-maker with no description
+            mock-hat-maker (fn [state-id _config]
+                             (fn [context]
+                               [context
+                                {"states" [{"id" (str state-id "-svc")
                                             "action" "service"}]
                                  "xitions" [{"id" [state-id (str state-id "-svc")]}
                                             {"id" [(str state-id "-svc") state-id]}]
@@ -132,19 +174,6 @@
                  "xitions" [{"id" ["start" "mc"]}
                             {"id" ["mc" "end"]}]}
             dot (fsm->dot-with-hats fsm registry)]
-        ;; Should have original state (quoted)
-        (is (includes? dot "\"mc\" [label=")
-            "Original state should appear")
-        ;; Should have hat-generated state with description as label
-        (is (includes? dot "\"mc-svc\" [label=\"Mock Service")
-            "Hat-generated state should use description as label")
-        ;; Should have hat-generated transitions (quoted)
-        (is (includes? dot "\"mc\" -> \"mc-svc\"")
-            "Hat-generated transition should appear")
-        (is (includes? dot "\"mc-svc\" -> \"mc\"")
-            "Hat loopback transition should appear")
-        ;; Should have cluster box with description as label
-        (is (includes? dot "subgraph cluster_mc")
-            "Hat states should be in a cluster")
-        (is (includes? dot "label=\"Mock Service\"")
-            "Cluster should use hat state description as label")))))
+        ;; Should fall back to "mc hat" for cluster label
+        (is (includes? dot "label=\"mc hat\"")
+            "Cluster should fall back to parent-id + ' hat' when no description")))))
