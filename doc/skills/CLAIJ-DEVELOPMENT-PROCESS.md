@@ -97,6 +97,9 @@ At the end of every story, Claude performs a brief retro:
 2. What went badly or was harder than expected?
 3. How could we have done it better?
 4. What changes should be made to skills/processes?
+5. Did I follow the process? If not:
+   - Does the process need improving?
+   - Or do I need to be more rigorous?
 
 **Actions:**
 - Add retro notes as final comment on the GitHub issue
