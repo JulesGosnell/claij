@@ -151,6 +151,7 @@
      :headers {"Content-Type" "text/html"}
      :body (html5
             [:head
+             [:meta {:charset "UTF-8"}]
              [:title (str "FSM: " fsm-id)]
              [:style "body { font-family: system-ui; max-width: 1200px; margin: 2em auto; padding: 1em; }
                       pre { background: #f5f5f5; padding: 1em; overflow-x: auto; border-radius: 4px; 
@@ -158,7 +159,16 @@
                       h2 { margin-top: 1.5em; border-bottom: 1px solid #ddd; padding-bottom: 0.3em; }
                       a { color: #0066cc; }
                       .nav { margin-bottom: 1em; }
-                      .section { margin-bottom: 2em; }"]]
+                      .section { margin-bottom: 2em; }
+                      table { border-collapse: collapse; width: 100%; }
+                      th, td { border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }
+                      th { background: #f9f9f9; }
+                      tr:hover { background: #f5f5f5; }
+                      .badge { display: inline-block; padding: 2px 6px; border-radius: 3px; 
+                               font-size: 0.85em; margin-right: 4px; }
+                      .badge-action { background: #e3f2fd; color: #1565c0; }
+                      .badge-hat { background: #f3e5f5; color: #7b1fa2; }
+                      .arrow { color: #666; }"]]
             [:body
              [:div.nav
               [:a {:href "/fsms"} "<< Back to Catalogue"]
@@ -180,17 +190,44 @@
                 [:h2 "Schemas"]
                 [:pre (with-out-str (clojure.pprint/pprint schemas))]])
 
-             ;; States section
+             ;; States section - as table
              (when-let [states (get fsm "states")]
                [:div.section
                 [:h2 (str "States (" (count states) ")")]
-                [:pre (with-out-str (clojure.pprint/pprint states))]])
+                [:table
+                 [:thead
+                  [:tr [:th "ID"] [:th "Description"] [:th "Action"] [:th "Hats"]]]
+                 [:tbody
+                  (for [state states]
+                    [:tr
+                     [:td [:strong (get state "id")]]
+                     [:td (get state "description" "-")]
+                     [:td [:span.badge.badge-action (get state "action" "-")]]
+                     [:td (if-let [hats (get state "hats")]
+                            (for [hat hats]
+                              [:span.badge.badge-hat
+                               (if (map? hat)
+                                 (first (keys hat))
+                                 (str hat))])
+                            "-")]])]]])
 
-             ;; Transitions section
+             ;; Transitions section - as table
              (when-let [xitions (get fsm "xitions")]
                [:div.section
                 [:h2 (str "Transitions (" (count xitions) ")")]
-                [:pre (with-out-str (clojure.pprint/pprint xitions))]])])}
+                [:table
+                 [:thead
+                  [:tr [:th "From → To"] [:th "Label"] [:th "Schema"]]]
+                 [:tbody
+                  (for [xition xitions]
+                    (let [[from to] (get xition "id")]
+                      [:tr
+                       [:td [:strong from] [:span.arrow " \u2192 "] [:strong to]]
+                       [:td (get xition "label" "-")]
+                       [:td (when-let [schema (get xition "schema")]
+                              (when (and (vector? schema)
+                                         (= :ref (first schema)))
+                                [:code (second schema)]))]]))]]])])}
     {:status 404
      :headers {"Content-Type" "text/html"}
      :body (html5
