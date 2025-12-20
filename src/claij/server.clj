@@ -155,7 +155,7 @@
              [:title (str "FSM: " fsm-id)]
              [:style "body { font-family: system-ui; max-width: 1200px; margin: 2em auto; padding: 1em; }
                       pre { background: #f5f5f5; padding: 1em; overflow-x: auto; border-radius: 4px; 
-                            max-height: 400px; overflow-y: auto; }
+                            max-height: 300px; overflow-y: auto; font-size: 0.9em; }
                       h2 { margin-top: 1.5em; border-bottom: 1px solid #ddd; padding-bottom: 0.3em; }
                       a { color: #0066cc; }
                       .nav { margin-bottom: 1em; }
@@ -164,18 +164,25 @@
                       th, td { border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }
                       th { background: #f9f9f9; }
                       tr:hover { background: #f5f5f5; }
+                      tr:target { background: #fffde7; }
                       .badge { display: inline-block; padding: 2px 6px; border-radius: 3px; 
                                font-size: 0.85em; margin-right: 4px; }
                       .badge-action { background: #e3f2fd; color: #1565c0; }
                       .badge-hat { background: #f3e5f5; color: #7b1fa2; }
-                      .arrow { color: #666; }"]]
+                      .arrow { color: #666; }
+                      .schema-name { font-weight: bold; font-family: monospace; }
+                      .schema-desc { color: #666; font-style: italic; }
+                      .schema-link { text-decoration: none; }
+                      .schema-link:hover { text-decoration: underline; }
+                      code { background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-size: 0.9em; }
+                      ol { line-height: 1.6; }"]]
             [:body
              [:div.nav
-              [:a {:href "/fsms"} "<< Back to Catalogue"]
+              [:a {:href "/fsms"} "\u2190 Back to Catalogue"]
               " | "
-              [:a {:href (str "/fsm/" fsm-id "/graph.svg")} "View SVG"]
+              [:a {:href (str "/fsm/" fsm-id "/graph.svg")} "SVG Graph"]
               " | "
-              [:a {:href (str "/fsm/" fsm-id "/document")} "View JSON"]]
+              [:a {:href (str "/fsm/" fsm-id "/document")} "JSON"]]
              [:h1 fsm-id]
 
              ;; Prompts section
@@ -186,11 +193,25 @@
                  (for [prompt prompts]
                    [:li prompt])]])
 
-             ;; Schemas section
+             ;; Schemas section - as table
              (when-let [schemas (get fsm "schemas")]
                [:div.section
-                [:h2 "Schemas"]
-                [:pre (with-out-str (clojure.pprint/pprint schemas))]])
+                [:h2 (str "Schemas (" (count schemas) ")")]
+                [:table
+                 [:thead
+                  [:tr [:th "Name"] [:th "Type"] [:th "Description"]]]
+                 [:tbody
+                  (for [[schema-name schema-def] schemas]
+                    (let [schema-type (when (vector? schema-def) (first schema-def))
+                          schema-props (when (and (vector? schema-def)
+                                                  (> (count schema-def) 1)
+                                                  (map? (second schema-def)))
+                                         (second schema-def))
+                          description (get schema-props :description)]
+                      [:tr {:id (str "schema-" schema-name)}
+                       [:td [:span.schema-name schema-name]]
+                       [:td [:code (str schema-type)]]
+                       [:td (or description [:span.schema-desc "—"])]]))]]])
 
              ;; States section - as table
              (when-let [states (get fsm "states")]
@@ -203,15 +224,15 @@
                   (for [state states]
                     [:tr
                      [:td [:strong (get state "id")]]
-                     [:td (get state "description" "-")]
-                     [:td [:span.badge.badge-action (get state "action" "-")]]
+                     [:td (get state "description" "—")]
+                     [:td [:span.badge.badge-action (get state "action" "—")]]
                      [:td (if-let [hats (get state "hats")]
                             (for [hat hats]
                               [:span.badge.badge-hat
                                (if (map? hat)
                                  (first (keys hat))
                                  (str hat))])
-                            "-")]])]]])
+                            "—")]])]]])
 
              ;; Transitions section - as table
              (when-let [xitions (get fsm "xitions")]
@@ -219,17 +240,19 @@
                 [:h2 (str "Transitions (" (count xitions) ")")]
                 [:table
                  [:thead
-                  [:tr [:th "From → To"] [:th "Label"] [:th "Schema"]]]
+                  [:tr [:th "From \u2192 To"] [:th "Label"] [:th "Schema"]]]
                  [:tbody
                   (for [xition xitions]
                     (let [[from to] (get xition "id")]
                       [:tr
                        [:td [:strong from] [:span.arrow " \u2192 "] [:strong to]]
-                       [:td (get xition "label" "-")]
+                       [:td (get xition "label" "—")]
                        [:td (when-let [schema (get xition "schema")]
                               (when (and (vector? schema)
                                          (= :ref (first schema)))
-                                [:code (second schema)]))]]))]]])])}
+                                (let [ref-name (second schema)]
+                                  [:a.schema-link {:href (str "#schema-" ref-name)}
+                                   [:code ref-name]])))]]))]]])])}
     {:status 404
      :headers {"Content-Type" "text/html"}
      :body (html5
@@ -237,7 +260,7 @@
             [:body
              [:h1 "FSM Not Found"]
              [:p (str "No FSM with id: " fsm-id)]
-             [:a {:href "/fsms"} "<< Back to Catalogue"]])}))
+             [:a {:href "/fsms"} "\u2190 Back to Catalogue"]])}))
 
 (defn fsm-document-handler [{{:keys [fsm-id]} :path-params}]
   (if-let [fsm (get fsms fsm-id)]
