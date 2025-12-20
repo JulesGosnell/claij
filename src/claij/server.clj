@@ -143,6 +143,63 @@
                  " | "
                  [:a {:href (str "/fsm/" id "/document")} "JSON"]]])]]])})
 
+(defn fsm-html-handler
+  "Return HTML page showing single FSM definition - sectioned view"
+  [{{:keys [fsm-id]} :path-params}]
+  (if-let [fsm (get fsms fsm-id)]
+    {:status 200
+     :headers {"Content-Type" "text/html"}
+     :body (html5
+            [:head
+             [:title (str "FSM: " fsm-id)]
+             [:style "body { font-family: system-ui; max-width: 1200px; margin: 2em auto; padding: 1em; }
+                      pre { background: #f5f5f5; padding: 1em; overflow-x: auto; border-radius: 4px; 
+                            max-height: 400px; overflow-y: auto; }
+                      h2 { margin-top: 1.5em; border-bottom: 1px solid #ddd; padding-bottom: 0.3em; }
+                      a { color: #0066cc; }
+                      .nav { margin-bottom: 1em; }
+                      .section { margin-bottom: 2em; }"]]
+            [:body
+             [:div.nav
+              [:a {:href "/fsms"} "<< Back to Catalogue"]
+              " | "
+              [:a {:href (str "/fsm/" fsm-id "/graph.svg")} "View SVG"]
+              " | "
+              [:a {:href (str "/fsm/" fsm-id "/document")} "View JSON"]]
+             [:h1 fsm-id]
+
+             ;; Prompts section
+             (when-let [prompts (get fsm "prompts")]
+               [:div.section
+                [:h2 "Prompts"]
+                [:pre (with-out-str (clojure.pprint/pprint prompts))]])
+
+             ;; Schemas section
+             (when-let [schemas (get fsm "schemas")]
+               [:div.section
+                [:h2 "Schemas"]
+                [:pre (with-out-str (clojure.pprint/pprint schemas))]])
+
+             ;; States section
+             (when-let [states (get fsm "states")]
+               [:div.section
+                [:h2 (str "States (" (count states) ")")]
+                [:pre (with-out-str (clojure.pprint/pprint states))]])
+
+             ;; Transitions section
+             (when-let [xitions (get fsm "xitions")]
+               [:div.section
+                [:h2 (str "Transitions (" (count xitions) ")")]
+                [:pre (with-out-str (clojure.pprint/pprint xitions))]])])}
+    {:status 404
+     :headers {"Content-Type" "text/html"}
+     :body (html5
+            [:head [:title "FSM Not Found"]]
+            [:body
+             [:h1 "FSM Not Found"]
+             [:p (str "No FSM with id: " fsm-id)]
+             [:a {:href "/fsms"} "<< Back to Catalogue"]])}))
+
 (defn fsm-document-handler [{{:keys [fsm-id]} :path-params}]
   (if-let [fsm (get fsms fsm-id)]
     {:status 200
@@ -357,19 +414,22 @@ a{color:#00ff88;font-size:1.2em}ol{line-height:2}</style></head>
             :handler list-fsms-handler}}]]
 
    ["/fsm/:fsm-id"
+    [""
+     {:get {:no-doc true
+            :parameters {:path {:fsm-id :string}}
+            :produces ["text/html"]
+            :handler fsm-html-handler}}]
     ["/document"
      {:get {:summary "Get FSM definition"
             :parameters {:path {:fsm-id :string}}
             :responses {200 {:body :map}
                         404 {:body :map}}
             :handler fsm-document-handler}}]
-
     ["/graph.svg"
      {:get {:summary "Get FSM as SVG visualization"
             :parameters {:path {:fsm-id :string}}
             :produces ["image/svg+xml"]
             :handler fsm-graph-svg-handler}}]
-
     ["/graph.dot"
      {:get {:summary "Get FSM as DOT source"
             :parameters {:path {:fsm-id :string}}
