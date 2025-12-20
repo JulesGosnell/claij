@@ -111,7 +111,7 @@ The CLAIJ FSM system enables **schema-guided multi-agent LLM workflows** where L
 
 An FSM is defined by:
 
-- **States**: Nodes representing different roles/responsibilities (MC, reviewer, BA, end, etc.)
+- **States**: Nodes representing different roles/responsibilities (Chairman, reviewer, BA, end, etc.)
 - **Transitions** (xitions): Edges between states, each backed by a `core.async` channel
 - **Schemas**: Malli definitions constraining valid transitions
 - **Actions**: Functions executed when entering a state (LLM calls, MCP services, human endpoints)
@@ -387,7 +387,7 @@ Total Work Preserved: 265,000 tokens
 
 ## Development Workflow
 
-CLAIJ's development workflow combines **Kanban-style task management** with **FSM governance** orchestrated by a **Master of Ceremonies (MC)**.
+CLAIJ's development workflow combines **Kanban-style task management** with **FSM governance** orchestrated by a **Chairman**.
 
 ### The Kanban Board
 
@@ -395,9 +395,9 @@ CLAIJ's development workflow combines **Kanban-style task management** with **FS
 Backlog → Ready-for-Analysis → Analysis → Ready-for-Dev → Dev → Done
 ```
 
-### The Master of Ceremonies (MC)
+### The Chairman
 
-The MC is a special role that orchestrates workflow transitions:
+The Chairman is a special role that orchestrates workflow transitions:
 
 1. **Story Selection**: Pick highest-priority story from Ready-for-Dev
 2. **Zone Management**: Lock/unlock code areas; queue conflicting work
@@ -406,7 +406,7 @@ The MC is a special role that orchestrates workflow transitions:
 5. **Merge Enforcement**: Validate tests pass; enforce atomic commits
 6. **Retrospective Facilitation**: Run retros when Ready-for-Dev empties
 
-The MC does not write code or make technical decisions—it facilitates the process.
+The Chairman does not write code or make technical decisions—it facilitates the process.
 
 ### The Meta-Loop
 
@@ -414,7 +414,7 @@ Triggered when **Ready-for-Dev becomes empty**:
 
 ```
 ┌─────────────────────────────────────────────────┐
-│              META-LOOP (MC-driven)              │
+│              META-LOOP (Chairman-driven)              │
 ├─────────────────────────────────────────────────┤
 │  1. Retrospective                               │
 │     - Review what caused jams/blockers          │
@@ -449,10 +449,10 @@ For each story picked from Ready-for-Dev:
 Zones are code areas (files, namespaces, functions) that get locked during active work:
 
 1. Story claims zones at start of implementation
-2. MC maintains zone lock registry
+2. Chairman maintains zone lock registry
 3. Subsequent stories that overlap locked zones are queued
 4. Zones unlocked after merge to main
-5. Queued stories automatically picked by MC after unlock
+5. Queued stories automatically picked by Chairman after unlock
 
 ---
 

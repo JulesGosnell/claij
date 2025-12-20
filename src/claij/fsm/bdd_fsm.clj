@@ -56,21 +56,21 @@
             ["id" [:= ["start" "stt"]]]
             ["audio" {:description "WAV audio bytes"} :any]]
 
-   ;; STT → MC: openapi-call response with transcription in body
-   "stt-to-mc" [:map {:closed true
-                      :description "STT service response"}
-                ["id" [:= ["stt" "mc"]]]
-                ["status" :int]
-                ["body" [:map
-                         ["text" {:description "Transcribed text"} :string]
-                         ["language" {:optional true} :string]]]
-                ["content-type" {:optional true} :string]]
+   ;; STT → LLM: openapi-call response with transcription in body
+   "stt-to-llm" [:map {:closed true
+                       :description "STT service response"}
+                 ["id" [:= ["stt" "llm"]]]
+                 ["status" :int]
+                 ["body" [:map
+                          ["text" {:description "Transcribed text"} :string]
+                          ["language" {:optional true} :string]]]
+                 ["content-type" {:optional true} :string]]
 
-   ;; MC → TTS: LLM produces text for synthesis
-   "mc-to-tts" [:map {:closed true
-                      :description "LLM response for TTS synthesis"}
-                ["id" [:= ["mc" "tts"]]]
-                ["text" {:description "Response text to synthesize"} :string]]
+   ;; LLM → TTS: LLM produces text for synthesis
+   "llm-to-tts" [:map {:closed true
+                       :description "LLM response for TTS synthesis"}
+                 ["id" [:= ["llm" "tts"]]]
+                 ["text" {:description "Response text to synthesize"} :string]]
 
    ;; TTS → end: openapi-call response with audio bytes in body
    "exit" [:map {:closed true
@@ -105,9 +105,9 @@
                :base-url default-stt-url
                :operation "transcribe"}}
 
-    ;; MC: LLM with MCP hat for GitHub and Clojure tools
-    {"id" "mc"
-     "description" "Master of Ceremonies"
+    ;; LLM: with MCP hat for GitHub and Clojure tools
+    {"id" "llm"
+     "description" "Large Language Model"
      "action" "llm"
      "hats" [{"mcp" {:servers {"github" {:config github-mcp-config}
                                "clojure" {:config clojure-tools-config}}}}]
@@ -118,7 +118,7 @@
       ""
       "RESPONSE FORMAT:"
       "You MUST respond with a JSON object containing 'id' and 'text' fields:"
-      "- 'id': [\"mc\", \"tts\"] (the transition to TTS)"
+      "- 'id': [\"llm\", \"tts\"] (the transition to TTS)"
       "- 'text': Your spoken response (will be synthesized to audio)"
       ""
       "MCP TOOLS AVAILABLE:"
@@ -163,15 +163,15 @@
      "label" "audio in"
      "schema" [:ref "entry"]}
 
-    ;; STT → MC: openapi-call response with text in body
-    {"id" ["stt" "mc"]
+    ;; STT → LLM: openapi-call response with text in body
+    {"id" ["stt" "llm"]
      "label" "transcribed"
-     "schema" [:ref "stt-to-mc"]}
+     "schema" [:ref "stt-to-llm"]}
 
-    ;; MC → TTS: LLM response text for synthesis
-    {"id" ["mc" "tts"]
+    ;; LLM → TTS: LLM response text for synthesis
+    {"id" ["llm" "tts"]
      "label" "response"
-     "schema" [:ref "mc-to-tts"]}
+     "schema" [:ref "llm-to-tts"]}
 
     ;; TTS → end: audio bytes out
     {"id" ["tts" "end"]

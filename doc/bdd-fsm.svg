@@ -10,7 +10,7 @@
 <title>bdd</title>
 <polygon fill="white" stroke="none" points="-4,4 -4,-544.72 313.12,-544.72 313.12,4 -4,4"/>
 <g id="clust2" class="cluster">
-<title>cluster_mc_hat</title>
+<title>cluster_llm_hat</title>
 <polygon fill="none" stroke="#999999" stroke-dasharray="5,2" points="179.12,-288.61 179.12,-375.36 301.12,-375.36 301.12,-288.61 179.12,-288.61"/>
 <text xml:space="preserve" text-anchor="middle" x="240.12" y="-358.06" font-family="Times,serif" font-size="14.00" fill="#666666">Hat&#45;generated</text>
 </g>
@@ -49,18 +49,18 @@
 <ellipse fill="none" stroke="black" cx="189.12" cy="-24.8" rx="24.8" ry="24.8"/>
 <text xml:space="preserve" text-anchor="middle" x="189.12" y="-21.68" font-family="Helvetica,sans-Serif" font-size="10.00">end</text>
 </g>
-<!-- mc -->
+<!-- llm -->
 <g id="node5" class="node">
-<title>mc</title>
-<path fill="none" stroke="black" d="M239.88,-249.36C239.88,-249.36 138.38,-249.36 138.38,-249.36 132.38,-249.36 126.38,-243.36 126.38,-237.36 126.38,-237.36 126.38,-202.36 126.38,-202.36 126.38,-196.36 132.38,-190.36 138.38,-190.36 138.38,-190.36 239.88,-190.36 239.88,-190.36 245.88,-190.36 251.88,-196.36 251.88,-202.36 251.88,-202.36 251.88,-237.36 251.88,-237.36 251.88,-243.36 245.88,-249.36 239.88,-249.36"/>
-<text xml:space="preserve" text-anchor="middle" x="189.12" y="-235.86" font-family="Helvetica,sans-Serif" font-size="10.00">mc</text>
+<title>llm</title>
+<path fill="none" stroke="black" d="M240.25,-249.36C240.25,-249.36 138,-249.36 138,-249.36 132,-249.36 126,-243.36 126,-237.36 126,-237.36 126,-202.36 126,-202.36 126,-196.36 132,-190.36 138,-190.36 138,-190.36 240.25,-190.36 240.25,-190.36 246.25,-190.36 252.25,-196.36 252.25,-202.36 252.25,-202.36 252.25,-237.36 252.25,-237.36 252.25,-243.36 246.25,-249.36 240.25,-249.36"/>
+<text xml:space="preserve" text-anchor="middle" x="189.12" y="-235.86" font-family="Helvetica,sans-Serif" font-size="10.00">llm</text>
 <text xml:space="preserve" text-anchor="middle" x="189.12" y="-223.11" font-family="Helvetica,sans-Serif" font-size="10.00">(llm + mcp hat)</text>
-<text xml:space="preserve" text-anchor="middle" x="189.12" y="-210.36" font-family="Helvetica,sans-Serif" font-size="10.00">Master of Ceremonies</text>
+<text xml:space="preserve" text-anchor="middle" x="189.12" y="-210.36" font-family="Helvetica,sans-Serif" font-size="10.00">Large Language Model</text>
 <text xml:space="preserve" text-anchor="middle" x="189.12" y="-197.61" font-family="Helvetica,sans-Serif" font-size="10.00">GitHub + Clojure tools</text>
 </g>
-<!-- stt&#45;&gt;mc -->
+<!-- stt&#45;&gt;llm -->
 <g id="edge3" class="edge">
-<title>stt&#45;&gt;mc</title>
+<title>stt&#45;&gt;llm</title>
 <path fill="none" stroke="black" d="M118.18,-296.18C120.64,-286.7 124.48,-275.9 130.38,-267.36 132.73,-263.94 135.41,-260.66 138.29,-257.53"/>
 <polygon fill="black" stroke="black" points="140.6,-260.17 145.26,-250.66 135.68,-255.19 140.6,-260.17"/>
 <text xml:space="preserve" text-anchor="middle" x="156.25" y="-270.06" font-family="Helvetica,sans-Serif" font-size="9.00">transcribed</text>
@@ -73,24 +73,24 @@
 <text xml:space="preserve" text-anchor="middle" x="189.12" y="-116.86" font-family="Helvetica,sans-Serif" font-size="10.00">(openapi&#45;call)</text>
 <text xml:space="preserve" text-anchor="middle" x="189.12" y="-104.11" font-family="Helvetica,sans-Serif" font-size="10.00">Text to Speech</text>
 </g>
-<!-- mc&#45;&gt;tts -->
+<!-- llm&#45;&gt;tts -->
 <g id="edge4" class="edge">
-<title>mc&#45;&gt;tts</title>
+<title>llm&#45;&gt;tts</title>
 <path fill="none" stroke="black" d="M189.12,-190.02C189.12,-178.97 189.12,-166.27 189.12,-154.8"/>
 <polygon fill="black" stroke="black" points="192.63,-154.92 189.13,-144.92 185.63,-154.92 192.63,-154.92"/>
 <text xml:space="preserve" text-anchor="middle" x="209.38" y="-163.81" font-family="Helvetica,sans-Serif" font-size="9.00">response</text>
 </g>
-<!-- mc&#45;mcp -->
+<!-- llm&#45;mcp -->
 <g id="node7" class="node">
-<title>mc&#45;mcp</title>
+<title>llm&#45;mcp</title>
 <path fill="none" stroke="black" stroke-dasharray="5,2" d="M281.5,-342.86C281.5,-342.86 198.75,-342.86 198.75,-342.86 192.75,-342.86 186.75,-336.86 186.75,-330.86 186.75,-330.86 186.75,-308.61 186.75,-308.61 186.75,-302.61 192.75,-296.61 198.75,-296.61 198.75,-296.61 281.5,-296.61 281.5,-296.61 287.5,-296.61 293.5,-302.61 293.5,-308.61 293.5,-308.61 293.5,-330.86 293.5,-330.86 293.5,-336.86 287.5,-342.86 281.5,-342.86"/>
-<text xml:space="preserve" text-anchor="middle" x="240.12" y="-329.36" font-family="Helvetica,sans-Serif" font-size="10.00">mc&#45;mcp</text>
+<text xml:space="preserve" text-anchor="middle" x="240.12" y="-329.36" font-family="Helvetica,sans-Serif" font-size="10.00">llm&#45;mcp</text>
 <text xml:space="preserve" text-anchor="middle" x="240.12" y="-316.61" font-family="Helvetica,sans-Serif" font-size="10.00">(mcp&#45;service)</text>
 <text xml:space="preserve" text-anchor="middle" x="240.12" y="-303.86" font-family="Helvetica,sans-Serif" font-size="10.00">Executes tool calls</text>
 </g>
-<!-- mc&#45;&gt;mc&#45;mcp -->
+<!-- llm&#45;&gt;llm&#45;mcp -->
 <g id="edge6" class="edge">
-<title>mc&#45;&gt;mc&#45;mcp</title>
+<title>llm&#45;&gt;llm&#45;mcp</title>
 <path fill="none" stroke="black" stroke-dasharray="5,2" d="M184.85,-249.61C184.64,-259.25 185.8,-269.78 190.12,-278.61 191.74,-281.9 193.77,-285.02 196.08,-287.94"/>
 <polygon fill="black" stroke="black" points="193.31,-290.1 202.69,-295.03 198.43,-285.33 193.31,-290.1"/>
 <text xml:space="preserve" text-anchor="middle" x="209.62" y="-270.06" font-family="Helvetica,sans-Serif" font-size="9.00">tool calls</text>
@@ -102,9 +102,9 @@
 <polygon fill="black" stroke="black" points="192.63,-61.29 189.13,-51.29 185.63,-61.29 192.63,-61.29"/>
 <text xml:space="preserve" text-anchor="middle" x="210.5" y="-70.31" font-family="Helvetica,sans-Serif" font-size="9.00">audio out</text>
 </g>
-<!-- mc&#45;mcp&#45;&gt;mc -->
+<!-- llm&#45;mcp&#45;&gt;llm -->
 <g id="edge7" class="edge">
-<title>mc&#45;mcp&#45;&gt;mc</title>
+<title>llm&#45;mcp&#45;&gt;llm</title>
 <path fill="none" stroke="black" stroke-dasharray="5,2" d="M237.78,-296.18C236.2,-286.9 233.54,-276.26 229.12,-267.36 227.7,-264.5 226.07,-261.67 224.29,-258.9"/>
 <polygon fill="black" stroke="black" points="227.31,-257.11 218.64,-251.02 221.62,-261.19 227.31,-257.11"/>
 <text xml:space="preserve" text-anchor="middle" x="258.15" y="-270.06" font-family="Helvetica,sans-Serif" font-size="9.00">tool results</text>

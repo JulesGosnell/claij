@@ -14,26 +14,26 @@ digraph "bdd" {
 
   // Main states
   "stt" [label="stt\n(openapi-call)\nSpeech to Text"];
-  "mc" [label="mc\n(llm + mcp hat)\nMaster of Ceremonies\nGitHub + Clojure tools"];
+  "llm" [label="llm\n(llm + mcp hat)\nLarge Language Model\nGitHub + Clojure tools"];
   "tts" [label="tts\n(openapi-call)\nText to Speech"];
 
   // Hat-generated cluster
-  subgraph cluster_mc_hat {
+  subgraph cluster_llm_hat {
     label="Hat-generated";
     style=dashed;
     color=gray60;
     fontcolor=gray40;
     
-    "mc-mcp" [label="mc-mcp\n(mcp-service)\nExecutes tool calls" style="rounded,dashed"];
+    "llm-mcp" [label="llm-mcp\n(mcp-service)\nExecutes tool calls" style="rounded,dashed"];
   }
 
   // Main flow transitions
   "start" -> "stt" [label="audio in"];
-  "stt" -> "mc" [label="transcribed"];
-  "mc" -> "tts" [label="response"];
+  "stt" -> "llm" [label="transcribed"];
+  "llm" -> "tts" [label="response"];
   "tts" -> "end" [label="audio out"];
   
   // Hat transitions (dashed)
-  "mc" -> "mc-mcp" [label="tool calls" style=dashed];
-  "mc-mcp" -> "mc" [label="tool results" style=dashed];
+  "llm" -> "llm-mcp" [label="tool calls" style=dashed];
+  "llm-mcp" -> "llm" [label="tool results" style=dashed];
 }

@@ -155,8 +155,8 @@
               (log/info (str "   Mock Review: Processing " xid))
               (cond
                 ;; Entry: submit code for review
-                (= xid ["start" "mc"])
-                (handler context {"id" ["mc" "reviewer"]
+                (= xid ["start" "chairman"])
+                (handler context {"id" ["chairman" "reviewer"]
                                   "code" {"language" {"name" "clojure"}
                                           "text" "(defn fib [n] (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))"}
                                   "notes" "Please review this fibonacci implementation"
@@ -165,16 +165,16 @@
                                   "llm" {"service" "openrouter" "model" "openai/gpt-4o"}})
 
                 ;; Reviewer responds
-                (= xid ["mc" "reviewer"])
-                (handler context {"id" ["reviewer" "mc"]
+                (= xid ["chairman" "reviewer"])
+                (handler context {"id" ["reviewer" "chairman"]
                                   "code" {"language" {"name" "clojure"}
                                           "text" "(def fib (memoize (fn [n] (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))))"}
                                   "comments" ["Add memoization for performance"]
                                   "notes" "Improved version with memoization"})
 
-                ;; MC ends the review
-                (= xid ["reviewer" "mc"])
-                (handler context {"id" ["mc" "end"]
+                ;; Chairman ends the review
+                (= xid ["reviewer" "chairman"])
+                (handler context {"id" ["chairman" "end"]
                                   "code" {"language" {"name" "clojure"}
                                           "text" "(def fib (memoize (fn [n] (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))))"}
                                   "notes" "Review complete"}))))

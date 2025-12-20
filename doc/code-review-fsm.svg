@@ -10,7 +10,7 @@
 <title>code&#45;review</title>
 <polygon fill="white" stroke="none" points="-4,4 -4,-353.29 311.38,-353.29 311.38,4 -4,4"/>
 <g id="clust2" class="cluster">
-<title>cluster_mc_hat</title>
+<title>cluster_chairman_hat</title>
 <polygon fill="none" stroke="#999999" stroke-dasharray="5,2" points="160.12,-199.54 160.12,-286.29 282.12,-286.29 282.12,-199.54 160.12,-199.54"/>
 <text xml:space="preserve" text-anchor="middle" x="221.12" y="-268.99" font-family="Times,serif" font-size="14.00" fill="#666666">Hat&#45;generated</text>
 </g>
@@ -27,18 +27,18 @@
 <text xml:space="preserve" text-anchor="middle" x="117.12" y="-227.54" font-family="Helvetica,sans-Serif" font-size="10.00">start</text>
 </g>
 <!-- title&#45;&gt;start -->
-<!-- mc -->
+<!-- chairman -->
 <g id="node4" class="node">
-<title>mc</title>
+<title>chairman</title>
 <path fill="none" stroke="black" d="M235.88,-155.86C235.88,-155.86 92.38,-155.86 92.38,-155.86 86.38,-155.86 80.38,-149.86 80.38,-143.86 80.38,-143.86 80.38,-108.86 80.38,-108.86 80.38,-102.86 86.38,-96.86 92.38,-96.86 92.38,-96.86 235.88,-96.86 235.88,-96.86 241.88,-96.86 247.88,-102.86 247.88,-108.86 247.88,-108.86 247.88,-143.86 247.88,-143.86 247.88,-149.86 241.88,-155.86 235.88,-155.86"/>
-<text xml:space="preserve" text-anchor="middle" x="164.12" y="-142.36" font-family="Helvetica,sans-Serif" font-size="10.00">mc</text>
+<text xml:space="preserve" text-anchor="middle" x="164.12" y="-142.36" font-family="Helvetica,sans-Serif" font-size="10.00">chairman</text>
 <text xml:space="preserve" text-anchor="middle" x="164.12" y="-129.61" font-family="Helvetica,sans-Serif" font-size="10.00">(llm + mcp hat)</text>
 <text xml:space="preserve" text-anchor="middle" x="164.12" y="-116.86" font-family="Helvetica,sans-Serif" font-size="10.00">Orchestrates code review</text>
 <text xml:space="preserve" text-anchor="middle" x="164.12" y="-104.11" font-family="Helvetica,sans-Serif" font-size="10.00">Can use MCP tools to read files</text>
 </g>
-<!-- start&#45;&gt;mc -->
+<!-- start&#45;&gt;chairman -->
 <g id="edge2" class="edge">
-<title>start&#45;&gt;mc</title>
+<title>start&#45;&gt;chairman</title>
 <path fill="none" stroke="black" d="M113.6,-202.98C113.37,-193.46 114.32,-182.88 118.12,-173.86 119.32,-171.01 120.79,-168.25 122.45,-165.58"/>
 <polygon fill="black" stroke="black" points="125.22,-167.71 128.28,-157.57 119.56,-163.59 125.22,-167.71"/>
 <text xml:space="preserve" text-anchor="middle" x="130.12" y="-176.56" font-family="Helvetica,sans-Serif" font-size="9.00">entry</text>
@@ -50,9 +50,9 @@
 <ellipse fill="none" stroke="black" cx="98.12" cy="-24.8" rx="24.8" ry="24.8"/>
 <text xml:space="preserve" text-anchor="middle" x="98.12" y="-21.68" font-family="Helvetica,sans-Serif" font-size="10.00">end</text>
 </g>
-<!-- mc&#45;&gt;end -->
+<!-- chairman&#45;&gt;end -->
 <g id="edge5" class="edge">
-<title>mc&#45;&gt;end</title>
+<title>chairman&#45;&gt;end</title>
 <path fill="none" stroke="black" d="M113.32,-96.54C107.76,-91.36 102.86,-85.47 99.38,-78.86 96.47,-73.36 95.01,-67.07 94.44,-60.79"/>
 <polygon fill="black" stroke="black" points="97.94,-61.12 94.26,-51.19 90.95,-61.25 97.94,-61.12"/>
 <text xml:space="preserve" text-anchor="middle" x="120.75" y="-70.31" font-family="Helvetica,sans-Serif" font-size="9.00">summary</text>
@@ -65,38 +65,38 @@
 <text xml:space="preserve" text-anchor="middle" x="234.12" y="-21.68" font-family="Helvetica,sans-Serif" font-size="10.00">(llm)</text>
 <text xml:space="preserve" text-anchor="middle" x="234.12" y="-8.93" font-family="Helvetica,sans-Serif" font-size="10.00">Reviews code for concerns</text>
 </g>
-<!-- mc&#45;&gt;reviewer -->
+<!-- chairman&#45;&gt;reviewer -->
 <g id="edge3" class="edge">
-<title>mc&#45;&gt;reviewer</title>
+<title>chairman&#45;&gt;reviewer</title>
 <path fill="none" stroke="black" d="M159.36,-96.54C159.11,-86.79 160.42,-76.21 165.38,-67.61 167.92,-63.2 171.13,-59.2 174.76,-55.58"/>
 <polygon fill="black" stroke="black" points="176.85,-58.41 182.16,-49.24 172.29,-53.09 176.85,-58.41"/>
 <text xml:space="preserve" text-anchor="middle" x="198.75" y="-70.31" font-family="Helvetica,sans-Serif" font-size="9.00">request review</text>
 </g>
-<!-- mc&#45;mcp -->
+<!-- chairman&#45;mcp -->
 <g id="node6" class="node">
-<title>mc&#45;mcp</title>
+<title>chairman&#45;mcp</title>
 <path fill="none" stroke="black" stroke-dasharray="5,2" d="M262.5,-253.79C262.5,-253.79 179.75,-253.79 179.75,-253.79 173.75,-253.79 167.75,-247.79 167.75,-241.79 167.75,-241.79 167.75,-219.54 167.75,-219.54 167.75,-213.54 173.75,-207.54 179.75,-207.54 179.75,-207.54 262.5,-207.54 262.5,-207.54 268.5,-207.54 274.5,-213.54 274.5,-219.54 274.5,-219.54 274.5,-241.79 274.5,-241.79 274.5,-247.79 268.5,-253.79 262.5,-253.79"/>
-<text xml:space="preserve" text-anchor="middle" x="221.12" y="-240.29" font-family="Helvetica,sans-Serif" font-size="10.00">mc&#45;mcp</text>
+<text xml:space="preserve" text-anchor="middle" x="221.12" y="-240.29" font-family="Helvetica,sans-Serif" font-size="10.00">chairman&#45;mcp</text>
 <text xml:space="preserve" text-anchor="middle" x="221.12" y="-227.54" font-family="Helvetica,sans-Serif" font-size="10.00">(mcp&#45;service)</text>
 <text xml:space="preserve" text-anchor="middle" x="221.12" y="-214.79" font-family="Helvetica,sans-Serif" font-size="10.00">Executes tool calls</text>
 </g>
-<!-- mc&#45;&gt;mc&#45;mcp -->
+<!-- chairman&#45;&gt;chairman&#45;mcp -->
 <g id="edge6" class="edge">
-<title>mc&#45;&gt;mc&#45;mcp</title>
+<title>chairman&#45;&gt;chairman&#45;mcp</title>
 <path fill="none" stroke="black" stroke-dasharray="5,2" d="M159.83,-156.12C159.61,-165.76 160.78,-176.29 165.12,-185.11 167.67,-190.27 171.13,-195.02 175.08,-199.34"/>
 <polygon fill="black" stroke="black" points="172.46,-201.68 182.1,-206.07 177.3,-196.62 172.46,-201.68"/>
 <text xml:space="preserve" text-anchor="middle" x="184.62" y="-176.56" font-family="Helvetica,sans-Serif" font-size="9.00">tool calls</text>
 </g>
-<!-- reviewer&#45;&gt;mc -->
+<!-- reviewer&#45;&gt;chairman -->
 <g id="edge4" class="edge">
-<title>reviewer&#45;&gt;mc</title>
+<title>reviewer&#45;&gt;chairman</title>
 <path fill="none" stroke="black" d="M237.65,-48.17C238.15,-58.13 237.2,-69.66 232.12,-78.86 230.29,-82.17 228.11,-85.3 225.67,-88.25"/>
 <polygon fill="black" stroke="black" points="223.16,-85.82 218.73,-95.44 228.19,-90.68 223.16,-85.82"/>
 <text xml:space="preserve" text-anchor="middle" x="267.25" y="-70.31" font-family="Helvetica,sans-Serif" font-size="9.00">review results</text>
 </g>
-<!-- mc&#45;mcp&#45;&gt;mc -->
+<!-- chairman&#45;mcp&#45;&gt;chairman -->
 <g id="edge7" class="edge">
-<title>mc&#45;mcp&#45;&gt;mc</title>
+<title>chairman&#45;mcp&#45;&gt;chairman</title>
 <path fill="none" stroke="black" stroke-dasharray="5,2" d="M216.52,-207.08C213.81,-196.57 209.79,-184.15 204.12,-173.86 202.56,-171.01 200.8,-168.19 198.92,-165.42"/>
 <polygon fill="black" stroke="black" points="201.79,-163.42 193.03,-157.47 196.17,-167.59 201.79,-163.42"/>
 <text xml:space="preserve" text-anchor="middle" x="233.66" y="-176.56" font-family="Helvetica,sans-Serif" font-size="9.00">tool results</text>

@@ -91,7 +91,7 @@
         ;; Construct entry message based on FSM requirements
         ;; For code-review FSM, include llms list and default concerns
         (let [entry-msg (if (= fsm-id "code-review")
-                          {"id" ["start" "mc"]
+                          {"id" ["start" "chairman"]
                            "document" original-text
                            "llms" [{"service" service "model" model}]
                            "concerns" ["Simplicity: Can this be simpler?"

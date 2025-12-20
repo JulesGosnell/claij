@@ -20,15 +20,15 @@
   (testing "FSM has required states"
     (let [state-ids (set (map #(get % "id") (get bdd-fsm "states")))]
       (is (contains? state-ids "stt"))
-      (is (contains? state-ids "mc"))
+      (is (contains? state-ids "llm"))
       (is (contains? state-ids "tts"))
       (is (contains? state-ids "end"))))
 
   (testing "FSM has required transitions"
     (let [xition-ids (set (map #(get % "id") (get bdd-fsm "xitions")))]
       (is (contains? xition-ids ["start" "stt"]))
-      (is (contains? xition-ids ["stt" "mc"]))
-      (is (contains? xition-ids ["mc" "tts"]))
+      (is (contains? xition-ids ["stt" "llm"]))
+      (is (contains? xition-ids ["llm" "tts"]))
       (is (contains? xition-ids ["tts" "end"]))))
 
   (testing "FSM is valid according to fsm-schema"
@@ -46,24 +46,24 @@
       (is (contains? (get stt-state "config") :operation))
       (is (= "transcribe" (get-in stt-state ["config" :operation]))))))
 
-(deftest mc-state-test
-  (testing "MC state uses llm action with MCP hat"
-    (let [mc-state (first (filter #(= "mc" (get % "id")) (get bdd-fsm "states")))]
-      (is (= "llm" (get mc-state "action")))
-      (is (vector? (get mc-state "hats")))
-      (is (= 1 (count (get mc-state "hats"))))
+(deftest llm-state-test
+  (testing "LLM state uses llm action with MCP hat"
+    (let [llm-state (first (filter #(= "llm" (get % "id")) (get bdd-fsm "states")))]
+      (is (= "llm" (get llm-state "action")))
+      (is (vector? (get llm-state "hats")))
+      (is (= 1 (count (get llm-state "hats"))))
       ;; Check hat structure
-      (let [hat (first (get mc-state "hats"))]
+      (let [hat (first (get llm-state "hats"))]
         (is (map? hat))
         (is (contains? hat "mcp"))
         (is (contains? (get hat "mcp") :servers))
         (is (contains? (get-in hat ["mcp" :servers]) "github"))
         (is (contains? (get-in hat ["mcp" :servers]) "clojure")))))
 
-  (testing "MC state has prompts"
-    (let [mc-state (first (filter #(= "mc" (get % "id")) (get bdd-fsm "states")))]
-      (is (vector? (get mc-state "prompts")))
-      (is (pos? (count (get mc-state "prompts")))))))
+  (testing "LLM state has prompts"
+    (let [llm-state (first (filter #(= "llm" (get % "id")) (get bdd-fsm "states")))]
+      (is (vector? (get llm-state "prompts")))
+      (is (pos? (count (get llm-state "prompts")))))))
 
 (deftest tts-state-test
   (testing "TTS state uses openapi-call action"
@@ -80,8 +80,8 @@
 (deftest bdd-schemas-test
   (testing "All required schemas are defined"
     (is (contains? bdd-schemas "entry"))
-    (is (contains? bdd-schemas "stt-to-mc"))
-    (is (contains? bdd-schemas "mc-to-tts"))
+    (is (contains? bdd-schemas "stt-to-llm"))
+    (is (contains? bdd-schemas "llm-to-tts"))
     (is (contains? bdd-schemas "exit")))
 
   (testing "Entry schema validates correctly"
@@ -90,9 +90,9 @@
                               "audio" (byte-array [1 2 3])}
                       {:registry bdd-registry}))))
 
-  (testing "MC-to-TTS schema validates correctly"
-    (let [schema (get bdd-schemas "mc-to-tts")]
-      (is (m/validate schema {"id" ["mc" "tts"]
+  (testing "LLM-to-TTS schema validates correctly"
+    (let [schema (get bdd-schemas "llm-to-tts")]
+      (is (m/validate schema {"id" ["llm" "tts"]
                               "text" "Hello, this is a test response."}
                       {:registry bdd-registry})))))
 

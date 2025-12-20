@@ -44,36 +44,36 @@
    "llms" [:vector {:min 1 :description "List of available LLMs to choose from"}
            [:ref "llm"]]
 
-   ;; Entry event: start → mc
+   ;; Entry event: start → chairman
    "entry" [:map {:closed true
                   :description "Initial request to start a code review"}
-            ["id" [:= ["start" "mc"]]]
+            ["id" [:= ["start" "chairman"]]]
             ["document" {:description "The code or document to review"} :string]
             ["llms" {:description "Available LLMs for the review"} [:ref "llms"]]
             ["concerns" {:description "Quality concerns to evaluate"} [:ref "concerns"]]]
 
-   ;; Request event: mc → reviewer
+   ;; Request event: chairman → reviewer
    "request" [:map {:closed true
-                    :description "MC's request to a reviewer for code analysis"}
-              ["id" [:= ["mc" "reviewer"]]]
+                    :description "Chairman's request to a reviewer for code analysis"}
+              ["id" [:= ["chairman" "reviewer"]]]
               ["code" {:description "The code to review"} [:ref "code"]]
               ["notes" {:description "Context or instructions for the reviewer"} [:ref "notes"]]
               ["concerns" {:description "Specific concerns for this review (max 3)"}
                [:vector {:max 3} :string]]
               ["llm" {:description "Which LLM should perform this review"} [:ref "llm"]]]
 
-   ;; Response event: reviewer → mc
+   ;; Response event: reviewer → chairman
    "response" [:map {:closed true
                      :description "Reviewer's analysis and feedback"}
-               ["id" [:= ["reviewer" "mc"]]]
+               ["id" [:= ["reviewer" "chairman"]]]
                ["code" {:description "The code (possibly modified with improvements)"} [:ref "code"]]
                ["notes" {:optional true :description "General observations about the review"} [:ref "notes"]]
                ["comments" {:description "Specific issues or suggestions found"} [:ref "comments"]]]
 
-   ;; Summary event: mc → end
+   ;; Summary event: chairman → end
    "summary" [:map {:closed true
                     :description "Final summary after all reviews complete"}
-              ["id" [:= ["mc" "end"]]]
+              ["id" [:= ["chairman" "end"]]]
               ["code" {:description "The final reviewed code"} [:ref "code"]]
               ["notes" {:description "Summary of the review process and findings"} [:ref "notes"]]]})
 
@@ -89,11 +89,11 @@
    "schemas" code-review-schemas
    "prompts" ["You are involved in a code review workflow"]
    "states"
-   [{"id" "mc"
+   [{"id" "chairman"
      "action" "llm"
      "hats" ["mcp"]
      "prompts"
-     ["You are an MC orchestrating a code review."
+     ["You are the Chairman orchestrating a code review."
       "You have been provided with a list of code quality concerns and a list of available LLMs."
       "Your role is to distribute the concerns effectively across multiple LLM reviewers to ensure thorough code review."
       ""
@@ -124,7 +124,7 @@
      "prompts"
      ["You are a code reviewer."
       "You will receive code to review along with a list of specific concerns to focus on."
-      "The MC (coordinator) has selected these concerns as most relevant for this review."
+      "The Chairman (coordinator) has selected these concerns as most relevant for this review."
       ""
       "YOUR TASK:"
       "- Give careful attention to the specific concerns provided in the request"
@@ -142,15 +142,15 @@
      "action" "end"}]
 
    "xitions"
-   [{"id" ["start" "mc"]
+   [{"id" ["start" "chairman"]
      "schema" [:ref "entry"]}
-    {"id" ["mc" "reviewer"]
+    {"id" ["chairman" "reviewer"]
      "prompts" []
      "schema" [:ref "request"]}
-    {"id" ["reviewer" "mc"]
+    {"id" ["reviewer" "chairman"]
      "prompts" []
      "schema" [:ref "response"]}
-    {"id" ["mc" "end"]
+    {"id" ["chairman" "end"]
      "prompts" []
      "schema" [:ref "summary"]}]})
 
@@ -209,7 +209,7 @@
                   {"service" "openrouter" "model" "openai/gpt-4o"}
                   {"service" "xai" "model" "grok-3-beta"}]
            ;; Construct entry message with document and llms
-           entry-msg# {"id" ["start" "mc"]
+           entry-msg# {"id" ["start" "chairman"]
                        "document" (str "Please review this code: " ~code-str)
                        "llms" llms#
                        "concerns" example-code-review-concerns}]

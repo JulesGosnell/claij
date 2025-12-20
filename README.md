@@ -81,7 +81,7 @@ At any point, an LLM within the system can decide to improve the system—better
 
 ### 2. A Society of Minds
 
-A single LLM hallucinates. A society of LLMs—each with focused concerns, constrained by schemas, coordinated by finite state machines—produces emergent reliability. The Master of Ceremonies delegates. Specialists review. Consensus emerges. Hallucinations are caught by the group.
+A single LLM hallucinates. A society of LLMs—each with focused concerns, constrained by schemas, coordinated by finite state machines—produces emergent reliability. The Chairman delegates. Specialists review. Consensus emerges. Hallucinations are caught by the group.
 
 Each LLM is like a junior developer: the more structure you give them, the better they perform. The fewer concerns they juggle, the better they focus on what matters.
 
@@ -189,7 +189,7 @@ Voice-controlled development from the bathtub. Speak a command → STT transcrib
 
 ### Multi-LLM Code Review
 
-A Master of Ceremonies coordinates specialist reviewers. The MC delegates, aggregates feedback, iterates until no new issues emerge, then summarizes. Multiple LLMs, focused concerns, emergent quality.
+A Chairman coordinates specialist reviewers. The Chairman delegates, aggregates feedback, iterates until no new issues emerge, then summarizes. Multiple LLMs, focused concerns, emergent quality.
 
 ![Code Review FSM](doc/code-review-fsm.svg)
 
@@ -198,9 +198,9 @@ A Master of Ceremonies coordinates specialist reviewers. The MC delegates, aggre
 CLAIJ integrates with the Model Context Protocol through the **hat system**—a declarative way to add capabilities to FSM states. When a state wears an MCP hat, it gains access to external tools (file systems, databases, APIs) through schema-validated requests.
 
 ```clojure
-{"id" "mc"
+{"id" "chairman"
  "action" "llm"
- "hats" ["mcp"]  ;; MC can now use MCP tools
+ "hats" ["mcp"]  ;; Chairman can now use MCP tools
  "prompts" [...]}
 ```
 

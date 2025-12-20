@@ -42,14 +42,14 @@
 (deftest code-review-fsm-test
   (testing "code-review-schemas"
     (testing "entry validates"
-      (let [entry {"id" ["start" "mc"]
+      (let [entry {"id" ["start" "chairman"]
                    "document" "test code"
                    "llms" [{"service" "openrouter" "model" "openai/gpt-4o"}]
                    "concerns" ["Simplicity"]}]
         (is (m/validate [:ref "entry"] entry {:registry code-review-registry}))))
 
     (testing "request validates"
-      (let [request {"id" ["mc" "reviewer"]
+      (let [request {"id" ["chairman" "reviewer"]
                      "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
                      "notes" "Please review"
                      "concerns" ["Simplicity"]
@@ -57,14 +57,14 @@
         (is (m/validate [:ref "request"] request {:registry code-review-registry}))))
 
     (testing "response validates"
-      (let [response {"id" ["reviewer" "mc"]
+      (let [response {"id" ["reviewer" "chairman"]
                       "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
                       "comments" ["Looks good"]
                       "notes" "Approved"}]
         (is (m/validate [:ref "response"] response {:registry code-review-registry}))))
 
     (testing "summary validates"
-      (let [summary {"id" ["mc" "end"]
+      (let [summary {"id" ["chairman" "end"]
                      "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
                      "notes" "Review complete"}]
         (is (m/validate [:ref "summary"] summary {:registry code-review-registry})))))
@@ -87,16 +87,16 @@
 
     (testing "has expected states"
       (let [state-ids (set (map #(get % "id") (get code-review-fsm "states")))]
-        (is (contains? state-ids "mc"))
+        (is (contains? state-ids "chairman"))
         (is (contains? state-ids "reviewer"))
         (is (contains? state-ids "end"))))
 
     (testing "has expected transitions"
       (let [xition-ids (set (map #(get % "id") (get code-review-fsm "xitions")))]
-        (is (contains? xition-ids ["start" "mc"]))
-        (is (contains? xition-ids ["mc" "reviewer"]))
-        (is (contains? xition-ids ["reviewer" "mc"]))
-        (is (contains? xition-ids ["mc" "end"]))))))
+        (is (contains? xition-ids ["start" "chairman"]))
+        (is (contains? xition-ids ["chairman" "reviewer"]))
+        (is (contains? xition-ids ["reviewer" "chairman"]))
+        (is (contains? xition-ids ["chairman" "end"]))))))
 
 (deftest code-review-fsm-mock-test
   (testing "code-review FSM with mock LLM actions"
@@ -114,13 +114,13 @@
 
           ;; These are the data payloads that will be in the trail
           entry-data
-          {"id" ["start" "mc"]
+          {"id" ["start" "chairman"]
            "document" text
            "llms" llms
            "concerns" concerns}
 
           request1-data
-          {"id" ["mc" "reviewer"]
+          {"id" ["chairman" "reviewer"]
            "code" {"language" {"name" "clojure"}
                    "text" "(defn fib [n]\n  (if (<= n 1)\n    n\n    (+ (fib (- n 1)) (fib (- n 2)))))"}
            "notes" "Here's a recursive fibonacci. Please review for improvements."
@@ -129,7 +129,7 @@
            "llm" {"service" "openrouter" "model" "openai/gpt-4o"}}
 
           response1-data
-          {"id" ["reviewer" "mc"]
+          {"id" ["reviewer" "chairman"]
            "code" {"language" {"name" "clojure"}
                    "text" "(def fib\n  (memoize\n    (fn [n]\n      (if (<= n 1)\n        n\n        (+ (fib (- n 1)) (fib (- n 2)))))))"}
            "comments" ["Consider using memoization to avoid redundant calculations"
@@ -137,7 +137,7 @@
            "notes" "Added memoization to improve performance."}
 
           request2-data
-          {"id" ["mc" "reviewer"]
+          {"id" ["chairman" "reviewer"]
            "code" {"language" {"name" "clojure"}
                    "text" "(def fib\n  (memoize\n    (fn [n]\n      (if (<= n 1)\n        n\n        (+ (fib (- n 1)) (fib (- n 2)))))))"}
            "notes" "Incorporated memoization. Please review again."
@@ -145,14 +145,14 @@
            "llm" {"service" "openrouter" "model" "openai/gpt-4o"}}
 
           response2-data
-          {"id" ["reviewer" "mc"]
+          {"id" ["reviewer" "chairman"]
            "code" {"language" {"name" "clojure"}
                    "text" "(def fib\n  (memoize\n    (fn [n]\n      (if (<= n 1)\n        n\n        (+ (fib (- n 1)) (fib (- n 2)))))))"}
            "comments" []
            "notes" "Looks good! The memoization solves the performance issue."}
 
           summary-data
-          {"id" ["mc" "end"]
+          {"id" ["chairman" "end"]
            "code" {"language" {"name" "clojure"}
                    "text" "(def fib\n  (memoize\n    (fn [n]\n      (if (<= n 1)\n        n\n        (+ (fib (- n 1)) (fib (- n 2)))))))"}
            "notes" "Code review complete. Added memoization for performance."}
@@ -207,7 +207,7 @@
 
           context {:id->action code-review-actions}
 
-          entry-msg {"id" ["start" "mc"]
+          entry-msg {"id" ["start" "chairman"]
                      "document" (str "Please review this Clojure code: " code)
                      "llms" llms
                      "concerns" concerns}
@@ -223,8 +223,8 @@
 
           (testing "FSM reached end state"
             (is (map? final-event) "Final event should be a map")
-            (is (= ["mc" "end"] (get final-event "id"))
-                "FSM should end with mc→end transition"))
+            (is (= ["chairman" "end"] (get final-event "id"))
+                "FSM should end with chairman→end transition"))
 
           (testing "Final event is valid summary"
             (is (m/validate [:ref "summary"] final-event {:registry code-review-registry})
@@ -239,10 +239,10 @@
             (is (>= (count trail) 4) "Trail should have at least 4 events")
             ;; Trail entries are {:from :to :event} - extract id from :event
             (let [ids (map #(get-in % [:event "id"]) trail)]
-              (is (some #{["start" "mc"]} ids) "Should have entry transition")
-              (is (some #{["mc" "reviewer"]} ids) "Should have request transition")
-              (is (some #{["reviewer" "mc"]} ids) "Should have response transition")
-              (is (some #{["mc" "end"]} ids) "Should have summary transition")))
+              (is (some #{["start" "chairman"]} ids) "Should have entry transition")
+              (is (some #{["chairman" "reviewer"]} ids) "Should have request transition")
+              (is (some #{["reviewer" "chairman"]} ids) "Should have response transition")
+              (is (some #{["chairman" "end"]} ids) "Should have summary transition")))
 
           (testing "Summary has required fields"
             (is (contains? final-event "code") "Summary should have code")
