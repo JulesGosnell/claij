@@ -122,7 +122,10 @@
                             (format "    %s [label=\"%s%s%s\"];\n"
                                     (quote-id id) display-name
                                     (if action (str "\\n(" action ")") "")
-                                    (or prompt-label ""))))]
+                                    (or prompt-label ""))))
+           ;; Find reverse edges (for bidirectional detection)
+           edge-pairs (set (map (fn [{[from to] "id"}] #{from to}) xitions))
+           seen-pairs (atom #{})]
        (str "digraph \"" fsm-id "\" {\n"
             "  rankdir=TB;\n"
             "  splines=curved;\n"
@@ -164,9 +167,20 @@
                    (for [{[from to] "id" label "label" desc "description"} xitions
                          :let [texts (filter seq [label desc])
                                text (if (seq texts) (join "\\n" texts) to)
-                               edge-label (escape-label text)]]
-                     (format "  %s -> %s [label=\"%s\"];\n"
-                             (quote-id (if (= from "start") "start" from))
-                             (quote-id (if (= to "end") "end" to))
-                             edge-label)))
+                               edge-label (escape-label text)
+                               pair #{from to}
+                               ;; Check if reverse edge exists (bidirectional)
+                               has-reverse? (some #(= (get % "id") [to from]) xitions)
+                               ;; Add constraint=false to second edge of bidirectional pair
+                               is-second? (and has-reverse? (@seen-pairs pair))
+                               _ (swap! seen-pairs conj pair)]]
+                     (if is-second?
+                       (format "  %s -> %s [label=\"%s\", constraint=false];\n"
+                               (quote-id (if (= from "start") "start" from))
+                               (quote-id (if (= to "end") "end" to))
+                               edge-label)
+                       (format "  %s -> %s [label=\"%s\"];\n"
+                               (quote-id (if (= from "start") "start" from))
+                               (quote-id (if (= to "end") "end" to))
+                               edge-label))))
             "}\n")))))
