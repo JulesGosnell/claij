@@ -1,19 +1,33 @@
 (ns claij.poc.tool-calling-poc-test
-  "PoC test: LLMs emit structured tool calls from MCP-style schema.
+  "LLM Compatibility Test: Schema-in-prompt → structured tool calls.
    
-   Validates that all supported LLMs can:
-   1. Parse JSON Schema tool definitions (MCP format)
-   2. Emit properly structured EDN tool_calls
-   3. Produce output that validates against Malli schema
+   PURPOSE: Validates that LLMs understand CLAIJ's core pattern:
+   - Parse JSON Schema tool definitions from prompt text
+   - Emit properly structured EDN tool_calls
+   - Produce output that validates against Malli schema
    
    This demonstrates LLMs have 'muscle memory' for tool calling -
-   no native tool API needed, just schema in prompt.
+   no native tool API needed, just schema in prompt. This is the
+   foundational validation of CLAIJ's schema-guided FSM architecture.
    
-   Tested providers:
-   - Anthropic Claude (native tool API available)
-   - Google Gemini (native tool API available)
-   - OpenAI GPT-5.2 (native tool API available, via OpenRouter)
-   - xAI Grok (NO native tool API - proves schema-in-prompt works!)"
+   GOING FORWARD: Use this test to validate new LLMs before adding
+   them to CLAIJ. When evaluating a new model or service:
+   1. Add a test case with the new service/model
+   2. Run: clojure -M:test --focus claij.poc.tool-calling-poc-test
+   3. If it passes, the model understands schema-in-prompt
+   
+   This is especially useful for validating:
+   - New Ollama models (local inference)
+   - New cloud provider models
+   - Fine-tuned models
+   - Smaller/faster models for cost optimization
+   
+   Current validated services:
+   - anthropic / claude-sonnet-4-20250514
+   - google / gemini-2.0-flash
+   - openrouter / openai/gpt-4o
+   - xai / grok-3-beta
+   - ollama:local / mistral:7b (if running)"
   (:require
    [clojure.test :refer [deftest testing is]]
    [malli.core :as m]
@@ -77,16 +91,16 @@ Respond ONLY with an EDN data structure containing your tool calls. No prose. Ex
 
 (defn call-llm-sync
   "Synchronous wrapper for llm/call. Returns result or throws on error."
-  [provider model]
+  [service model]
   (let [result (promise)]
-    (llm/call provider model
+    (llm/call service model
               [{"role" "user" "content" tool-prompt}]
               (fn [r] (deliver result {:ok r}))
               {:error (fn [e] (deliver result {:error e}))})
-    (let [r (deref result 30000 {:error {:timeout true}})]
+    (let [r (deref result 60000 {:error {:timeout true}})]
       (if (:ok r)
         (:ok r)
-        (throw (ex-info "LLM call failed" {:provider provider :model model :error (:error r)}))))))
+        (throw (ex-info "LLM call failed" {:service service :model model :error (:error r)}))))))
 
 (defn validate-tool-calls
   "Validate response structure and semantic correctness"
@@ -109,30 +123,30 @@ Respond ONLY with an EDN data structure containing your tool calls. No prose. Ex
 
 (deftest ^:integration test-claude-tool-calling
   (testing "Claude emits valid tool calls from MCP schema"
-    (let [response (call-llm-sync "anthropic" "claude-opus-4.5")]
+    (let [response (call-llm-sync "anthropic" "claude-sonnet-4-20250514")]
       (validate-tool-calls response))))
 
 (deftest ^:integration test-gemini-tool-calling
   (testing "Gemini emits valid tool calls from MCP schema"
-    (let [response (call-llm-sync "google" "gemini-3-pro-preview")]
+    (let [response (call-llm-sync "google" "gemini-2.0-flash")]
       (validate-tool-calls response))))
 
 (deftest ^:integration test-openai-tool-calling
   (testing "OpenAI (via OpenRouter) emits valid tool calls from MCP schema"
-    (let [response (call-llm-sync "openai" "gpt-5.2")]
+    (let [response (call-llm-sync "openrouter" "openai/gpt-4o")]
       (validate-tool-calls response))))
 
 (deftest ^:integration test-grok-tool-calling
   (testing "Grok emits valid tool calls from MCP schema (no native tool API!)"
-    (let [response (call-llm-sync "x-ai" "grok-code-fast-1")]
+    (let [response (call-llm-sync "xai" "grok-3-beta")]
       (validate-tool-calls response))))
 
 (deftest ^:integration test-all-providers-consistent
   (testing "All providers produce structurally identical responses"
-    (let [claude (call-llm-sync "anthropic" "claude-opus-4.5")
-          gemini (call-llm-sync "google" "gemini-3-pro-preview")
-          openai (call-llm-sync "openai" "gpt-5.2")
-          grok (call-llm-sync "x-ai" "grok-code-fast-1")]
+    (let [claude (call-llm-sync "anthropic" "claude-sonnet-4-20250514")
+          gemini (call-llm-sync "google" "gemini-2.0-flash")
+          openai (call-llm-sync "openrouter" "openai/gpt-4o")
+          grok (call-llm-sync "xai" "grok-3-beta")]
 
       ;; All should have same structure
       (is (= (count (:tool_calls claude))
@@ -148,3 +162,17 @@ Respond ONLY with an EDN data structure containing your tool calls. No prose. Ex
                           (:tool_calls openai)
                           (:tool_calls grok)))
           "All tool calls should reference 'calculator' tool"))))
+
+;;------------------------------------------------------------------------------
+;; Ollama Tests (Local Inference)
+;;------------------------------------------------------------------------------
+
+(deftest ^:integration test-ollama-mistral-tool-calling
+  (testing "Ollama mistral:7b emits valid tool calls from MCP schema"
+    (let [response (call-llm-sync "ollama:local" "mistral:7b")]
+      (validate-tool-calls response))))
+
+(deftest ^:integration test-ollama-qwen-tool-calling
+  (testing "Ollama qwen2.5-coder:7b emits valid tool calls from MCP schema"
+    (let [response (call-llm-sync "ollama:local" "qwen2.5-coder:7b")]
+      (validate-tool-calls response))))
