@@ -24,6 +24,10 @@
    ;; HTTP client
    [clj-http.client :refer [post]]
 
+   ;; HTML generation
+   [hiccup.core :refer [html]]
+   [hiccup.page :refer [html5]]
+
    ;; Internal
    [claij.util :refer [assert-env-var clj->json json->clj]]
    [claij.graph :as graph]
@@ -113,6 +117,31 @@
 (defn list-fsms-handler [_]
   {:status 200
    :body (vec (keys fsms))})
+
+(defn fsms-html-handler
+  "Return HTML page listing all FSMs"
+  [_]
+  {:status 200
+   :headers {"Content-Type" "text/html"}
+   :body (html5
+          [:head
+           [:title "CLAIJ FSM Catalogue"]
+           [:style "body { font-family: system-ui; max-width: 800px; margin: 2em auto; padding: 1em; }
+                    table { border-collapse: collapse; width: 100%; }
+                    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                    tr:hover { background: #f5f5f5; }
+                    a { color: #0066cc; }"]]
+          [:body
+           [:h1 "FSM Catalogue"]
+           [:table
+            [:thead [:tr [:th "ID"] [:th "Links"]]]
+            [:tbody
+             (for [id (keys fsms)]
+               [:tr
+                [:td [:a {:href (str "/fsm/" id)} id]]
+                [:td [:a {:href (str "/fsm/" id "/graph.svg")} "SVG"]
+                 " | "
+                 [:a {:href (str "/fsm/" id "/document")} "JSON"]]])]]])})
 
 (defn fsm-document-handler [{{:keys [fsm-id]} :path-params}]
   (if-let [fsm (get fsms fsm-id)]
@@ -318,8 +347,12 @@ a{color:#00ff88;font-size:1.2em}ol{line-height:2}</style></head>
                              :body "Certificate not found. Run bin/gen-ssl-cert.sh first."}))))}}]
 
    ["/fsms"
+    [""
+     {:get {:no-doc true
+            :produces ["text/html"]
+            :handler fsms-html-handler}}]
     ["/list"
-     {:get {:summary "List available FSMs"
+     {:get {:summary "List available FSMs (JSON)"
             :responses {200 {:body [:vector :string]}}
             :handler list-fsms-handler}}]]
 
