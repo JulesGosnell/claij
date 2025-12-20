@@ -1,18 +1,23 @@
-digraph "code-review" {
+digraph "bdd" {
   rankdir=TB;
   node [shape=box, style=rounded, fontname="Helvetica", fontsize=10];
   edge [fontname="Helvetica", fontsize=9];
   
-  title [shape=plaintext label=<<FONT POINT-SIZE="14" COLOR="gray40">Code Review FSM with MCP Hat</FONT>>];
+  // Title
+  title [shape=plaintext label=<<FONT POINT-SIZE="14" COLOR="gray40">Bath Driven Development FSM</FONT>>];
   { rank=same title }
   title -> "start" [style=invis];
   
+  // Terminal states
   "start" [shape=doublecircle, fillcolor=lightgreen, style=filled];
   "end"   [shape=doublecircle, fillcolor=lightcoral, style=filled];
 
-  "mc" [label="mc\n(llm + mcp hat)\nOrchestrates code review\nCan use MCP tools to read files"];
-  "reviewer" [label="reviewer\n(llm)\nReviews code for concerns"];
+  // Main states
+  "stt" [label="stt\n(openapi-call)\nSpeech to Text"];
+  "mc" [label="mc\n(llm + mcp hat)\nMaster of Ceremonies\nGitHub + Clojure tools"];
+  "tts" [label="tts\n(openapi-call)\nText to Speech"];
 
+  // Hat-generated cluster
   subgraph cluster_mc_hat {
     label="Hat-generated";
     style=dashed;
@@ -22,11 +27,13 @@ digraph "code-review" {
     "mc-mcp" [label="mc-mcp\n(mcp-service)\nExecutes tool calls" style="rounded,dashed"];
   }
 
-  "start" -> "mc" [label="entry"];
-  "mc" -> "reviewer" [label="request review"];
-  "reviewer" -> "mc" [label="review results"];
-  "mc" -> "end" [label="summary"];
+  // Main flow transitions
+  "start" -> "stt" [label="audio in"];
+  "stt" -> "mc" [label="transcribed"];
+  "mc" -> "tts" [label="response"];
+  "tts" -> "end" [label="audio out"];
   
+  // Hat transitions (dashed)
   "mc" -> "mc-mcp" [label="tool calls" style=dashed];
   "mc-mcp" -> "mc" [label="tool results" style=dashed];
 }
