@@ -126,7 +126,7 @@
       (is (contains? ctx :llm/model))
       (is (contains? ctx :hats))
       (is (= "ollama:local" (:llm/service ctx)))
-      (is (= "deepseek-coder-v2:16b" (:llm/model ctx)))))
+      (is (= "deepseek-coder-v2:16b-32k" (:llm/model ctx)))))
 
   (testing "Creates context with custom values"
     (let [ctx (make-bdd-context {:service "anthropic"
