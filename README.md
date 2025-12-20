@@ -181,6 +181,12 @@ See [Issue #50](https://github.com/JulesGosnell/claij/issues/50) for the Evals r
 
 ## Working Examples
 
+### Bath Driven Development
+
+Voice-controlled development from the bathtub. Speak a command → STT transcribes → LLM processes with GitHub/Clojure tools → TTS speaks the response. Local Ollama inference, zero cloud costs.
+
+![BDD FSM](doc/bdd-fsm.svg)
+
 ### Multi-LLM Code Review
 
 A Master of Ceremonies coordinates specialist reviewers. The MC delegates, aggregates feedback, iterates until no new issues emerge, then summarizes. Multiple LLMs, focused concerns, emergent quality.

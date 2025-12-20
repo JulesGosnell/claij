@@ -63,12 +63,13 @@
      auth     - Auth config map or nil
      model    - Model name (native to service)
      messages - Vector of message maps [{\"role\" \"user\" \"content\" \"...\"}]
+     options  - Strategy-specific options (e.g., {:num_ctx 32768} for Ollama)
    
    Returns:
      {:url     string
       :headers map
       :body    string (JSON encoded)}"
-  (fn [strategy _url _auth _model _messages] strategy))
+  (fn [strategy _url _auth _model _messages _options] strategy))
 
 (defmethod make-request "openai-compat"
   [_strategy url auth model messages options]
