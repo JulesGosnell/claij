@@ -135,7 +135,7 @@
                                   "https://api.anthropic.com/v1/messages"
                                   {:type :x-api-key :env "ANTHROPIC_API_KEY"}
                                   "claude-sonnet-4-20250514"
-                                  messages-with-system)
+                                  messages-with-system nil)
             body (json/parse-string (:body req) true)]
         (is (= "You are a helpful assistant." (:system body)))
         (is (= [{:role "user" :content "Hello!"}] (:messages body)))))))
@@ -166,7 +166,7 @@
                                   "https://generativelanguage.googleapis.com/v1beta/models"
                                   {:type :x-goog-api-key :env "GOOGLE_API_KEY"}
                                   "gemini-2.0-flash"
-                                  messages-with-system)
+                                  messages-with-system nil)
             body (json/parse-string (:body req) true)]
         (is (= {:parts [{:text "You are a helpful assistant."}]}
                (:systemInstruction body)))
@@ -223,7 +223,7 @@
     (let [req (svc/build-request-from-registry test-registry
                                                "ollama:local"
                                                "mistral:7b"
-                                               simple-messages nil)
+                                               simple-messages)
           body (json/parse-string (:body req) true)]
       (is (= "http://prognathodon:11434/v1/chat/completions" (:url req)))
       (is (= "mistral:7b" (:model body))))))
@@ -235,7 +235,7 @@
         (let [req (svc/build-request-from-registry test-registry
                                                    service-name
                                                    "test-model"
-                                                   simple-messages nil)]
+                                                   simple-messages)]
           (is (string? (:url req)) (str service-name " should have URL"))
           (is (map? (:headers req)) (str service-name " should have headers"))
           (is (string? (:body req)) (str service-name " should have JSON body")))))))
@@ -253,7 +253,7 @@
       (let [response (svc/call-llm-sync test-registry
                                         "ollama:local"
                                         "mistral:7b"
-                                        simple-messages nil)]
+                                        simple-messages)]
         (is (= "Mocked response" response)))))
 
   (testing "Anthropic strategy parsing"
@@ -263,7 +263,7 @@
       (let [response (svc/call-llm-sync test-registry
                                         "anthropic"
                                         "claude-sonnet-4-20250514"
-                                        simple-messages nil)]
+                                        simple-messages)]
         (is (= "Anthropic response" response)))))
 
   (testing "Google strategy parsing"
@@ -273,7 +273,7 @@
       (let [response (svc/call-llm-sync test-registry
                                         "google"
                                         "gemini-2.0-flash"
-                                        simple-messages nil)]
+                                        simple-messages)]
         (is (= "Google response" response))))))
 
 (deftest test-call-llm-async
