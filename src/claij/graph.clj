@@ -8,13 +8,6 @@
 ;; - Alternatives: Cytoscape.js or vis.js (easier animation but different layout).
 ;; Recommendation: d3-graphviz = same look + easy real-time highlighting.
 
-;; TODO: Enhance transition labels by using Malli schema documentation.
-;; Malli schemas support :description in map metadata, e.g. [:map {:description "..."} ...]
-;; Plan: When schemas are updated, add :description to each transition's schema.
-;; Then update label logic:
-;;   prefer xition "label" → xition "description" → schema :description → fallback to 'to' state
-;; This gives concise edge labels while keeping full details available if needed.
-
 ;; thanks Grok
 
 (defn fsm->dot [fsm]
@@ -25,16 +18,6 @@
          xitions "xitions"
          :or {fsm-id "fsm" states [] xitions []}} fsm
         title-text (or fsm-desc (some->> fsm-prompts (join "\\n")))
-        ;; Escape quotes and limit label length for readability
-        escape-label (fn [s]
-                       (-> s
-                           (string-replace "\"" "\\\"")
-                           (string-replace "\n" "\\n")))
-        truncate-label (fn [s max-len]
-                         (if (> (count s) max-len)
-                           (str (subs s 0 max-len) "...")
-                           s))
-        ;; Quote node IDs to handle hyphens and special chars
         quote-id (fn [id] (str "\"" id "\""))]
     (str "digraph \"" fsm-id "\" {\n"
          "  rankdir=TB;\n"
@@ -52,26 +35,21 @@
          (apply str
                 (for [{id "id" desc "description" action "action" prompts "prompts"} states
                       :when (and id (not= id "start") (not= id "end"))
-                      :let [;; Use description if available, otherwise id
-                            display-name (or desc id)
-                            ;; Truncate long prompts for graph readability
-                            prompt-text (when (seq prompts)
-                                          (truncate-label (join " " prompts) 80))
-                            prompt-label (when prompt-text
-                                           (str "\\n" (escape-label prompt-text)))]]
+                      :let [display-name (or desc id)
+                            prompt-label (when (seq prompts)
+                                           (str "\\n" (string-replace (join "\\n" prompts) "\n" "\\n")))]]
                   (format "  %s [label=\"%s%s%s\"];\n"
                           (quote-id id) display-name (if action (str "\\n(" action ")") "") (or prompt-label ""))))
          "\n  // transitions\n"
          (apply str
                 (for [{[from to] "id" label "label" desc "description"} xitions
-                      :let [;; Only show label if explicitly provided (not just destination)
-                            texts (filter seq [label desc])
-                            edge-label (when (seq texts) (escape-label (join "\\n" texts)))
-                            from-id (quote-id (if (= from "start") "start" from))
-                            to-id (quote-id (if (= to "end") "end" to))]]
-                  (if edge-label
-                    (format "  %s -> %s [label=\"%s\"];\n" from-id to-id edge-label)
-                    (format "  %s -> %s;\n" from-id to-id))))
+                      :let [texts (filter seq [label desc])
+                            text (if (seq texts) (join "\\n" texts) to)
+                            edge-label (string-replace text "\n" "\\n")]]
+                  (format "  %s -> %s [label=\"%s\"];\n"
+                          (quote-id (if (= from "start") "start" from))
+                          (quote-id (if (= to "end") "end" to))
+                          edge-label)))
          "}\n")))
 
 (defn fsm->dot-with-hats
@@ -114,23 +92,12 @@
             xitions "xitions"
             :or {fsm-id "fsm" states [] xitions []}} expanded-fsm
            title-text (or fsm-desc (some->> fsm-prompts (join "\\n")))
-           escape-label (fn [s]
-                          (-> s
-                              (string-replace "\"" "\\\"")
-                              (string-replace "\n" "\\n")))
-           truncate-label (fn [s max-len]
-                            (if (> (count s) max-len)
-                              (str (subs s 0 max-len) "...")
-                              s))
            quote-id (fn [id] (str "\"" id "\""))
            hat-state-ids (set (map #(get % "id") hat-states))
            render-state (fn [{id "id" desc "description" action "action" prompts "prompts"}]
-                          (let [;; Use description if available, otherwise id
-                                display-name (or desc id)
-                                prompt-text (when (seq prompts)
-                                              (truncate-label (join " " prompts) 80))
-                                prompt-label (when prompt-text
-                                               (str "\\n" (escape-label prompt-text)))]
+                          (let [display-name (or desc id)
+                                prompt-label (when (seq prompts)
+                                               (str "\\n" (string-replace (join "\\n" prompts) "\n" "\\n")))]
                             (format "    %s [label=\"%s%s%s\"];\n"
                                     (quote-id id) display-name
                                     (if action (str "\\n(" action ")") "")
@@ -158,27 +125,26 @@
                      (render-state state)))
             "\n  // hat clusters\n"
             (apply str
-                   (for [[parent-id hat-states] hat-groups
+                   (for [[parent-id group-states] hat-groups
                          :let [cluster-name (str "cluster_" (string-replace parent-id "-" "_"))
                                ;; Use first hat state's description for cluster label if available
-                               cluster-label (or (some #(get % "description") hat-states)
+                               cluster-label (or (some #(get % "description") group-states)
                                                  (str parent-id " hat"))]]
                      (str "  subgraph " cluster-name " {\n"
                           "    label=\"" cluster-label "\";\n"
                           "    style=dashed;\n"
                           "    color=gray60;\n"
                           "    fontcolor=gray40;\n"
-                          (apply str (map render-state hat-states))
+                          (apply str (map render-state group-states))
                           "  }\n")))
             "\n  // transitions\n"
             (apply str
                    (for [{[from to] "id" label "label" desc "description"} xitions
-                         :let [;; Only show label if explicitly provided
-                               texts (filter seq [label desc])
-                               edge-label (when (seq texts) (escape-label (join "\\n" texts)))
-                               from-id (quote-id (if (= from "start") "start" from))
-                               to-id (quote-id (if (= to "end") "end" to))]]
-                     (if edge-label
-                       (format "  %s -> %s [label=\"%s\"];\n" from-id to-id edge-label)
-                       (format "  %s -> %s;\n" from-id to-id))))
+                         :let [texts (filter seq [label desc])
+                               text (if (seq texts) (join "\\n" texts) to)
+                               edge-label (string-replace text "\n" "\\n")]]
+                     (format "  %s -> %s [label=\"%s\"];\n"
+                             (quote-id (if (= from "start") "start" from))
+                             (quote-id (if (= to "end") "end" to))
+                             edge-label)))
             "}\n")))))
