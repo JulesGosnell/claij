@@ -125,18 +125,23 @@
    :headers {"Content-Type" "text/html"}
    :body (html5
           [:head
+           [:meta {:charset "UTF-8"}]
            [:title "CLAIJ FSM Catalogue"]
            [:style "body { font-family: system-ui; max-width: 800px; margin: 2em auto; padding: 1em; }
                     table { border-collapse: collapse; width: 100%; }
                     th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                    th { background: #f9f9f9; }
                     tr:hover { background: #f5f5f5; }
-                    a { color: #0066cc; }"]]
+                    a { color: #0066cc; }
+                    h1 { margin-bottom: 0.5em; }
+                    .subtitle { color: #666; margin-bottom: 1.5em; }"]]
           [:body
            [:h1 "FSM Catalogue"]
+           [:p.subtitle (str (count fsms) " finite state machines")]
            [:table
             [:thead [:tr [:th "ID"] [:th "Links"]]]
             [:tbody
-             (for [id (keys fsms)]
+             (for [id (sort (keys fsms))]
                [:tr
                 [:td [:a {:href (str "/fsm/" id)} id]]
                 [:td [:a {:href (str "/fsm/" id "/graph.svg")} "SVG"]
