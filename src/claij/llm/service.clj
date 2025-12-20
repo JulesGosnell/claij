@@ -241,27 +241,33 @@
 ;;------------------------------------------------------------------------------
 
 (def default-registry
-  "Default service registry. Can be overridden in context."
-  {"ollama:local" {:strategy "openai-compat"
-                   :url "http://localhost:11434/v1/chat/completions"
-                   :auth nil}
+  "Default service registry. Can be overridden in context.
+   
+   Environment variables:
+   - OLLAMA_HOST: Ollama server host (default: localhost)
+   - OLLAMA_PORT: Ollama server port (default: 11434)"
+  (let [ollama-host (or (get-env "OLLAMA_HOST") "localhost")
+        ollama-port (or (get-env "OLLAMA_PORT") "11434")]
+    {"ollama:local" {:strategy "openai-compat"
+                     :url (str "http://" ollama-host ":" ollama-port "/v1/chat/completions")
+                     :auth nil}
 
-   "openrouter" {:strategy "openai-compat"
-                 :url "https://openrouter.ai/api/v1/chat/completions"
-                 :auth {:type :bearer :env "OPENROUTER_API_KEY"}}
+     "openrouter" {:strategy "openai-compat"
+                   :url "https://openrouter.ai/api/v1/chat/completions"
+                   :auth {:type :bearer :env "OPENROUTER_API_KEY"}}
 
-   "anthropic" {:strategy "anthropic"
-                :url "https://api.anthropic.com/v1/messages"
-                :auth {:type :x-api-key :env "ANTHROPIC_API_KEY"}}
+     "anthropic" {:strategy "anthropic"
+                  :url "https://api.anthropic.com/v1/messages"
+                  :auth {:type :x-api-key :env "ANTHROPIC_API_KEY"}}
 
-   "google" {:strategy "google"
-             :url "https://generativelanguage.googleapis.com/v1beta/models"
-             :auth {:type :x-goog-api-key :env "GOOGLE_API_KEY"}}
+     "google" {:strategy "google"
+               :url "https://generativelanguage.googleapis.com/v1beta/models"
+               :auth {:type :x-goog-api-key :env "GOOGLE_API_KEY"}}
 
-   "xai" {:strategy "openai-compat"
-          :url "https://api.x.ai/v1/chat/completions"
-          :auth {:type :bearer :env "XAI_API_KEY"}}
+     "xai" {:strategy "openai-compat"
+            :url "https://api.x.ai/v1/chat/completions"
+            :auth {:type :bearer :env "XAI_API_KEY"}}
 
-   "openai" {:strategy "openai-compat"
-             :url "https://api.openai.com/v1/chat/completions"
-             :auth {:type :bearer :env "OPENAI_API_KEY"}}})
+     "openai" {:strategy "openai-compat"
+               :url "https://api.openai.com/v1/chat/completions"
+               :auth {:type :bearer :env "OPENAI_API_KEY"}}}))
