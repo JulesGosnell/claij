@@ -76,7 +76,7 @@
                                 "http://prognathodon:11434/v1/chat/completions"
                                 nil
                                 "mistral:7b"
-                                simple-messages)
+                                simple-messages nil)
           body (json/parse-string (:body req) true)]
       (is (= "http://prognathodon:11434/v1/chat/completions" (:url req)))
       (is (= "application/json" (get-in req [:headers "Content-Type"])))
@@ -90,7 +90,7 @@
                                   "https://openrouter.ai/api/v1/chat/completions"
                                   {:type :bearer :env "OPENROUTER_API_KEY"}
                                   "anthropic/claude-sonnet-4"
-                                  simple-messages)
+                                  simple-messages nil)
             body (json/parse-string (:body req) true)]
         (is (= "https://openrouter.ai/api/v1/chat/completions" (:url req)))
         (is (= "Bearer or-key-123" (get-in req [:headers "Authorization"])))
@@ -102,7 +102,7 @@
                                   "https://api.x.ai/v1/chat/completions"
                                   {:type :bearer :env "XAI_API_KEY"}
                                   "grok-3-beta"
-                                  simple-messages)
+                                  simple-messages nil)
             body (json/parse-string (:body req) true)]
         (is (= "https://api.x.ai/v1/chat/completions" (:url req)))
         (is (= "Bearer xai-key" (get-in req [:headers "Authorization"])))
@@ -119,7 +119,7 @@
                                   "https://api.anthropic.com/v1/messages"
                                   {:type :x-api-key :env "ANTHROPIC_API_KEY"}
                                   "claude-sonnet-4-20250514"
-                                  simple-messages)
+                                  simple-messages nil)
             body (json/parse-string (:body req) true)]
         (is (= "https://api.anthropic.com/v1/messages" (:url req)))
         (is (= "anthro-key" (get-in req [:headers "x-api-key"])))
@@ -151,7 +151,7 @@
                                   "https://generativelanguage.googleapis.com/v1beta/models"
                                   {:type :x-goog-api-key :env "GOOGLE_API_KEY"}
                                   "gemini-2.0-flash"
-                                  simple-messages)
+                                  simple-messages nil)
             body (json/parse-string (:body req) true)]
         (is (= "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
                (:url req)))
@@ -179,7 +179,7 @@
                                   "https://generativelanguage.googleapis.com/v1beta/models"
                                   {:type :x-goog-api-key :env "GOOGLE_API_KEY"}
                                   "gemini-2.0-flash"
-                                  multi-turn-messages)
+                                  multi-turn-messages nil)
             body (json/parse-string (:body req) true)]
         (is (= [{:role "user" :parts [{:text "What is a lazy sequence?"}]}
                 {:role "model" :parts [{:text "A lazy sequence is..."}]}
@@ -223,7 +223,7 @@
     (let [req (svc/build-request-from-registry test-registry
                                                "ollama:local"
                                                "mistral:7b"
-                                               simple-messages)
+                                               simple-messages nil)
           body (json/parse-string (:body req) true)]
       (is (= "http://prognathodon:11434/v1/chat/completions" (:url req)))
       (is (= "mistral:7b" (:model body))))))
@@ -235,7 +235,7 @@
         (let [req (svc/build-request-from-registry test-registry
                                                    service-name
                                                    "test-model"
-                                                   simple-messages)]
+                                                   simple-messages nil)]
           (is (string? (:url req)) (str service-name " should have URL"))
           (is (map? (:headers req)) (str service-name " should have headers"))
           (is (string? (:body req)) (str service-name " should have JSON body")))))))
@@ -253,7 +253,7 @@
       (let [response (svc/call-llm-sync test-registry
                                         "ollama:local"
                                         "mistral:7b"
-                                        simple-messages)]
+                                        simple-messages nil)]
         (is (= "Mocked response" response)))))
 
   (testing "Anthropic strategy parsing"
@@ -263,7 +263,7 @@
       (let [response (svc/call-llm-sync test-registry
                                         "anthropic"
                                         "claude-sonnet-4-20250514"
-                                        simple-messages)]
+                                        simple-messages nil)]
         (is (= "Anthropic response" response)))))
 
   (testing "Google strategy parsing"
@@ -273,7 +273,7 @@
       (let [response (svc/call-llm-sync test-registry
                                         "google"
                                         "gemini-2.0-flash"
-                                        simple-messages)]
+                                        simple-messages nil)]
         (is (= "Google response" response))))))
 
 (deftest test-call-llm-async

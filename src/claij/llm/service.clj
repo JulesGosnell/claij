@@ -71,15 +71,16 @@
   (fn [strategy _url _auth _model _messages] strategy))
 
 (defmethod make-request "openai-compat"
-  [_strategy url auth model messages]
+  [_strategy url auth model messages options]
   {:url url
    :headers (merge {"Content-Type" "application/json"}
                    (resolve-auth auth))
-   :body (json/generate-string {:model model
-                                :messages messages})})
+   :body (json/generate-string (merge {:model model
+                                       :messages messages}
+                                      options))})
 
 (defmethod make-request "anthropic"
-  [_strategy url auth model messages]
+  [_strategy url auth model messages _options]
   (let [system-msgs (filter #(= "system" (get % "role")) messages)
         system-text (when (seq system-msgs)
                       (str/join "\n\n" (map #(get % "content") system-msgs)))
@@ -95,7 +96,7 @@
               system-text (assoc :system system-text)))}))
 
 (defmethod make-request "google"
-  [_strategy url auth model messages]
+  [_strategy url auth model messages _options]
   (let [full-url (str url "/" model ":generateContent")
         system-msgs (filter #(= "system" (get % "role")) messages)
         system-text (when (seq system-msgs)
@@ -173,8 +174,8 @@
    Returns:
      clj-http request map"
   [registry service model messages]
-  (let [{:keys [strategy url auth]} (lookup-service registry service)]
-    (make-request strategy url auth model messages)))
+  (let [{:keys [strategy url auth options]} (lookup-service registry service)]
+    (make-request strategy url auth model messages options)))
 
 ;;------------------------------------------------------------------------------
 ;; HTTP Execution
@@ -250,7 +251,8 @@
         ollama-port (or (get-env "OLLAMA_PORT") "11434")]
     {"ollama:local" {:strategy "openai-compat"
                      :url (str "http://" ollama-host ":" ollama-port "/v1/chat/completions")
-                     :auth nil}
+                     :auth nil
+                     :options {:num_ctx 32768}} ;; Ollama context window (default 4096 too small)
 
      "openrouter" {:strategy "openai-compat"
                    :url "https://openrouter.ai/api/v1/chat/completions"
