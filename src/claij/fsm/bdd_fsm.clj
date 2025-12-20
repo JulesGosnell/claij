@@ -160,18 +160,22 @@
    "xitions"
    [;; Entry: audio bytes in
     {"id" ["start" "stt"]
+     "label" "audio in"
      "schema" [:ref "entry"]}
 
     ;; STT → MC: openapi-call response with text in body
     {"id" ["stt" "mc"]
+     "label" "transcribed"
      "schema" [:ref "stt-to-mc"]}
 
     ;; MC → TTS: LLM response text for synthesis
     {"id" ["mc" "tts"]
+     "label" "response"
      "schema" [:ref "mc-to-tts"]}
 
     ;; TTS → end: audio bytes out
     {"id" ["tts" "end"]
+     "label" "audio out"
      "schema" [:ref "exit"]}]})
 
 ;;; ============================================================
