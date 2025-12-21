@@ -7,8 +7,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [clojure.string :refer [includes?]]
-   [claij.graph :refer [fsm->dot fsm->dot-with-hats]]
-   [claij.hat]))
+   [claij.graph :refer [fsm->dot fsm->dot-with-hats]]))
 
 ;; DOT format constants - these are Graphviz standard syntax elements
 (def ^:private dot-digraph-prefix "digraph")
@@ -114,66 +113,70 @@
 
   (testing "fsm->dot-with-hats"
 
-    (testing "expands hat-generated states with prompts"
-      (let [;; Mock hat-maker that adds a service state with prompts (long to trigger truncation)
-            mock-hat-maker (fn [state-id _config]
-                             (fn [context]
-                               [context
-                                {"states" [{"id" (str state-id "-svc")
-                                            "description" "Mock Service"
-                                            "action" "service"
-                                            "prompts" [(apply str (repeat 100 "Long prompt text. "))]}]
-                                 "xitions" [{"id" [state-id (str state-id "-svc")] "label" "to svc"}
-                                            {"id" [(str state-id "-svc") state-id] "description" "back to parent"}]
-                                 "prompts" []}]))
-            registry (-> (claij.hat/make-hat-registry)
-                         (claij.hat/register-hat "mock" mock-hat-maker))
-            fsm {"id" "hat-fsm"
-                 "description" "Test FSM with hats"
-                 "states" [{"id" "mc" "hats" ["mock"]}]
-                 "xitions" [{"id" ["start" "mc"]}
-                            {"id" ["mc" "end"]}]}
-            dot (fsm->dot-with-hats fsm registry)]
-        ;; Should have original state (quoted)
-        (is (includes? dot "\"mc\" [label=")
+    (testing "expands mcp hat to service state with loopback transitions"
+      (let [fsm {"id" "hat-fsm"
+                 "description" "Test FSM with MCP hat"
+                 "states" [{"id" "llm" "action" "llm" "hats" ["mcp"]}]
+                 "xitions" [{"id" ["start" "llm"]}
+                            {"id" ["llm" "end"]}]}
+            dot (fsm->dot-with-hats fsm)]
+        ;; Should have original state
+        (is (includes? dot "\"llm\" [label=")
             "Original state should appear")
-        ;; Should have hat-generated state with description as label
-        (is (includes? dot "\"mc-svc\" [label=\"Mock Service")
-            "Hat-generated state should use description as label")
-        ;; Prompts should be truncated
-        (is (includes? dot "...")
-            "Long prompts should be truncated")
-        ;; Should have hat-generated transitions with labels
-        (is (includes? dot "[label=\"to svc\"]")
-            "Hat transition label should appear")
-        (is (includes? dot "[label=\"back to parent\"]")
-            "Hat transition description should appear")
-        ;; Should have cluster box with description as label
-        (is (includes? dot "subgraph cluster_mc")
+        ;; Should have hat label on state
+        (is (includes? dot "[mcp]")
+            "Hat name should appear in state label")
+        ;; Should have hat-generated MCP service state
+        (is (includes? dot "\"llm-mcp\" [label=\"MCP Tools")
+            "MCP service state should be generated")
+        (is (includes? dot "(mcp-service)")
+            "MCP service should have mcp-service action")
+        ;; Should have loopback transitions
+        (is (includes? dot "[label=\"tool-call\"]")
+            "Tool-call transition should be generated")
+        (is (includes? dot "[label=\"tool-result\"]")
+            "Tool-result transition should be generated")
+        ;; Should have cluster for hat states
+        (is (includes? dot "subgraph cluster_llm")
             "Hat states should be in a cluster")
-        (is (includes? dot "label=\"Mock Service\"")
-            "Cluster should use hat state description as label")
+        (is (includes? dot "label=\"llm hats\"")
+            "Cluster should have label")
         ;; FSM description should appear
-        (is (includes? dot "Test FSM with hats")
+        (is (includes? dot "Test FSM with MCP hat")
             "FSM description should appear in title")))
 
-    (testing "falls back to hat label when no description"
-      (let [;; Mock hat-maker with no description
-            mock-hat-maker (fn [state-id _config]
-                             (fn [context]
-                               [context
-                                {"states" [{"id" (str state-id "-svc")
-                                            "action" "service"}]
-                                 "xitions" [{"id" [state-id (str state-id "-svc")]}
-                                            {"id" [(str state-id "-svc") state-id]}]
-                                 "prompts" []}]))
-            registry (-> (claij.hat/make-hat-registry)
-                         (claij.hat/register-hat "mock" mock-hat-maker))
-            fsm {"id" "hat-fsm"
-                 "states" [{"id" "mc" "hats" ["mock"]}]
-                 "xitions" [{"id" ["start" "mc"]}
-                            {"id" ["mc" "end"]}]}
-            dot (fsm->dot-with-hats fsm registry)]
-        ;; Should fall back to "mc hat" for cluster label
-        (is (includes? dot "label=\"mc hat\"")
-            "Cluster should fall back to parent-id + ' hat' when no description")))))
+    (testing "expands mcp hat with config (map form)"
+      (let [fsm {"id" "config-hat-fsm"
+                 "states" [{"id" "chairman"
+                            "action" "llm"
+                            "hats" [{:mcp {:servers {"github" {:config {}}}}}]}]
+                 "xitions" [{"id" ["start" "chairman"]}
+                            {"id" ["chairman" "end"]}]}
+            dot (fsm->dot-with-hats fsm)]
+        ;; Should expand mcp hat even with config
+        (is (includes? dot "\"chairman-mcp\"")
+            "MCP service state should be generated for chairman")
+        (is (includes? dot "subgraph cluster_chairman")
+            "Chairman hat cluster should exist")))
+
+    (testing "non-mcp hats show as labels only"
+      (let [fsm {"id" "other-hat-fsm"
+                 "states" [{"id" "state1" "hats" ["unknown-hat"]}]
+                 "xitions" []}
+            dot (fsm->dot-with-hats fsm)]
+        ;; Should show hat name in label
+        (is (includes? dot "[unknown-hat]")
+            "Unknown hat should appear as label")
+        ;; Should NOT create service state for unknown hats
+        (is (not (includes? dot "state1-unknown"))
+            "Unknown hats should not generate service states")))
+
+    (testing "state without hats renders normally"
+      (let [fsm {"id" "no-hat-fsm"
+                 "states" [{"id" "plain" "action" "do-stuff"}]
+                 "xitions" []}
+            dot (fsm->dot-with-hats fsm)]
+        (is (includes? dot "\"plain\" [label=\"plain")
+            "State without hats should render normally")
+        (is (not (includes? dot "subgraph cluster"))
+            "No clusters when no hats expanded")))))
