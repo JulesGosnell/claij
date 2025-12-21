@@ -26,7 +26,16 @@
         truncate-label (fn [s max-len]
                          (if (> (count s) max-len)
                            (str (subs s 0 max-len) "...")
-                           s))]
+                           s))
+        format-hats (fn [hats]
+                      (when (seq hats)
+                        (str "\\n["
+                             (join ", " (map (fn [h]
+                                               (if (map? h)
+                                                 (name (first (keys h)))
+                                                 (str h)))
+                                             hats))
+                             "]")))]
     (str "digraph \"" fsm-id "\" {\n"
          "  rankdir=TB;\n"
          "  node [shape=box, style=rounded, fontname=\"Helvetica\", fontsize=10];\n"
@@ -41,15 +50,19 @@
          "  \"end\"   [shape=doublecircle, fillcolor=lightcoral, style=filled];\n"
          "\n  // states\n"
          (apply str
-                (for [{id "id" desc "description" action "action" prompts "prompts"} states
+                (for [{id "id" desc "description" action "action" prompts "prompts" hats "hats"} states
                       :when (and id (not= id "start") (not= id "end"))
                       :let [display-name (or desc id)
                             prompt-text (when (seq prompts)
                                           (truncate-label (join " " prompts) 80))
                             prompt-label (when prompt-text
-                                           (str "\\n" (escape-label prompt-text)))]]
-                  (format "  %s [label=\"%s%s%s\"];\n"
-                          (quote-id id) display-name (if action (str "\\n(" action ")") "") (or prompt-label ""))))
+                                           (str "\\n" (escape-label prompt-text)))
+                            hat-label (format-hats hats)]]
+                  (format "  %s [label=\"%s%s%s%s\"];\n"
+                          (quote-id id) display-name
+                          (if action (str "\\n(" action ")") "")
+                          (or hat-label "")
+                          (or prompt-label ""))))
          "\n  // transitions\n"
          (apply str
                 (for [{[from to] "id" label "label" desc "description"} xitions
