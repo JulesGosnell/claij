@@ -212,7 +212,7 @@
               [:h2 "Graph"]
               [:div.graph-container
                [:object {:type "image/svg+xml"
-                         :data (str "/fsm/" fsm-id "/graph.svg")
+                         :data (str "/fsm/" fsm-id "/graph.svg?hats=true")
                          :style "min-height: 150px; max-height: 500px;"}
                 "Your browser does not support SVG"]]]
 
@@ -308,16 +308,12 @@
                               {:strs [hats]} :query-params}]
   (if-let [fsm (get fsms fsm-id)]
     (let [dot-str (if hats
-                    ;; Expand hats - need context with hat registry
-                    (let [ctx (case fsm-id
-                                "bdd" (bdd/make-bdd-context {})
-                                ;; Default: no hats available
-                                {:hats {:registry (hat/make-hat-registry)}})
-                          registry (get-in ctx [:hats :registry])]
-                      (graph/fsm->dot-with-hats fsm registry ctx))
+                    ;; Expand hats for visualization (no MCP connection needed)
+                    (graph/fsm->dot-with-hats fsm)
                     (graph/fsm->dot fsm))]
       {:status 200
-       :headers {"content-type" "image/svg+xml"}
+       :headers {"content-type" "image/svg+xml"
+                 "cache-control" "no-cache, no-store, must-revalidate"}
        :body (dot->svg dot-str)})
     {:status 404
      :body {:error (str "FSM not found: " fsm-id)}}))
