@@ -179,4 +179,60 @@
         (is (includes? dot "\"plain\" [label=\"plain")
             "State without hats should render normally")
         (is (not (includes? dot "subgraph cluster"))
-            "No clusters when no hats expanded")))))
+            "No clusters when no hats expanded")))
+
+    (testing "keyword hat declarations are parsed correctly"
+      (let [fsm {"id" "keyword-hat-fsm"
+                 "states" [{"id" "agent" "hats" [:mcp]}]
+                 "xitions" []}
+            dot (fsm->dot-with-hats fsm)]
+        (is (includes? dot "[mcp]")
+            "Keyword hat should be displayed")
+        (is (includes? dot "\"agent-mcp\"")
+            "Keyword mcp hat should expand to service state")))
+
+    (testing "string key in map form hat declaration"
+      (let [fsm {"id" "string-key-hat-fsm"
+                 "states" [{"id" "bot" "hats" [{"mcp" {:timeout 5000}}]}]
+                 "xitions" []}
+            dot (fsm->dot-with-hats fsm)]
+        (is (includes? dot "[mcp]")
+            "String key hat should be displayed")
+        (is (includes? dot "\"bot-mcp\"")
+            "String key mcp hat should expand")))
+
+    (testing "state with prompts truncates long text"
+      (let [long-prompt (apply str (repeat 20 "This is a very long prompt. "))
+            fsm {"id" "long-prompt-fsm"
+                 "states" [{"id" "talker" "prompts" [long-prompt] "hats" ["mcp"]}]
+                 "xitions" []}
+            dot (fsm->dot-with-hats fsm)]
+        (is (includes? dot "...")
+            "Long prompts should be truncated")
+        (is (includes? dot "This is a very long")
+            "Beginning of prompt should appear")))
+
+    (testing "fsm with prompts as title fallback"
+      (let [fsm {"id" "prompt-title-fsm"
+                 "prompts" ["System prompt line 1" "Line 2"]
+                 "states" [{"id" "s1" "hats" ["mcp"]}]
+                 "xitions" []}
+            dot (fsm->dot-with-hats fsm)]
+        (is (includes? dot "System prompt line 1")
+            "FSM prompts should appear as title")))
+
+    (testing "multiple hats on one state"
+      (let [fsm {"id" "multi-hat-fsm"
+                 "states" [{"id" "super" "hats" ["mcp" "other-hat"]}]
+                 "xitions" []}
+            dot (fsm->dot-with-hats fsm)]
+        (is (includes? dot "[mcp, other-hat]")
+            "Multiple hats should be comma-separated")))
+
+    (testing "escapes special characters in transition labels"
+      (let [fsm {"id" "escape-fsm"
+                 "states" [{"id" "quoter" "hats" ["mcp"]}]
+                 "xitions" [{"id" ["start" "quoter"] "label" "with\nnewline"}]}
+            dot (fsm->dot-with-hats fsm)]
+        (is (includes? dot "with\\nnewline")
+            "Newlines should be escaped in transition labels")))))
