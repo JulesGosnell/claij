@@ -136,26 +136,24 @@
                     h1 { margin-bottom: 0.5em; }
                     .subtitle { color: #666; margin-bottom: 1.5em; }
                     .count { color: #666; font-size: 0.9em; }
-                    td.numeric { text-align: center; }"]]
+                    .links { white-space: nowrap; }"]]
           [:body
            [:h1 "FSM Catalogue"]
            [:p.subtitle (str (count fsms) " finite state machines")]
            [:table
-            [:thead [:tr
-                     [:th "ID"]
-                     [:th "States"]
-                     [:th "Transitions"]
-                     [:th "Schemas"]
-                     [:th "Links"]]]
+            [:thead [:tr [:th "ID"] [:th "States"] [:th "Transitions"] [:th "Schemas"] [:th "Links"]]]
             [:tbody
              (for [id (sort (keys fsms))
-                   :let [fsm (get fsms id)]]
+                   :let [fsm (get fsms id)
+                         states (get fsm "states")
+                         xitions (get fsm "xitions")
+                         schemas (get fsm "schemas")]]
                [:tr
                 [:td [:a {:href (str "/fsm/" id)} id]]
-                [:td.numeric (count (get fsm "states"))]
-                [:td.numeric (count (get fsm "xitions"))]
-                [:td.numeric (count (get fsm "schemas"))]
-                [:td
+                [:td.count (count states)]
+                [:td.count (count xitions)]
+                [:td.count (count schemas)]
+                [:td.links
                  [:a {:href (str "/fsm/" id "/graph.svg")} "SVG"]
                  " | "
                  [:a {:href (str "/fsm/" id "/document")} "JSON"]]])]]])})
@@ -172,7 +170,7 @@
              [:title (str "FSM: " fsm-id)]
              [:style "body { font-family: system-ui; max-width: 1200px; margin: 2em auto; padding: 1em; }
                       pre { background: #f5f5f5; padding: 1em; overflow-x: auto; border-radius: 4px; 
-                            max-height: 300px; overflow-y: auto; font-size: 0.9em; }
+                            max-height: 300px; overflow-y: auto; font-size: 0.85em; margin: 0; }
                       h2 { margin-top: 1.5em; border-bottom: 1px solid #ddd; padding-bottom: 0.3em; }
                       a { color: #0066cc; }
                       .nav { margin-bottom: 1em; }
@@ -193,9 +191,10 @@
                       .schema-link:hover { text-decoration: underline; }
                       code { background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-size: 0.9em; }
                       ol { line-height: 1.6; }
-                      .graph-container { background: #fafafa; border: 1px solid #ddd; border-radius: 4px;
-                                         padding: 1em; text-align: center; }
-                      .graph-container object { max-width: 100%; height: auto; }"]]
+                      details { margin-top: 0.5em; }
+                      details summary { cursor: pointer; color: #0066cc; font-size: 0.85em; }
+                      details summary:hover { text-decoration: underline; }
+                      details[open] summary { margin-bottom: 0.5em; }"]]
             [:body
              [:div.nav
               [:a {:href "/fsms"} "\u2190 Back to Catalogue"]
@@ -205,15 +204,6 @@
               [:a {:href (str "/fsm/" fsm-id "/document")} "JSON"]]
              [:h1 fsm-id]
 
-             ;; Graph section - inline SVG
-             [:div.section
-              [:h2 "Graph"]
-              [:div.graph-container
-               [:object {:type "image/svg+xml"
-                         :data (str "/fsm/" fsm-id "/graph.svg")
-                         :style "max-height: 400px;"}
-                "Your browser does not support SVG"]]]
-
              ;; Prompts section
              (when-let [prompts (get fsm "prompts")]
                [:div.section
@@ -222,7 +212,7 @@
                  (for [prompt prompts]
                    [:li prompt])]])
 
-             ;; Schemas section - as table
+             ;; Schemas section - as table with expandable details
              (when-let [schemas (get fsm "schemas")]
                [:div.section
                 [:h2 (str "Schemas (" (count schemas) ")")]
@@ -238,7 +228,11 @@
                                          (second schema-def))
                           description (get schema-props :description)]
                       [:tr {:id (str "schema-" schema-name)}
-                       [:td [:span.schema-name schema-name]]
+                       [:td
+                        [:span.schema-name schema-name]
+                        [:details
+                         [:summary "show definition"]
+                         [:pre (with-out-str (clojure.pprint/pprint schema-def))]]]
                        [:td [:code (str schema-type)]]
                        [:td (or description [:span.schema-desc "—"])]]))]]])
 
