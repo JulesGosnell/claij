@@ -194,7 +194,10 @@
                       details { margin-top: 0.5em; }
                       details summary { cursor: pointer; color: #0066cc; font-size: 0.85em; }
                       details summary:hover { text-decoration: underline; }
-                      details[open] summary { margin-bottom: 0.5em; }"]]
+                      details[open] summary { margin-bottom: 0.5em; }
+                      .graph-container { background: #fafafa; border: 1px solid #ddd; border-radius: 4px;
+                                         padding: 1em; overflow-x: auto; }
+                      .graph-container object { display: block; margin: 0 auto; max-width: 100%; }"]]
             [:body
              [:div.nav
               [:a {:href "/fsms"} "\u2190 Back to Catalogue"]
@@ -203,6 +206,15 @@
               " | "
               [:a {:href (str "/fsm/" fsm-id "/document")} "JSON"]]
              [:h1 fsm-id]
+
+             ;; Graph section - inline SVG
+             [:div.section
+              [:h2 "Graph"]
+              [:div.graph-container
+               [:object {:type "image/svg+xml"
+                         :data (str "/fsm/" fsm-id "/graph.svg")
+                         :style "min-height: 150px; max-height: 500px;"}
+                "Your browser does not support SVG"]]]
 
              ;; Prompts section
              (when-let [prompts (get fsm "prompts")]
