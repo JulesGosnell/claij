@@ -11,7 +11,8 @@
    [claij.action :refer [def-action action-input-schema action-output-schema]]
    [claij.llm :refer [call]]
    [claij.llm.service :as llm-service]
-   [claij.hat :as hat]))
+   [claij.hat :as hat]
+   [claij.parallel :as parallel]))
 
 ;;------------------------------------------------------------------------------
 ;; Action Dispatch Helpers
@@ -250,6 +251,31 @@
           max-retries 3
           retrier (make-retrier max-retries)
 
+          ;; Bail-out helper: find transition to "end" and force it with error
+          bail-out! (fn [error-info current-trail]
+                      ;; ox-and-cs is [[{xition-map} channel] ...] where xition-map has "id" key
+                      (let [end-xition (first (filter (fn [[xition _]]
+                                                        (= (second (get xition "id")) "end"))
+                                                      ox-and-cs))
+                            [end-x end-c] end-xition]
+                        (if end-c
+                          ;; Found end transition - use it
+                          (let [end-id (get end-x "id")
+                                error-event {"id" end-id
+                                             "error" error-info
+                                             "bail_out" true}
+                                error-trail (conj (vec current-trail)
+                                                  {:from (first end-id)
+                                                   :to "end"
+                                                   :event error-event
+                                                   :error error-info})]
+                            (log/error (str "   [!!] BAIL OUT: Forcing transition to end via " end-id))
+                            (>!! end-c {:context context
+                                        :event error-event
+                                        :trail error-trail}))
+                          ;; No end transition - just log (FSM will timeout)
+                          (log/error (str "   [!!] CRITICAL: No transition to 'end' found - FSM will hang!")))))
+
           ;; Handler validates output and retries on failure
           handler
           (fn handler
@@ -287,7 +313,13 @@
                       ;; Max retries exceeded
                       (fn []
                         (log/error (str "   [X] Max Retries Exceeded: No valid transition after " max-retries " attempts"))
-                        (log/error (str "   Final output: " (pr-str output-event))))))
+                        (log/error (str "   Final output: " (pr-str output-event)))
+                        (bail-out! {:reason "max-retries-exceeded"
+                                    :type :invalid-transition
+                                    :attempted-id ox-id
+                                    :valid-ids (keys id->x-and-c)
+                                    :final-output output-event}
+                                   current-trail))))
                    ;; MATCHING TRANSITION FOUND - validate schema
                    (let [ox-schema (resolve-schema new-context ox ox-schema-raw)
                          ;; Use pre-built registry from context (built in start-fsm)
@@ -346,7 +378,13 @@
                         (fn []
                           (log/error (str "   [X] Max Retries Exceeded: Validation failed after " max-retries " attempts"))
                           (log/error (str "   Final output: " (pr-str output-event)))
-                          (log/debug (str "   Validation errors: " (pr-str es)))))))))
+                          (log/debug (str "   Validation errors: " (pr-str es)))
+                          (bail-out! {:reason "max-retries-exceeded"
+                                      :type :schema-validation
+                                      :attempted-id ox-id
+                                      :validation-errors es
+                                      :final-output output-event}
+                                     current-trail)))))))
                (catch Throwable t
                  (log/error t "Error in handler processing")))))]
 
@@ -1020,6 +1058,97 @@
                  (log/error "LLM action failed:" (pr-str error-info))
                  ;; Return error to handler so FSM can see it
                  (handler context {"id" "error" "error" error-info}))}))))
+
+(def-action parallel-llm-action
+  "FSM action: call multiple LLMs in parallel, collect responses.
+   
+   Config schema:
+   - \"timeout-ms\" - Max time to wait for all LLMs (default: 60000)
+   - \"parallel?\" - Execute concurrently (default: true, false = sequential)
+   - \"llms\" - Vector of LLM specs, each with:
+     - \"id\" - Symbolic name for this LLM (e.g. \"analyst-claude\")
+     - \"service\" - LLM service name
+     - \"model\" - Model identifier
+   
+   Returns event with:
+   - \"responses\" - Map of {llm-id -> {:status :success/:error/:timeout, :value/:error ...}}
+   - \"summary\" - {:all-succeeded? bool, :completed-count n, :timed-out-ids [...]}
+   
+   Uses claij.parallel/collect-async for concurrent execution with timeout handling."
+  [:map
+   ["timeout-ms" {:optional true} :int]
+   ["parallel?" {:optional true} :boolean]
+   ["llms" [:vector [:map
+                     ["id" :string]
+                     ["service" :string]
+                     ["model" :string]]]]]
+  [config {xs "xitions" :as fsm} ix {sid "id" :as state}]
+  (fn [context event trail handler]
+    (let [{:strs [timeout-ms llms]
+           parallel? "parallel?"} config
+          timeout-ms (or timeout-ms 60000)
+          parallel? (if (nil? parallel?) true parallel?)
+
+          ;; Get LLM service registry from context or use default
+          llm-registry (or (:llm/registry context) llm-service/default-registry)
+
+          ;; Compute output transitions from current state
+          output-xitions (filter (fn [{[from _to] "id"}] (= from sid)) xs)
+          output-schema (state-schema context fsm state output-xitions)
+
+          ;; Get registry for expanding refs
+          registry (or (get context :malli/registry)
+                       (build-fsm-registry fsm context))
+
+          ;; Build prompt trail from history
+          prompt-trail (trail->prompts context fsm trail)
+
+          ;; Build initial message if trail is empty
+          initial-message (when (empty? trail)
+                            (let [ix-schema-raw (resolve-schema context ix (get ix "schema"))
+                                  ix-schema (expand-refs-for-llm ix-schema-raw registry)
+                                  out-schema (expand-refs-for-llm output-schema registry)]
+                              [{"role" "user"
+                                "content" (pr-str [ix-schema event out-schema])}]))
+
+          full-trail (if initial-message initial-message prompt-trail)
+
+          ;; Build operations for each LLM
+          operations (for [{:strs [id service model]} llms]
+                       (let [prompts (make-prompts fsm ix state full-trail service model)]
+                         {:id id
+                          :fn (fn [on-success on-error]
+                                (log/info (str "parallel-llm-action: calling " service "/" model " as " id))
+                                (call
+                                 service model
+                                 prompts
+                                 (fn [output]
+                                   (log/info (str "parallel-llm-action: " id " responded"))
+                                   (on-success output))
+                                 {:registry llm-registry
+                                  :schema output-schema
+                                  :error (fn [error-info]
+                                           (log/error (str "parallel-llm-action: " id " failed: " (pr-str error-info)))
+                                           (on-error error-info))}))}))]
+
+      (log/info (str "parallel-llm-action: dispatching " (count llms) " LLMs, parallel=" parallel? ", timeout=" timeout-ms "ms"))
+
+      ;; Execute in parallel (or sequential) and collect results
+      (let [{:keys [results all-succeeded? completed-count timed-out-ids failed-ids]}
+            (parallel/collect-async (vec operations) {:timeout-ms timeout-ms :parallel? parallel?})]
+
+        (log/info (str "parallel-llm-action: completed " completed-count "/" (count llms)
+                       ", all-succeeded=" all-succeeded?
+                       (when (seq timed-out-ids) (str ", timed-out=" timed-out-ids))
+                       (when (seq failed-ids) (str ", failed=" failed-ids))))
+
+        ;; Return aggregated response to handler
+        (handler context {"id" "parallel-complete"
+                          "responses" results
+                          "summary" {:all-succeeded? all-succeeded?
+                                     :completed-count completed-count
+                                     :timed-out-ids timed-out-ids
+                                     :failed-ids failed-ids}})))))
 
 ;; a correlation id threaded through the data
 ;; a monitor or callback on each state

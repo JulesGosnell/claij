@@ -33,7 +33,8 @@
    [claij.action :refer [def-action]]
    [claij.hat :as hat]
    [claij.mcp.bridge :as bridge]
-   [claij.mcp.schema :as mcp-schema]))
+   [claij.mcp.schema :as mcp-schema]
+   [claij.parallel :as parallel]))
 
 ;; Forward declaration for mcp-hat-maker to reference
 (declare mcp-service-action)
@@ -307,6 +308,7 @@
   "Action for MCP service state. Routes tool calls to appropriate server bridges.
    
    Supports cross-server batching: multiple servers can be called in one round trip.
+   Now with parallel execution via claij.parallel/collect-async.
    
    Expects:
    - servers at [:hats :mcp :servers] in context
@@ -341,17 +343,38 @@
                                                     (clojure.string/join ", " (remove #(contains? servers %) (keys calls)))
                                                     ". Available: " (clojure.string/join ", " (keys servers)))}}))
 
-        ;; Execute tool calls on each server (could parallelize with pmap)
+        ;; Execute tool calls on each server (PARALLEL via collect-async)
         :else
-        (let [results (reduce-kv
-                       (fn [acc server-name requests]
-                         (log/info "mcp-service-action: calling" server-name "with" (count requests) "requests")
-                         (let [bridge (get-in servers [server-name :bridge])
-                               responses (bridge/send-and-await bridge requests 30000)]
-                           (bridge/drain-notifications bridge)
-                           (assoc acc server-name responses)))
-                       {}
-                       calls)]
+        (let [;; Build operations for parallel execution
+              operations (for [[server-name requests] calls]
+                           {:id server-name
+                            :fn (fn [on-success on-error]
+                                  (try
+                                    (let [bridge (get-in servers [server-name :bridge])
+                                          responses (bridge/send-and-await bridge requests 30000)]
+                                      (bridge/drain-notifications bridge)
+                                      (on-success responses))
+                                    (catch Throwable t
+                                      (log/error t "mcp-service-action: error calling server" server-name)
+                                      (on-error {:exception (.getMessage t)
+                                                 :server server-name}))))})
+              ;; Execute in parallel (default) with 30s timeout
+              {:keys [results all-succeeded? timed-out-ids]} (parallel/collect-async operations {:timeout-ms 30000
+                                                                                                 :parallel? true})
+              ;; Transform results back to the expected format
+              ;; {server-name -> responses} for successes
+              ;; {server-name -> error-info} for failures
+              formatted-results (reduce-kv
+                                 (fn [acc server-name {:keys [status value error]}]
+                                   (case status
+                                     :success (assoc acc server-name value)
+                                     :error (assoc acc server-name {"error" error})
+                                     :timeout (assoc acc server-name {"error" {:timeout true}})))
+                                 {}
+                                 results)]
+          (when-not all-succeeded?
+            (log/warn "mcp-service-action: not all servers succeeded."
+                      "timed-out:" timed-out-ids))
           ;; Return to calling state with results keyed by server
           (handler context {"id" [state-id from]
-                            "results" results}))))))
+                            "results" formatted-results}))))))
