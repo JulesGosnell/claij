@@ -255,66 +255,98 @@
           (fn handler
             ([new-context output-event] (handler new-context output-event trail))
             ([new-context {ox-id "id" :as output-event} current-trail]
+             (log/info (str "   [>>] Handler entered for ox-id: " ox-id ", valid-ids: " (keys id->x-and-c)))
              (try
-               (let [[{ox-schema-raw "schema" :as ox} c] (id->x-and-c ox-id)
-                     _ (when (nil? ox) (log/error "no output xition:" (prn-str ox-id)))
-                     ox-schema (resolve-schema new-context ox ox-schema-raw)
-                     ;; Use pre-built registry from context (built in start-fsm)
-                     registry (get new-context :malli/registry)
-                     ;; Use Malli validation with combined registry
-                     {v? :valid? es :errors}
-                     (validate-event registry ox-schema output-event)]
-                 (if v?
-                     ;; SUCCESS - Put context, event, and trail on channel
+               (let [[{ox-schema-raw "schema" :as ox} c] (id->x-and-c ox-id)]
+                 (if (nil? ox)
+                   ;; NO MATCHING TRANSITION - Retry with error feedback
                    (do
-                     (log/info (str "   [OK] Validation: " ox-id))
-                     (let [;; One entry per transition: {:from :to :event}
-                           ;; Record the OUTPUT transition - event validates against ox-schema
-                           ;; ox-id = [current-state, next-state]
-                           ;; Check omit on OUTPUT transition (ox), not input (ix)
-                           [ox-from ox-to] ox-id
-                           ox-omit? (get ox "omit")
-                           new-trail (if ox-omit?
-                                       (vec current-trail)
-                                       (conj (vec current-trail)
-                                             {:from ox-from
-                                              :to ox-to
-                                              :event output-event}))]
-                       (>!! c {:context new-context
-                               :event output-event
-                               :trail new-trail}))
-                     nil)
-                     ;; FAILURE - Retry with error feedback
-                   (retrier
-                    @retry-count
-                       ;; Retry operation
-                    (fn []
-                      (log/error (str "   [X] Validation Failed: " ox-id es " (attempt " (inc @retry-count) "/" max-retries ")"))
-                      (swap! retry-count inc)
-                      (let [error-msg (str "Your response failed schema validation.\n\n"
-                                           "Validation errors: " (pr-str es) "\n\n"
-                                           "Please review the schema and provide a corrected response.")
-
-;; Error entry: records the failed attempt
-                            ;; Use ox-id since that's the transition we tried to make
-                            [err-from err-to] ox-id
-                            error-trail (conj (vec current-trail)
-                                              {:from err-from
-                                               :to err-to
-                                               :event output-event
-                                               :error {:message error-msg
-                                                       :errors es
-                                                       :attempt @retry-count}})]
-                        (log/info "      [>>] Sending validation error feedback to LLM")
-                           ;; Call action again with error in trail
-                        (if-let [action (get-in context [:id->action a])]
-                          (invoke-action a action new-context fsm ix state event error-trail handler)
-                          (handler new-context (get-in (peek error-trail) [:error :message]) error-trail))))
-                       ;; Max retries exceeded
-                    (fn []
-                      (log/error (str "   [X] Max Retries Exceeded: Validation failed after " max-retries " attempts"))
-                      (log/error (str "   Final output: " (pr-str output-event)))
-                      (log/debug (str "   Validation errors: " (pr-str es)))))))
+                     (log/error "no output xition:" (prn-str ox-id))
+                     (retrier
+                      @retry-count
+                      ;; Retry operation
+                      (fn []
+                        (log/error (str "   [X] No matching transition for id: " ox-id " (attempt " (inc @retry-count) "/" max-retries ")"))
+                        (swap! retry-count inc)
+                        (let [valid-ids (keys id->x-and-c)
+                              error-msg (str "Your response has an invalid transition id.\n\n"
+                                             "You provided id: " (pr-str ox-id) "\n\n"
+                                             "Valid transition ids are: " (pr-str valid-ids) "\n\n"
+                                             "Please provide a response with a valid id.")
+                              error-trail (conj (vec current-trail)
+                                                {:from (first ox-id)
+                                                 :to (second ox-id)
+                                                 :event output-event
+                                                 :error {:message error-msg
+                                                         :errors ["Invalid transition id"]
+                                                         :attempt @retry-count}})]
+                          (log/info "      [>>] Sending invalid transition feedback to LLM")
+                          (if-let [action (get-in context [:id->action a])]
+                            (invoke-action a action new-context fsm ix state event error-trail handler)
+                            (handler new-context error-msg error-trail))))
+                      ;; Max retries exceeded
+                      (fn []
+                        (log/error (str "   [X] Max Retries Exceeded: No valid transition after " max-retries " attempts"))
+                        (log/error (str "   Final output: " (pr-str output-event))))))
+                   ;; MATCHING TRANSITION FOUND - validate schema
+                   (let [ox-schema (resolve-schema new-context ox ox-schema-raw)
+                         ;; Use pre-built registry from context (built in start-fsm)
+                         registry (get new-context :malli/registry)
+                         ;; Use Malli validation with combined registry
+                         {v? :valid? es :errors}
+                         (validate-event registry ox-schema output-event)]
+                     (if v?
+                       ;; SUCCESS - Put context, event, and trail on channel
+                       (do
+                         (log/info (str "   [OK] Validation: " ox-id))
+                         (let [;; One entry per transition: {:from :to :event}
+                               ;; Record the OUTPUT transition - event validates against ox-schema
+                               ;; ox-id = [current-state, next-state]
+                               ;; Check omit on OUTPUT transition (ox), not input (ix)
+                               [ox-from ox-to] ox-id
+                               ox-omit? (get ox "omit")
+                               new-trail (if ox-omit?
+                                           (vec current-trail)
+                                           (conj (vec current-trail)
+                                                 {:from ox-from
+                                                  :to ox-to
+                                                  :event output-event}))]
+                           (log/info (str "   [>>] Putting on channel for: " ox-id))
+                           (>!! c {:context new-context
+                                   :event output-event
+                                   :trail new-trail})
+                           (log/info (str "   [OK] Channel put complete for: " ox-id)))
+                         nil)
+                       ;; FAILURE - Retry with error feedback
+                       (retrier
+                        @retry-count
+                        ;; Retry operation
+                        (fn []
+                          (log/error (str "   [X] Validation Failed: " ox-id es " (attempt " (inc @retry-count) "/" max-retries ")"))
+                          (swap! retry-count inc)
+                          (let [error-msg (str "Your response failed schema validation.\n\n"
+                                               "Validation errors: " (pr-str es) "\n\n"
+                                               "Please review the schema and provide a corrected response.")
+                                ;; Error entry: records the failed attempt
+                                ;; Use ox-id since that's the transition we tried to make
+                                [err-from err-to] ox-id
+                                error-trail (conj (vec current-trail)
+                                                  {:from err-from
+                                                   :to err-to
+                                                   :event output-event
+                                                   :error {:message error-msg
+                                                           :errors es
+                                                           :attempt @retry-count}})]
+                            (log/info "      [>>] Sending validation error feedback to LLM")
+                            ;; Call action again with error in trail
+                            (if-let [action (get-in context [:id->action a])]
+                              (invoke-action a action new-context fsm ix state event error-trail handler)
+                              (handler new-context (get-in (peek error-trail) [:error :message]) error-trail))))
+                        ;; Max retries exceeded
+                        (fn []
+                          (log/error (str "   [X] Max Retries Exceeded: Validation failed after " max-retries " attempts"))
+                          (log/error (str "   Final output: " (pr-str output-event)))
+                          (log/debug (str "   Validation errors: " (pr-str es)))))))))
                (catch Throwable t
                  (log/error t "Error in handler processing")))))]
 
@@ -840,9 +872,14 @@
            error
            [{"role" "user" "content" [:string (:message error) ix-schema]}]
 
-           ;; Normal entry - role based on what produced it
+           ;; Assistant (LLM output) - just the document, NOT a triple
+           ;; This prevents Claude from mimicking the triple format
+           from-is-llm?
+           [{"role" "assistant" "content" event}]
+
+           ;; User request - show the triple for context
            :else
-           [{"role" role "content" [ix-schema event s-schema]}])))
+           [{"role" "user" "content" [ix-schema event s-schema]}])))
      trail)))
 
 (defn make-prompts
@@ -870,25 +907,36 @@
         "content" (join
                    "\n"
                    (concat
-                    ["We are living in a Clojure world."
-                     "All communications will be in EDN (Extensible Data Notation) format."
+                    ["EDN (Extensible Data Notation) FORMAT"
                      ""
-                     "REFERENCE SCHEMAS:"
+                     "All communications use EDN - a data format from Clojure, similar to JSON:"
+                     "- Maps: {\"key\" \"value\" \"key2\" 123}"
+                     "- Vectors: [\"item1\" \"item2\" 42]"
+                     "- Strings use double quotes: \"hello\""
+                     "- Numbers: 42, 3.14"
+                     "- ALL map keys must be quoted strings: \"id\" not id"
+                     ""
+                     "REFERENCE SCHEMAS (Malli notation - for structure reference only):"
                      (pr-str fsm-schemas)
                      ""
                      "YOUR REQUEST:"
-                     "- will contain [INPUT-SCHEMA INPUT-DOCUMENT OUTPUT-SCHEMA] triples."
-                     "- INPUT-SCHEMA: Malli schema describing the INPUT-DOCUMENT"
-                     "- INPUT-DOCUMENT: The actual data to process"
+                     "- Contains [INPUT-SCHEMA INPUT-DOCUMENT OUTPUT-SCHEMA] triples"
+                     "- INPUT-SCHEMA: Malli schema describing the INPUT-DOCUMENT structure"
+                     "- INPUT-DOCUMENT: The actual data you receive"
                      "- OUTPUT-SCHEMA: Malli schema your response MUST conform to"
                      ""
-                     "YOUR RESPONSE - the OUTPUT-DOCUMENT:"
-                     "- Must be ONLY valid EDN (no markdown, no backticks, no explanation)"
-                     "- Must use string keys like \"id\" not keyword keys like :id"
-                     "- The OUTPUT-SCHEMA will offer you a set (possibly only one) of choices/sub-schemas"
-                     "- Your OUTPUT-DOCUMENT must conform strictly to one of these - it is a document NOT a schema itself"
-                     "- Each sub-schema will contain a discriminator called \"id\". You must include this"
-                     "- You must include all non-optional fields with a valid value"
+                     "YOUR RESPONSE:"
+                     "- Must be ONLY a valid EDN map - no prose, no markdown, no explanation"
+                     "- Must use string keys: \"id\" not :id"
+                     "- Must include the \"id\" field with a valid transition"
+                     "- Must include all required fields with valid values"
+                     ""
+                     "CRITICAL FORMAT RULES:"
+                     "- Start with { and end with } - nothing else!"
+                     "- Do NOT output vectors, explanations, or the word 'I'"
+                     "- Do NOT wrap in markdown code blocks"
+                     "- WRONG: I will analyze... or [schema doc schema]"
+                     "- RIGHT: {\"id\" [\"from\" \"to\"] \"field\" \"value\"}"
                      ""
                      "CONTEXT:"]
                     fsm-prompts

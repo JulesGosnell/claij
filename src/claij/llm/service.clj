@@ -257,7 +257,8 @@
 
      "openrouter" {:strategy "openai-compat"
                    :url "https://openrouter.ai/api/v1/chat/completions"
-                   :auth {:type :bearer :env "OPENROUTER_API_KEY"}}
+                   :auth {:type :bearer :env "OPENROUTER_API_KEY"}
+                   :options {:max_tokens 4096}}
 
      "anthropic" {:strategy "anthropic"
                   :url "https://api.anthropic.com/v1/messages"

@@ -88,19 +88,31 @@
                (let [d (strip-md-json raw-content)]
                  (try
                    (let [j (edn/read-string (str/trim d))]
-                     (log/info "      [OK] LLM Response: Valid EDN received")
-                     (handler j))
+                     ;; Check if we got a proper map vs something else (like a symbol)
+                     (if (map? j)
+                       (do
+                         (log/info "      [OK] LLM Response: Valid EDN map received")
+                         (log/info "      [>>] Calling handler with:" (pr-str (get j "id")))
+                         (try
+                           (handler j)
+                           (log/info "      [OK] Handler returned successfully")
+                           (catch Throwable t
+                             (log/error t "      [X] Handler threw exception"))))
+                       ;; Not a map - treat as parse error and retry
+                       (throw (ex-info "EDN parsed but is not a map"
+                                       {:parsed j :raw d}))))
                    (catch Exception e
                      (let [retrier (make-retrier max-retries)]
                        (retrier
                         retry-count
                         ;; Retry operation: send error feedback and try again
                         (fn []
-                          (let [error-msg (str "We could not unmarshal your EDN - it must be badly formed.\n\n"
-                                               "Here is the exception:\n"
-                                               (.getMessage e) "\n\n"
-                                               "Here is your malformed response:\n" d "\n\n"
-                                               "Please try again. Your response should only contain the relevant EDN document.")
+                          (let [error-msg (str "Your response is not valid EDN.\n\n"
+                                               "ERROR: " (.getMessage e) "\n\n"
+                                               "YOUR RESPONSE WAS:\n" d "\n\n"
+                                               "REQUIRED: Output ONLY an EDN map starting with { and ending with }.\n"
+                                               "Do NOT output prose, explanations, or text like 'I will...'.\n"
+                                               "The map must have an \"id\" key with a valid transition.")
                                 retry-prompts (conj (vec prompts) {"role" "user" "content" error-msg})]
                             (log/warn (str "      [X] EDN Parse Error: " (.getMessage e)))
                             (log/info (str "      [>>] Sending error feedback to LLM"))
