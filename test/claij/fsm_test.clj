@@ -280,7 +280,7 @@
              (get-in (nth prompts 0) ["content" 1])))
       (is (= "assistant" (get (nth prompts 1) "role")))
       (is (= {"id" ["processor" "end"] "result" "done1"}
-             (get-in (nth prompts 1) ["content" 1])))))
+             (get (nth prompts 1) "content")))))
 
   (testing "trail->prompts handles error entries as user messages"
     (let [sample-trail [{:from "start" :to "processor"

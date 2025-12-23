@@ -54,7 +54,7 @@
         (let [retry-messages (second @attempts)
               last-message (last retry-messages)
               content (get last-message "content")]
-          (is (re-find #"could not unmarshal" content) "Error message should mention unmarshaling")
+          (is (re-find #"not valid EDN" content) "Error message should mention invalid EDN")
           (is (re-find #"EDN" content) "Error message should mention EDN"))
 
         ;; Should eventually succeed
