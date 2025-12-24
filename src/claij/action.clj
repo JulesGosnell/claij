@@ -7,7 +7,7 @@
    
    By putting def-action here, both can require it without cycles."
   (:require
-   [malli.core :as m]))
+   [claij.schema :as schema]))
 
 ;;------------------------------------------------------------------------------
 ;; def-action Macro
@@ -19,43 +19,41 @@
    Usage (map form - preferred):
    (def-action my-action
      \"Documentation string\"
-     {:config [:map [\"timeout\" :int]]  ;; config schema (validated at factory call)
-      :input :any                        ;; input schema (what action accepts)
-      :output :any}                      ;; output schema (what action produces)
+     {:config {\"type\" \"object\" ...}  ;; config schema (validated at factory call)
+      :input true                        ;; input schema (what action accepts, true = any)
+      :output true}                      ;; output schema (what action produces, true = any)
      [config fsm ix state]               ;; config-time params
      (fn [context event trail handler]   ;; returns runtime function
        ...))
    
-   Usage (legacy vector form - backward compatible):
+   Usage (legacy form - backward compatible):
    (def-action my-action
      \"Documentation string\"
-     [:map [\"timeout\" :int]]           ;; config schema only, input/output default to :any
+     {\"type\" \"object\" ...}           ;; config schema only, input/output default to true
      [config fsm ix state]
      (fn [context event trail handler]
        ...))
    
    The defined var has metadata:
    - :action/name - the action name as string
-   - :action/config-schema - Malli schema for config validation
-   - :action/input-schema - Malli schema for action input (default :any)
-   - :action/output-schema - Malli schema for action output (default :any)
+   - :action/config-schema - JSON Schema for config validation
+   - :action/input-schema - JSON Schema for action input (default true = any)
+   - :action/output-schema - JSON Schema for action output (default true = any)
    - :doc - standard Clojure docstring (works with clojure.repl/doc)
    
    The factory validates config before returning the runtime function.
    Throws ExceptionInfo on config validation failure.
    
    Note: Input/output schemas declare the action's CAPABILITY.
-   FSM transition schemas declare the CONTRACT. Subsumption checking
-   ensures action-input subsumes transition-schema (action accepts
-   at least what transition provides)."
+   FSM transition schemas declare the CONTRACT."
   [name doc schema-spec params & body]
   (let [action-name (str name)
         ;; Support both map form {:config ... :input ... :output ...}
-        ;; and legacy vector form (config-schema only)
+        ;; and legacy form (config-schema only)
         schema-map? (and (map? schema-spec) (contains? schema-spec :config))
         config-schema (if schema-map? (:config schema-spec) schema-spec)
-        input-schema (if schema-map? (get schema-spec :input :any) :any)
-        output-schema (if schema-map? (get schema-spec :output :any) :any)]
+        input-schema (if schema-map? (get schema-spec :input true) true)
+        output-schema (if schema-map? (get schema-spec :output true) true)]
     `(def ~(with-meta name
              {:action/name action-name
               :action/config-schema config-schema
@@ -64,13 +62,14 @@
               :doc doc})
        (fn [config# fsm# ix# state#]
          ;; Validate config at factory call time (start-fsm)
-         (when-not (m/validate ~config-schema config#)
-           (throw (ex-info (str "Action config validation failed: " ~action-name)
-                           {:type :config-validation
-                            :action ~action-name
-                            :schema ~config-schema
-                            :value config#
-                            :explanation (m/explain ~config-schema config#)})))
+         (let [result# (schema/validate ~config-schema config#)]
+           (when-not (:valid? result#)
+             (throw (ex-info (str "Action config validation failed: " ~action-name)
+                             {:type :config-validation
+                              :action ~action-name
+                              :schema ~config-schema
+                              :value config#
+                              :errors (:errors result#)}))))
          ;; Return runtime function with config-time params closed over
          (let [~params [config# fsm# ix# state#]]
            ~@body)))))
@@ -97,12 +96,12 @@
 
 (defn action-input-schema
   "Get the input schema from an action var's metadata.
-   Returns :any if not explicitly declared."
+   Returns true (any) if not explicitly declared."
   [action-var]
-  (or (-> action-var meta :action/input-schema) :any))
+  (or (-> action-var meta :action/input-schema) true))
 
 (defn action-output-schema
   "Get the output schema from an action var's metadata.
-   Returns :any if not explicitly declared."
+   Returns true (any) if not explicitly declared."
   [action-var]
-  (or (-> action-var meta :action/output-schema) :any))
+  (or (-> action-var meta :action/output-schema) true))

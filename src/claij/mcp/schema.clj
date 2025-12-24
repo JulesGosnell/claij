@@ -1,9 +1,12 @@
 (ns claij.mcp.schema
-  "Malli schema generation for MCP protocol messages."
+  "Malli schema generation for MCP protocol messages.
+   
+   Note: This namespace uses Malli for internal MCP protocol validation.
+   This is separate from the FSM JSON Schema migration - MCP protocol
+   validation is internal and doesn't affect LLM output parsing."
   (:require
    [malli.core :as m]
-   [malli.registry :as mr]
-   [claij.malli :refer [base-registry]]))
+   [malli.registry :as mr]))
 
 (def mcp-schemas
   {"logging-level" [:enum {:description "Log severity level (RFC-5424)"}
@@ -58,7 +61,7 @@
                            ["logger" {:optional true :description "Logger name"} :string]]})
 
 ;; Inlined schemas for validation without MCP registry
-;; These expand refs to avoid :malli.core/invalid-ref errors during validation
+;; These expand refs to avoid invalid-ref errors during validation
 
 (def inlined-content-item
   "Content item schema fully inlined (no refs)."
@@ -129,7 +132,9 @@
    ["data" :any]
    ["logger" {:optional true} :string]])
 
-(def mcp-registry (mr/composite-registry base-registry mcp-schemas))
+(def mcp-registry
+  "MCP-specific Malli registry for protocol validation."
+  (mr/composite-registry (m/default-schemas) mcp-schemas))
 
 (def tool-response-schema [:ref "tool-response"])
 (def resource-response-schema [:ref "resource-response"])

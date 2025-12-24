@@ -2,8 +2,7 @@
   (:require
    [clojure.string :as str]
    [clojure.tools.logging :as log]
-   [malli.registry :as mr]
-   [claij.malli :refer [def-fsm base-registry]]
+   [claij.schema :refer [def-fsm]]
    [claij.action :refer [def-action]]
    [claij.fsm :refer [start-fsm]]
    [claij.llm :refer [call]]
@@ -15,42 +14,51 @@
 
 (def triage-schemas
   "Schema definitions for triage FSM events.
-   Uses string keys for LLM JSON compatibility."
+   Uses JSON Schema format."
   {;; Entry event: start → triage
-   "entry" [:map {:closed true}
-            ["id" [:= ["start" "triage"]]]
-            ["document" :string]]
+   "entry" {"type" "object"
+            "additionalProperties" false
+            "required" ["id" "document"]
+            "properties"
+            {"id" {"const" ["start" "triage"]}
+             "document" {"type" "string"}}}
 
    ;; Reuse existing FSM
-   "reuse" [:map {:closed true}
-            ["id" [:= ["triage" "reuse"]]]
-            ["fsm-id" :string]
-            ["fsm-version" :int]
-            ["rationale" :string]]
+   "reuse" {"type" "object"
+            "additionalProperties" false
+            "required" ["id" "fsm-id" "fsm-version" "rationale"]
+            "properties"
+            {"id" {"const" ["triage" "reuse"]}
+             "fsm-id" {"type" "string"}
+             "fsm-version" {"type" "integer"}
+             "rationale" {"type" "string"}}}
 
    ;; Fork existing FSM (not implemented)
-   "fork" [:map {:closed true}
-           ["id" [:= ["triage" "fork"]]]
-           ["fsm-id" :string]
-           ["fsm-version" :int]
-           ["modifications" :string]]
+   "fork" {"type" "object"
+           "additionalProperties" false
+           "required" ["id" "fsm-id" "fsm-version" "modifications"]
+           "properties"
+           {"id" {"const" ["triage" "fork"]}
+            "fsm-id" {"type" "string"}
+            "fsm-version" {"type" "integer"}
+            "modifications" {"type" "string"}}}
 
    ;; Generate new FSM (not implemented)
-   "generate" [:map {:closed true}
-               ["id" [:= ["triage" "generate"]]]
-               ["requirements" :string]]
+   "generate" {"type" "object"
+               "additionalProperties" false
+               "required" ["id" "requirements"]
+               "properties"
+               {"id" {"const" ["triage" "generate"]}
+                "requirements" {"type" "string"}}}
 
    ;; Result from delegated FSM
-   "result" [:map {:closed true}
-             ["id" [:enum ["reuse" "end"] ["fork" "end"] ["generate" "end"]]]
-             ["success" :boolean]
-             ["output" {:optional true} :any]]})
-
-(def triage-registry
-  "Malli registry for triage validation."
-  (mr/composite-registry
-   base-registry
-   triage-schemas))
+   "result" {"type" "object"
+             "additionalProperties" false
+             "required" ["id" "success"]
+             "properties"
+             {"id" {"enum" [["reuse" "end"] ["fork" "end"] ["generate" "end"]]}
+              "success" {"type" "boolean"}
+              "output" {}}}})
 
 ;;------------------------------------------------------------------------------
 ;; Triage Action
@@ -60,7 +68,7 @@
   "Loads all FSMs from store and asks LLM to choose the best one.
    
    Queries the store for FSM metadata and presents them to the LLM for selection."
-  [:map]
+  {"type" "object"}
   [_config _fsm ix _state]
   (fn [context event _trail handler]
     ;; Extract user's problem description from the event
@@ -140,31 +148,31 @@
 
    "xitions"
    [{"id" ["start" "triage"]
-     "schema" [:ref "entry"]}
+     "schema" {"$ref" "#/$defs/entry"}}
 
     {"id" ["triage" "reuse"]
      "prompts" []
-     "schema" [:ref "reuse"]}
+     "schema" {"$ref" "#/$defs/reuse"}}
 
     {"id" ["triage" "fork"]
      "prompts" []
-     "schema" [:ref "fork"]}
+     "schema" {"$ref" "#/$defs/fork"}}
 
     {"id" ["triage" "generate"]
      "prompts" []
-     "schema" [:ref "generate"]}
+     "schema" {"$ref" "#/$defs/generate"}}
 
     {"id" ["reuse" "end"]
      "prompts" []
-     "schema" [:ref "result"]}
+     "schema" {"$ref" "#/$defs/result"}}
 
     {"id" ["fork" "end"]
      "prompts" []
-     "schema" [:ref "result"]}
+     "schema" {"$ref" "#/$defs/result"}}
 
     {"id" ["generate" "end"]
      "prompts" []
-     "schema" [:ref "result"]}]})
+     "schema" {"$ref" "#/$defs/result"}}]})
 
 ;;------------------------------------------------------------------------------
 ;; Public API

@@ -11,12 +11,11 @@
    
    Features:
    - Async HTTP with callbacks
-   - EDN response parsing with markdown stripping
+   - JSON response parsing with markdown stripping
    - Automatic retry on parse errors with LLM feedback"
   (:require
    [clojure.string :as str]
    [clojure.tools.logging :as log]
-   [clojure.edn :as edn]
    [clj-http.client :as http]
    [cheshire.core :as json]
    [claij.util :refer [make-retrier]]
@@ -39,23 +38,23 @@
 ;;------------------------------------------------------------------------------
 
 (defn call
-  "Call LLM API asynchronously with EDN parsing and retry logic.
+  "Call LLM API asynchronously with JSON parsing and retry logic.
    
    Uses claij.llm.service for HTTP layer with strategy-based dispatch.
-   Automatically retries on EDN parse errors with feedback to the LLM.
+   Automatically retries on JSON parse errors with feedback to the LLM.
   
    Args:
      service  - Service name (e.g., 'anthropic', 'ollama:local', 'openrouter')
      model    - Model name native to service (e.g., 'claude-sonnet-4-20250514', 'mistral:7b')
      prompts  - Vector of message maps with 'role' and 'content' keys
-     handler  - Function to call with successful parsed EDN response
+     handler  - Function to call with successful parsed JSON response
    
    Options:
      :registry    - Service registry (default: svc/default-registry)
-     :schema      - Malli schema for response validation (currently unused)
+     :schema      - JSON Schema for response validation (currently unused)
      :error       - Function to call on error
      :retry-count - (Internal) Current retry attempt number
-     :max-retries - Maximum number of retries for malformed EDN (default: 3)"
+     :max-retries - Maximum number of retries for malformed JSON (default: 3)"
   [service model prompts handler & [{:keys [registry schema error retry-count max-retries]
                                      :or {retry-count 0 max-retries 3}}]]
   (let [registry (or registry svc/default-registry)]
@@ -87,11 +86,12 @@
                ;; Normal flow - process the content
                (let [d (strip-md-json raw-content)]
                  (try
-                   (let [j (edn/read-string (str/trim d))]
-                     ;; Check if we got a proper map vs something else (like a symbol)
+                   ;; Parse response as JSON (use false to get string keys, not keywords)
+                   (let [j (json/parse-string (str/trim d) false)]
+                     ;; Check if we got a proper map vs something else
                      (if (map? j)
                        (do
-                         (log/info "      [OK] LLM Response: Valid EDN map received")
+                         (log/info "      [OK] LLM Response: Valid JSON map received")
                          (log/info "      [>>] Calling handler with:" (pr-str (get j "id")))
                          (try
                            (handler j)
@@ -99,7 +99,7 @@
                            (catch Throwable t
                              (log/error t "      [X] Handler threw exception"))))
                        ;; Not a map - treat as parse error and retry
-                       (throw (ex-info "EDN parsed but is not a map"
+                       (throw (ex-info "JSON parsed but is not a map"
                                        {:parsed j :raw d}))))
                    (catch Exception e
                      (let [retrier (make-retrier max-retries)]
@@ -107,14 +107,14 @@
                         retry-count
                         ;; Retry operation: send error feedback and try again
                         (fn []
-                          (let [error-msg (str "Your response is not valid EDN.\n\n"
+                          (let [error-msg (str "Your response is not valid JSON.\n\n"
                                                "ERROR: " (.getMessage e) "\n\n"
                                                "YOUR RESPONSE WAS:\n" d "\n\n"
-                                               "REQUIRED: Output ONLY an EDN map starting with { and ending with }.\n"
-                                               "Do NOT output prose, explanations, or text like 'I will...'.\n"
-                                               "The map must have an \"id\" key with a valid transition.")
+                                               "REQUIRED: Output ONLY a JSON object starting with { and ending with }.\n"
+                                               "Do NOT output prose, explanations, markdown, or text like 'I will...'.\n"
+                                               "The object must have an \"id\" key with a valid transition.")
                                 retry-prompts (conj (vec prompts) {"role" "user" "content" error-msg})]
-                            (log/warn (str "      [X] EDN Parse Error: " (.getMessage e)))
+                            (log/warn (str "      [X] JSON Parse Error: " (.getMessage e)))
                             (log/info (str "      [>>] Sending error feedback to LLM"))
                             (call service model retry-prompts handler
                                   {:registry registry

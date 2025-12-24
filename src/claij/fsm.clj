@@ -3,11 +3,9 @@
    [clojure.string :refer [join]]
    [clojure.tools.logging :as log]
    [clojure.core.async :refer [chan go-loop alts! >!! close!]]
-   [malli.core :as m]
-   [malli.error :as me]
-   [malli.registry :as mr]
+   [cheshire.core :as json]
    [claij.util :refer [index-by ->key map-values make-retrier]]
-   [claij.malli :refer [def-fsm fsm-registry base-registry expand-refs-for-llm]]
+   [claij.schema :as schema]
    [claij.action :refer [def-action action-input-schema action-output-schema]]
    [claij.llm :refer [call]]
    [claij.llm.service :as llm-service]
@@ -58,9 +56,9 @@
 ;; this either comes from a request (us->llm) or a response (llm->us)
 ;; the fsm is direction agnostic
 ;; each xition carries a schema
-;; the document will be validated against one of these schemas (Malli :or)
+;; the document will be validated against one of these schemas (JSON Schema anyOf)
 ;; it will make the xition of which it validates against the schema
-;; when making a request, we will send the :or of xition schemas from our state
+;; when making a request, we will send the anyOf of xition schemas from our state
 ;; the llm will make a response that conforms to the xition it wants to make
 ;; if it validates, we will make the xition, otherwise we go back to the llm til it gets it right
 
@@ -82,54 +80,49 @@
 ;;------------------------------------------------------------------------------
 
 (defn build-fsm-registry
-  "Build a composite Malli registry for an FSM.
+  "Build a combined schema registry ($defs) for an FSM.
    
    Combines (in priority order, later overrides earlier):
-   1. base-registry - Default Malli schemas + CLAIJ base types
-   2. FSM schemas - Types defined in fsm[\"schemas\"]
-   3. Context registry - Domain-specific schemas from context[:malli/registry]
+   1. FSM schemas - Types defined in fsm[\"schemas\"]
+   2. Context registry - Domain-specific schemas from context[:schema/defs]
    
    This should be called once at FSM start and stored in context.
    
    Args:
      fsm - The FSM definition (may have \"schemas\" field)
-     context - Optional context with :malli/registry for additional schemas
+     context - Optional context with :schema/defs for additional schemas
    
    Returns:
-     A composite Malli registry for schema resolution"
+     A map of definition-name -> JSON Schema for $ref resolution"
   ([fsm] (build-fsm-registry fsm {}))
   ([fsm context]
-   (let [fsm-schemas (get fsm "schemas")
-         context-registry (get context :malli/registry)]
-     (mr/composite-registry
-      base-registry
-      (or fsm-schemas {})
-      (or context-registry {})))))
+   (merge (get fsm "schemas" {})
+          (get context :schema/defs {}))))
 
 ;;------------------------------------------------------------------------------
 ;; Malli Event Validation
 ;;------------------------------------------------------------------------------
 
+;;------------------------------------------------------------------------------
+;; JSON Schema Event Validation
+;;------------------------------------------------------------------------------
+
 (defn validate-event
-  "Validate an event against a Malli schema with registry support.
+  "Validate an event against a JSON Schema with $defs support.
    
    Args:
-     registry - Malli registry (composite or map) for resolving refs
-     schema   - The schema to validate against (may contain [:ref \"key\"])
+     registry - Map of definition-name -> JSON Schema for $ref resolution
+     schema   - The JSON Schema to validate against (may contain $refs)
      event    - The event data to validate
    
    Returns:
-     {:valid? true} or {:valid? false :errors [humanized-errors]}"
+     {:valid? true} or {:valid? false :errors [...]}"
   [registry schema event]
-  (let [opts (when registry {:registry registry})]
-    (try
-      (if (m/validate schema event opts)
-        {:valid? true}
-        {:valid? false
-         :errors (me/humanize (m/explain schema event opts))})
-      (catch Exception e
-        {:valid? false
-         :errors [(str "Schema validation error: " schema event (.getMessage e))]}))))
+  (try
+    (schema/validate schema event registry)
+    (catch Exception e
+      {:valid? false
+       :errors [(str "Schema validation error: " (.getMessage e))]})))
 
 ;;------------------------------------------------------------------------------
 ;; Schema Utilities
@@ -196,14 +189,12 @@
    Parameters:
    - context: FSM context with :id->schema and :id->action
    - xition: The transition being resolved
-   - schema: The schema to resolve (string, nil, or Malli schema)
+   - schema: The schema to resolve (string, nil, or JSON Schema map)
    - state: (optional) State for action schema fallback
    - direction: (optional) :input or :output for fallback direction
    
-   NOTE: Future optimization opportunity - when we have the event and the
-   resolved schema is a Malli :or, we could narrow it further based on
-   event content. Currently we only narrow to the selected transition,
-   not within a transition's schema."
+   Note: JSON Schema $ref resolution happens during validation (m3) or
+   via schema/expand-refs for LLM prompt preparation."
   ([context xition schema]
    (resolve-schema context xition schema nil nil))
   ([context xition schema state direction]
@@ -223,23 +214,25 @@
        :output (state-action-output-schema context state)
        :any)
 
-     ;; Nil schema without fallback -> permissive
+     ;; Nil schema without fallback -> permissive (validates anything)
      (nil? schema)
      true
 
-     ;; Everything else (Malli schema) -> return as-is
+     ;; JSON Schema map -> return as-is
      :else
      schema)))
 
 (defn state-schema
   "Make the schema for a state - to be valid for a state, you must be valid for one (only) of its output xitions.
    Resolves dynamic schemas via context :id->schema lookup.
-   Returns a Malli :or schema."
+   Returns a JSON Schema with anyOf for multiple options."
   [context {fid "id" fv "version" fs "schema" :as _fsm} {sid "id" :as _state} xs]
-  (into [:or]
-        (mapv (fn [{s "schema" :as xition}]
-                (resolve-schema context xition s))
-              xs)))
+  (let [schemas (mapv (fn [{s "schema" :as xition}]
+                        (resolve-schema context xition s))
+                      xs)]
+    (if (= 1 (count schemas))
+      (first schemas)
+      {"anyOf" schemas})))
 
 (defn xform [context {fsm-schema "schema" :as fsm} {[from to] "id" ix-schema "schema" ix-omit? "omit" :as ix} {a "action" :as state} ox-and-cs event trail]
   (try
@@ -323,7 +316,7 @@
                    ;; MATCHING TRANSITION FOUND - validate schema
                    (let [ox-schema (resolve-schema new-context ox ox-schema-raw)
                          ;; Use pre-built registry from context (built in start-fsm)
-                         registry (get new-context :malli/registry)
+                         registry (get new-context :schema/defs)
                          ;; Use Malli validation with combined registry
                          {v? :valid? es :errors}
                          (validate-event registry ox-schema output-event)]
@@ -432,41 +425,44 @@
   "Extract input and output schemas from an FSM definition without starting it.
    
    This is a pure function for design-time analysis - use it for:
-   - FSM composition and type checking with subsumes?
+   - FSM composition and type checking
    - Validating FSM compatibility before wiring them together
    - Static analysis of FSM interfaces
    
    Context is optional but needed for dynamic schema resolution:
    - :id->schema - Map of schema-key to schema-fn for dynamic schemas
-   - :malli/registry - Additional Malli schemas
+   - :schema/defs - Additional JSON Schema definitions
    
    Returns:
-   - :input-schema - Malli :or schema of all transitions FROM 'start'
-   - :output-schema - Malli :or schema of all transitions TO 'end'
+   - :input-schema - JSON Schema (anyOf) of all transitions FROM 'start'
+   - :output-schema - JSON Schema (anyOf) of all transitions TO 'end'
    
    Usage:
      (let [{:keys [input-schema output-schema]} (fsm-schemas {} my-fsm)]
-       (when-not (subsumes? next-fsm-input output-schema)
-         (throw (ex-info \"FSM output incompatible with next FSM input\" {}))))"
+       ;; Use schemas for type checking or documentation
+       )"
   ([fsm] (fsm-schemas {} fsm))
   ([context {xs "xitions" :as fsm}]
    (let [;; Group transitions by source and destination
          sid->ox (group-by (comp first (->key "id")) xs)
          sid->ix (group-by (comp second (->key "id")) xs)
 
-         ;; Compute input-schema: :or of all xition schemas FROM "start"
-         start-xitions (get sid->ox "start")
-         input-schema (into [:or]
-                            (mapv (fn [{s "schema" :as xition}]
-                                    (resolve-schema context xition s))
-                                  start-xitions))
+         ;; Helper to build schema from transitions
+         build-schema (fn [xitions]
+                        (let [schemas (mapv (fn [{s "schema" :as xition}]
+                                              (resolve-schema context xition s))
+                                            xitions)]
+                          (if (= 1 (count schemas))
+                            (first schemas)
+                            {"anyOf" schemas})))
 
-         ;; Compute output-schema: :or of all xition schemas TO "end"
+         ;; Compute input-schema: anyOf all xition schemas FROM "start"
+         start-xitions (get sid->ox "start")
+         input-schema (build-schema start-xitions)
+
+         ;; Compute output-schema: anyOf all xition schemas TO "end"
          end-xitions (get sid->ix "end")
-         output-schema (into [:or]
-                             (mapv (fn [{s "schema" :as xition}]
-                                     (resolve-schema context xition s))
-                                   end-xitions))]
+         output-schema (build-schema end-xitions)]
      {:input-schema input-schema
       :output-schema output-schema})))
 
@@ -480,7 +476,7 @@
 ;;
 ;; 1. CONFIG-TIME CONTEXT
 ;;    - Actions receive context at config-time (not just runtime)
-;;    - Context provides: :store (DB), :malli/registry, :id->action
+;;    - Context provides: :store (DB), :schema/defs, :id->action
 ;;    - This enables fsm-action to load child FSM and compute schemas
 ;;
 ;; 2. ACTION SCHEMAS vs TRANSITION SCHEMAS
@@ -488,7 +484,7 @@
 ;;    - Transitions declare the CONTRACT (specific types)
 ;;    - Subsumption: action-input must subsume transition-schema
 ;;      (action accepts at least what transition provides)
-;;    - Example: llm-action accepts :any, but transition constrains to [:map ...]
+;;    - Example: llm-action accepts any input, but transition constrains to specific schema
 ;;
 ;; 3. DYNAMIC/LAZY ACTIONS (MCP, etc)
 ;;    - Use :any for both input and output at config-time
@@ -571,7 +567,7 @@
         completion-promise (promise)
         context (-> context
                     (assoc :fsm/completion-promise completion-promise)
-                    (assoc :malli/registry fsm-registry))
+                    (assoc :schema/defs fsm-registry))
 
         ;; Create channels and mappings
         id->x (index-by (->key "id") xs)
@@ -846,9 +842,7 @@
    Note: 'service' is the registry key (e.g., 'anthropic', 'google', 'ollama:local')."
   {["anthropic" "claude-sonnet-4-20250514"]
    {:prompts [{:role "system"
-               :content "CRITICAL: Your response must be ONLY valid EDN - no explanatory text before or after."}
-              {:role "system"
-               :content "CRITICAL: Use string keys like \"id\" not keyword keys like :id."}
+               :content "CRITICAL: Your response must be ONLY valid JSON - no explanatory text before or after."}
               {:role "system"
                :content "CRITICAL: Be concise in your response to avoid hitting token limits."}]}
 
@@ -873,14 +867,14 @@
    - Otherwise → user (request to LLM)
    
    Parameters:
-   - context: FSM context (for schema resolution, includes :malli/registry)
+   - context: FSM context (for schema resolution, includes :schema/defs)
    - fsm: The FSM definition (for schema lookups and state actions)
    - trail: The audit trail (vector, oldest-first)
    
    Returns: Sequence of prompt messages with refs expanded for LLM consumption."
   [context {xs "xitions" ss "states" :as fsm} trail]
   (let [;; Get registry from context (built in start-fsm), or build from FSM for backwards compat
-        registry (or (get context :malli/registry)
+        registry (or (get context :schema/defs)
                      (build-fsm-registry fsm context))
         ;; Index for lookups
         id->x (index-by (->key "id") xs)
@@ -888,8 +882,8 @@
         ;; Get output transitions from a state
         state-output-xitions (fn [state-id]
                                (filter (fn [{[from _to] "id"}] (= from state-id)) xs))
-        ;; Helper to expand refs for LLM (refs are Clojure constructs, LLM can't resolve them)
-        expand (fn [schema] (expand-refs-for-llm schema registry))]
+        ;; Helper to expand refs for LLM (refs are JSON Schema $refs, LLM can't resolve them)
+        expand (fn [s] (schema/expand-refs s registry))]
     (mapcat
      (fn [{:keys [from to event error]}]
        (let [;; Look up source state to determine role
@@ -900,15 +894,18 @@
              ix (id->x [from to])
              ix-schema-raw (resolve-schema context ix (get ix "schema"))
              ix-schema (expand ix-schema-raw)
-             ;; Compute output schema (Malli :or from destination state's outgoing transitions)
+             ;; Compute output schema (JSON Schema anyOf from destination state's outgoing transitions)
              ;; Resolve each schema then expand refs
              output-xitions (state-output-xitions to)
-             s-schema-raw (into [:or] (mapv #(resolve-schema context % (get % "schema")) output-xitions))
+             output-schemas (mapv #(resolve-schema context % (get % "schema")) output-xitions)
+             s-schema-raw (if (= 1 (count output-schemas))
+                            (first output-schemas)
+                            {"anyOf" output-schemas})
              s-schema (expand s-schema-raw)]
          (cond
            ;; Error entry - always user message with error feedback
            error
-           [{"role" "user" "content" [:string (:message error) ix-schema]}]
+           [{"role" "user" "content" [(:message error) ix-schema]}]
 
            ;; Assistant (LLM output) - just the document, NOT a triple
            ;; This prevents Claude from mimicking the triple format
@@ -940,41 +937,41 @@
          llm-user-prompts (mapv :content (filter #(= (:role %) "user") llm-prompts))]
 
      (concat
-      ;; Build system message with clear tuple-3 explanation - matches POC style
+      ;; Build system message with clear tuple-3 explanation
       [{"role" "system"
         "content" (join
                    "\n"
                    (concat
-                    ["EDN (Extensible Data Notation) FORMAT"
+                    ["JSON FORMAT"
                      ""
-                     "All communications use EDN - a data format from Clojure, similar to JSON:"
-                     "- Maps: {\"key\" \"value\" \"key2\" 123}"
-                     "- Vectors: [\"item1\" \"item2\" 42]"
+                     "All communications use JSON:"
+                     "- Objects: {\"key\": \"value\", \"key2\": 123}"
+                     "- Arrays: [\"item1\", \"item2\", 42]"
                      "- Strings use double quotes: \"hello\""
                      "- Numbers: 42, 3.14"
-                     "- ALL map keys must be quoted strings: \"id\" not id"
+                     "- Booleans: true, false"
+                     "- Null: null"
                      ""
-                     "REFERENCE SCHEMAS (Malli notation - for structure reference only):"
-                     (pr-str fsm-schemas)
+                     "REFERENCE SCHEMAS (JSON Schema):"
+                     (json/generate-string fsm-schemas)
                      ""
                      "YOUR REQUEST:"
-                     "- Contains [INPUT-SCHEMA INPUT-DOCUMENT OUTPUT-SCHEMA] triples"
-                     "- INPUT-SCHEMA: Malli schema describing the INPUT-DOCUMENT structure"
+                     "- Contains [INPUT-SCHEMA, INPUT-DOCUMENT, OUTPUT-SCHEMA] triples"
+                     "- INPUT-SCHEMA: JSON Schema describing the INPUT-DOCUMENT structure"
                      "- INPUT-DOCUMENT: The actual data you receive"
-                     "- OUTPUT-SCHEMA: Malli schema your response MUST conform to"
+                     "- OUTPUT-SCHEMA: JSON Schema your response MUST conform to"
                      ""
                      "YOUR RESPONSE:"
-                     "- Must be ONLY a valid EDN map - no prose, no markdown, no explanation"
-                     "- Must use string keys: \"id\" not :id"
-                     "- Must include the \"id\" field with a valid transition"
+                     "- Must be ONLY a valid JSON object - no prose, no markdown, no explanation"
+                     "- Must include the \"id\" field with a valid transition array"
                      "- Must include all required fields with valid values"
                      ""
                      "CRITICAL FORMAT RULES:"
                      "- Start with { and end with } - nothing else!"
-                     "- Do NOT output vectors, explanations, or the word 'I'"
+                     "- Do NOT output arrays as your response, explanations, or the word 'I'"
                      "- Do NOT wrap in markdown code blocks"
-                     "- WRONG: I will analyze... or [schema doc schema]"
-                     "- RIGHT: {\"id\" [\"from\" \"to\"] \"field\" \"value\"}"
+                     "- WRONG: I will analyze... or [schema, doc, schema]"
+                     "- RIGHT: {\"id\": [\"from\", \"to\"], \"field\": \"value\"}"
                      ""
                      "CONTEXT:"]
                     fsm-prompts
@@ -987,8 +984,8 @@
         [{"role" "user"
           "content" (join "\n" llm-user-prompts)}])
 
-      ;; Add conversation trail
-      (map (fn [m] (update m "content" pr-str)) trail)))))
+      ;; Add conversation trail (serialize to JSON)
+      (map (fn [m] (update m "content" json/generate-string)) trail)))))
 
 (def-action llm-action
   "FSM action: call LLM with prompts built from FSM config and trail.
@@ -1001,11 +998,11 @@
    
    Service registry is taken from context :llm/registry or uses default-registry.
    
-   Passes the output schema (Malli :or of valid output transitions) to call
+   Passes the output schema (JSON Schema anyOf of valid output transitions) to call
    for structured output enforcement."
-  [:map
-   ["service" {:optional true} :string]
-   ["model" {:optional true} :string]]
+  {"type" "object"
+   "properties" {"service" {"type" "string"}
+                 "model" {"type" "string"}}}
   [config {xs "xitions" :as fsm} ix {sid "id" :as state}]
   (fn [context event trail handler]
     (log/info "llm-action entry, trail-count:" (count trail))
@@ -1023,21 +1020,21 @@
           output-schema (state-schema context fsm state output-xitions)
 
           ;; Get registry for expanding refs
-          registry (or (get context :malli/registry)
+          registry (or (get context :schema/defs)
                        (build-fsm-registry fsm context))
 
           ;; Build prompt trail from history
           prompt-trail (trail->prompts context fsm trail)
 
           ;; CRITICAL: When trail is empty (first call), we need to send the initial event!
-          ;; POC sends [input-schema input-doc output-schema] as user message
+          ;; Send [input-schema input-doc output-schema] as user message
           ;; We do the same here - use entry transition schema as input-schema
           initial-message (when (empty? trail)
                             (let [ix-schema-raw (resolve-schema context ix (get ix "schema"))
-                                  ix-schema (expand-refs-for-llm ix-schema-raw registry)
-                                  out-schema (expand-refs-for-llm output-schema registry)]
+                                  ix-schema (schema/expand-refs ix-schema-raw registry)
+                                  out-schema (schema/expand-refs output-schema registry)]
                               [{"role" "user"
-                                "content" (pr-str [ix-schema event out-schema])}]))
+                                "content" (json/generate-string [ix-schema event out-schema])}]))
 
           ;; Combine: trail prompts + initial message if needed
           full-trail (if initial-message
@@ -1097,7 +1094,7 @@
           output-schema (state-schema context fsm state output-xitions)
 
           ;; Get registry for expanding refs
-          registry (or (get context :malli/registry)
+          registry (or (get context :schema/defs)
                        (build-fsm-registry fsm context))
 
           ;; Build prompt trail from history
@@ -1106,8 +1103,8 @@
           ;; Build initial message if trail is empty
           initial-message (when (empty? trail)
                             (let [ix-schema-raw (resolve-schema context ix (get ix "schema"))
-                                  ix-schema (expand-refs-for-llm ix-schema-raw registry)
-                                  out-schema (expand-refs-for-llm output-schema registry)]
+                                  ix-schema (schema/expand-refs ix-schema-raw registry)
+                                  out-schema (schema/expand-refs output-schema registry)]
                               [{"role" "user"
                                 "content" (pr-str [ix-schema event out-schema])}]))
 

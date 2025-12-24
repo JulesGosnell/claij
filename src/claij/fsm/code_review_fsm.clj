@@ -1,8 +1,6 @@
 (ns claij.fsm.code-review-fsm
   (:require
-   [malli.core :as m]
-   [malli.registry :as mr]
-   [claij.malli :refer [def-fsm base-registry]]
+   [claij.schema :refer [def-fsm]]
    [claij.fsm :as fsm]
    [claij.actions :as actions]))
 
@@ -11,77 +9,116 @@
 
 (def code-review-schemas
   "Schema definitions for code review events.
-   Plain map for emit-for-llm analysis and inlining.
-   Use string keys for refs and map entries for LLM JSON compatibility."
+   Uses JSON Schema format with $ref for references."
   {;; Code structure with language info
-   "code" [:map {:closed true
-                 :description "Source code with programming language metadata"}
-           ["language" {:description "Programming language information"}
-            [:map {:closed true}
-             ["name" {:description "Language name (e.g. 'clojure', 'python', 'javascript')"} :string]
-             ["version" {:optional true :description "Language version (e.g. '1.11', '3.12')"} :string]]]
-           ["text" {:description "The actual source code"} :string]]
+   "code" {"type" "object"
+           "description" "Source code with programming language metadata"
+           "additionalProperties" false
+           "required" ["language" "text"]
+           "properties"
+           {"language" {"type" "object"
+                        "description" "Programming language information"
+                        "additionalProperties" false
+                        "required" ["name"]
+                        "properties"
+                        {"name" {"type" "string"
+                                 "description" "Language name (e.g. 'clojure', 'python', 'javascript')"}
+                         "version" {"type" "string"
+                                    "description" "Language version (e.g. '1.11', '3.12')"}}}
+            "text" {"type" "string"
+                    "description" "The actual source code"}}}
 
    ;; General notes field
-   "notes" [:string {:description "General notes or observations about the code"}]
+   "notes" {"type" "string"
+            "description" "General notes or observations about the code"}
 
    ;; List of specific issues
-   "comments" [:vector {:description "List of specific issues or suggestions"}
-               [:string {:description "A specific comment about an issue found"}]]
+   "comments" {"type" "array"
+               "description" "List of specific issues or suggestions"
+               "items" {"type" "string"
+                        "description" "A specific comment about an issue found"}}
 
    ;; List of concerns to review
-   "concerns" [:vector {:description "List of code quality concerns to focus on"}
-               [:string {:description "A specific concern to evaluate"}]]
+   "concerns" {"type" "array"
+               "description" "List of code quality concerns to focus on"
+               "items" {"type" "string"
+                        "description" "A specific concern to evaluate"}}
 
    ;; LLM specification
-   "llm" [:map {:closed true
-                :description "LLM service and model specification"}
-          ["service" {:description "The LLM service"}
-           [:enum "anthropic" "google" "openrouter" "ollama:local" "xai"]]
-          ["model" {:description "The specific model to use (native to service)"} :string]]
+   "llm" {"type" "object"
+          "description" "LLM service and model specification"
+          "additionalProperties" false
+          "required" ["service" "model"]
+          "properties"
+          {"service" {"type" "string"
+                      "description" "The LLM service"
+                      "enum" ["anthropic" "google" "openrouter" "ollama:local" "xai"]}
+           "model" {"type" "string"
+                    "description" "The specific model to use (native to service)"}}}
 
    ;; List of available LLMs (min 1)
-   "llms" [:vector {:min 1 :description "List of available LLMs to choose from"}
-           [:ref "llm"]]
+   "llms" {"type" "array"
+           "description" "List of available LLMs to choose from"
+           "minItems" 1
+           "items" {"$ref" "#/$defs/llm"}}
 
    ;; Entry event: start → chairman
-   "entry" [:map {:closed true
-                  :description "Initial request to start a code review"}
-            ["id" [:= ["start" "chairman"]]]
-            ["document" {:description "The code or document to review"} :string]
-            ["llms" {:description "Available LLMs for the review"} [:ref "llms"]]
-            ["concerns" {:description "Quality concerns to evaluate"} [:ref "concerns"]]]
+   "entry" {"type" "object"
+            "description" "Initial request to start a code review"
+            "additionalProperties" false
+            "required" ["id" "document" "llms" "concerns"]
+            "properties"
+            {"id" {"const" ["start" "chairman"]}
+             "document" {"type" "string"
+                         "description" "The code or document to review"}
+             "llms" {"$ref" "#/$defs/llms"
+                     "description" "Available LLMs for the review"}
+             "concerns" {"$ref" "#/$defs/concerns"
+                         "description" "Quality concerns to evaluate"}}}
 
    ;; Request event: chairman → reviewer
-   "request" [:map {:closed true
-                    :description "Chairman's request to a reviewer for code analysis"}
-              ["id" [:= ["chairman" "reviewer"]]]
-              ["code" {:description "The code to review"} [:ref "code"]]
-              ["notes" {:description "Context or instructions for the reviewer"} [:ref "notes"]]
-              ["concerns" {:description "Specific concerns for this review (max 3)"}
-               [:vector {:max 3} :string]]
-              ["llm" {:description "Which LLM should perform this review"} [:ref "llm"]]]
+   "request" {"type" "object"
+              "description" "Chairman's request to a reviewer for code analysis"
+              "additionalProperties" false
+              "required" ["id" "code" "notes" "concerns" "llm"]
+              "properties"
+              {"id" {"const" ["chairman" "reviewer"]}
+               "code" {"$ref" "#/$defs/code"
+                       "description" "The code to review"}
+               "notes" {"$ref" "#/$defs/notes"
+                        "description" "Context or instructions for the reviewer"}
+               "concerns" {"type" "array"
+                           "description" "Specific concerns for this review (max 3)"
+                           "maxItems" 3
+                           "items" {"type" "string"}}
+               "llm" {"$ref" "#/$defs/llm"
+                      "description" "Which LLM should perform this review"}}}
 
    ;; Response event: reviewer → chairman
-   "response" [:map {:closed true
-                     :description "Reviewer's analysis and feedback"}
-               ["id" [:= ["reviewer" "chairman"]]]
-               ["code" {:description "The code (possibly modified with improvements)"} [:ref "code"]]
-               ["notes" {:optional true :description "General observations about the review"} [:ref "notes"]]
-               ["comments" {:description "Specific issues or suggestions found"} [:ref "comments"]]]
+   "response" {"type" "object"
+               "description" "Reviewer's analysis and feedback"
+               "additionalProperties" false
+               "required" ["id" "code" "comments"]
+               "properties"
+               {"id" {"const" ["reviewer" "chairman"]}
+                "code" {"$ref" "#/$defs/code"
+                        "description" "The code (possibly modified with improvements)"}
+                "notes" {"$ref" "#/$defs/notes"
+                         "description" "General observations about the review"}
+                "comments" {"$ref" "#/$defs/comments"
+                            "description" "Specific issues or suggestions found"}}}
 
    ;; Summary event: chairman → end
-   "summary" [:map {:closed true
-                    :description "Final summary after all reviews complete"}
-              ["id" [:= ["chairman" "end"]]]
-              ["code" {:description "The final reviewed code"} [:ref "code"]]
-              ["notes" {:description "Summary of the review process and findings"} [:ref "notes"]]]})
-
-(def code-review-registry
-  "Malli registry for validation. Composes base-registry with code-review-schemas."
-  (mr/composite-registry
-   base-registry
-   code-review-schemas))
+   "summary" {"type" "object"
+              "description" "Final summary after all reviews complete"
+              "additionalProperties" false
+              "required" ["id" "code" "notes"]
+              "properties"
+              {"id" {"const" ["chairman" "end"]}
+               "code" {"$ref" "#/$defs/code"
+                       "description" "The final reviewed code"}
+               "notes" {"$ref" "#/$defs/notes"
+                        "description" "Summary of the review process and findings"}}}})
 
 (def-fsm
   code-review-fsm
@@ -143,22 +180,16 @@
 
    "xitions"
    [{"id" ["start" "chairman"]
-     "schema" [:ref "entry"]}
+     "schema" {"$ref" "#/$defs/entry"}}
     {"id" ["chairman" "reviewer"]
      "prompts" []
-     "schema" [:ref "request"]}
+     "schema" {"$ref" "#/$defs/request"}}
     {"id" ["reviewer" "chairman"]
      "prompts" []
-     "schema" [:ref "response"]}
+     "schema" {"$ref" "#/$defs/response"}}
     {"id" ["chairman" "end"]
      "prompts" []
-     "schema" [:ref "summary"]}]})
-
-;;------------------------------------------------------------------------------
-;; LLM Configuration Registry
-
-;;------------------------------------------------------------------------------
-;; Prompt Construction
+     "schema" {"$ref" "#/$defs/summary"}}]})
 
 ;;------------------------------------------------------------------------------
 ;; Example Concerns
@@ -181,9 +212,6 @@
    "Separation of concerns: Keep each function focused on one responsibility"
    "Error handling: Fail fast and explicitly. Use ex-info for rich error context"
    "Comments: Sparse but pragmatic. Comment the 'why' not the 'what'"])
-
-;;------------------------------------------------------------------------------
-;; LLM Action
 
 ;;------------------------------------------------------------------------------
 ;; Review Macro

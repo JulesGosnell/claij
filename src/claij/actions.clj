@@ -1,7 +1,6 @@
 (ns claij.actions
   (:require
    [clojure.tools.logging :as log]
-   [malli.core :as m]
    [claij.action :refer [def-action action? action-name action-config-schema]]
    [claij.llm :refer [call]]
    [claij.fsm :refer [start-fsm llm-action]]
@@ -23,9 +22,9 @@
    
    Both can be present - handler is called first, then promise delivered.
    This allows composed FSMs to propagate results while still supporting await."
-  {:config [:map]
-   :input :any
-   :output :any}
+  {:config {"type" "object"}
+   :input true
+   :output true}
   [_config _fsm _ix _state]
   (fn [context _event trail _handler]
     (log/info "   [OK] End")
@@ -39,7 +38,7 @@
 
 (def-action fork-action
   "Placeholder for FSM forking (NOT IMPLEMENTED)"
-  [:map]
+  {"type" "object"}
   [_config _fsm _ix _state]
   (fn [context _event _trail handler]
     (log/warn "   Fork: NOT IMPLEMENTED - this is a placeholder")
@@ -49,7 +48,7 @@
 
 (def-action generate-action
   "Placeholder for FSM generation (NOT IMPLEMENTED)"
-  [:map]
+  {"type" "object"}
   [_config _fsm _ix _state]
   (fn [context _event _trail handler]
     (log/warn "   Generate: NOT IMPLEMENTED - this is a placeholder")
@@ -61,9 +60,9 @@
   "Loads the chosen FSM, starts it, delegates the user's text, waits for result.
    
    Creates a child context with a custom end action to capture the result."
-  {:config [:map]
-   :input :any
-   :output :any}
+  {:config {"type" "object"}
+   :input true
+   :output true}
   [_config _fsm _ix _state]
   (fn [context event trail handler]
     ;; Extract the chosen FSM info from event, original text from trail
@@ -254,15 +253,17 @@
             nil))))
     ;; Metadata to identify this as a curried action
     {:action/name "fsm"
-     :action/config-schema [:map
-                            ["fsm-id" :string]
-                            ["fsm-version" {:optional true} :int]
-                            ["success-to" :string]
-                            ["failure-to" {:optional true} :string]
-                            ["timeout-ms" {:optional true} :int]
-                            ["trail-mode" {:optional true} [:enum :omit :summary :full]]]
-     :action/input-schema :any
-     :action/output-schema :any}))
+     :action/config-schema {"type" "object"
+                            "required" ["fsm-id" "success-to"]
+                            "properties"
+                            {"fsm-id" {"type" "string"}
+                             "fsm-version" {"type" "integer"}
+                             "success-to" {"type" "string"}
+                             "failure-to" {"type" "string"}
+                             "timeout-ms" {"type" "integer"}
+                             "trail-mode" {"enum" ["omit" "summary" "full"]}}}
+     :action/input-schema true
+     :action/output-schema true}))
 
 ;; Pre-built fsm-action for registration in :id->action
 (defn store-fsm-loader

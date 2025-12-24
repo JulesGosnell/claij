@@ -32,7 +32,7 @@
    [claij.action :refer [def-action]]
    [claij.hat.openapi :as openapi]
    [claij.fsm :as fsm]
-   [claij.malli :refer [expand-refs-for-llm]]))
+   [claij.schema :as schema]))
 
 ;;------------------------------------------------------------------------------
 ;; Schema-derived Routing
@@ -41,14 +41,15 @@
 (defn- extract-id-from-schema
   "Extract the constrained id value from an output schema.
    
-   For deterministic states, the output schema is [:or [:map [\"id\" [:= [from to]]] ...]]
-   with a single alternative. We extract [from to] from the [:=] constraint.
+   For deterministic states, the output schema is either:
+   - JSON Schema: {\"anyOf\": [{\"properties\": {\"id\": {\"const\": [from, to]}} ...}]}
+   - Or a single schema without anyOf
    
    Returns the id vector, or throws if schema doesn't have exactly one deterministic route."
   [output-schema]
-  (let [;; Unwrap [:or ...] to get alternatives
-        alternatives (if (= :or (first output-schema))
-                       (rest output-schema)
+  (let [;; Handle both anyOf (multiple) and single schema cases
+        alternatives (if-let [any-of (get output-schema "anyOf")]
+                       any-of
                        [output-schema])
 
         _ (when (not= 1 (count alternatives))
@@ -56,31 +57,21 @@
                             {:alternatives-count (count alternatives)
                              :schema output-schema})))
 
-        ;; Get the single map schema
-        map-schema (first alternatives)
+        ;; Get the single schema
+        single-schema (first alternatives)
 
-        ;; Find the "id" key in the map schema
-        ;; Map schema is [:map opts? & key-schemas] where key-schemas are [key opts? schema]
-        map-entries (if (map? (second map-schema))
-                      (drop 2 map-schema) ; skip :map and opts
-                      (rest map-schema)) ; skip just :map
+        ;; Extract id from properties
+        id-schema (get-in single-schema ["properties" "id"])
 
-        id-entry (first (filter #(= "id" (first %)) map-entries))
+        _ (when-not id-schema
+            (throw (ex-info "Schema missing 'id' property" {:schema output-schema})))
 
-        _ (when-not id-entry
-            (throw (ex-info "Schema missing 'id' key" {:schema output-schema})))
+        ;; id-schema should have {"const": [from, to]}
+        id-value (get id-schema "const")
 
-        ;; id-entry is ["id" opts? schema] - get the schema part
-        id-schema (if (map? (second id-entry))
-                    (nth id-entry 2) ; ["id" {:opts} schema]
-                    (second id-entry)) ; ["id" schema]
-
-        ;; id-schema should be [:= [from to]] or [:tuple [:= from] [:= to]]
-        _ (when-not (and (vector? id-schema) (= := (first id-schema)))
-            (throw (ex-info "Expected [:= id] constraint for deterministic routing"
-                            {:id-schema id-schema})))
-
-        id-value (second id-schema)]
+        _ (when-not id-value
+            (throw (ex-info "Expected {\"const\": id} constraint for deterministic routing"
+                            {:id-schema id-schema})))]
 
     id-value))
 
@@ -306,14 +297,16 @@
    - \"body\" - Response body (parsed JSON or byte array for binary)
    - \"content-type\" - Response content type
    - \"error\" - Error message if failed"
-  {:config [:map
-            [:spec-url :string]
-            [:operation :string]
-            [:base-url :string]
-            [:auth {:optional true} :any]
-            [:timeout-ms {:optional true} :int]]
-   :input :any
-   :output :any}
+  {:config {"type" "object"
+            "required" ["spec-url" "operation" "base-url"]
+            "properties"
+            {"spec-url" {"type" "string"}
+             "operation" {"type" "string"}
+             "base-url" {"type" "string"}
+             "auth" {}
+             "timeout-ms" {"type" "integer"}}}
+   :input true
+   :output true}
   [config {xs "xitions" :as fsm} _ix {state-id "id" :as state}]
 
   ;; Factory time: fetch spec and find operation
@@ -338,10 +331,10 @@
         output-schema-raw (fsm/state-schema {} fsm state output-xitions)
 
         ;; Expand refs so we can extract the id constraint
-        output-schema (expand-refs-for-llm output-schema-raw registry)
+        output-schema (schema/expand-refs output-schema-raw registry)
 
         ;; Extract the constrained id from the schema
-        ;; For deterministic states, schema is [:or [:map ["id" [:= [from to]]] ...]]
+        ;; For deterministic states, schema is {"anyOf": [{"properties": {"id": {"const": [from, to]}}}...]}
         output-id (extract-id-from-schema output-schema)
 
         ;; Get content types from spec

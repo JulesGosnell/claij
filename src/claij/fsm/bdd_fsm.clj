@@ -10,8 +10,7 @@
    - GitHub tools (issues, PRs, code)
    - Clojure tools (REPL, file operations)"
   (:require
-   [malli.registry :as mr]
-   [claij.malli :refer [def-fsm base-registry]]
+   [claij.schema :refer [def-fsm]]
    [claij.fsm :as fsm]
    [claij.actions :as actions]
    [claij.action.openapi-call :refer [openapi-call-actions]]
@@ -51,40 +50,50 @@
    Note: openapi-call returns {\"status\" N, \"body\" {...}, \"content-type\" \"...\"}
    The schemas here reflect that structure."
   {;; Entry event: start → stt (audio in)
-   "entry" [:map {:closed true
-                  :description "Voice input to transcribe"}
-            ["id" [:= ["start" "stt"]]]
-            ["audio" {:description "WAV audio bytes"} :any]]
+   "entry" {"type" "object"
+            "description" "Voice input to transcribe"
+            "additionalProperties" false
+            "required" ["id" "audio"]
+            "properties"
+            {"id" {"const" ["start" "stt"]}
+             "audio" {"description" "WAV audio bytes"}}}
 
    ;; STT → LLM: openapi-call response with transcription in body
-   "stt-to-llm" [:map {:closed true
-                       :description "STT service response"}
-                 ["id" [:= ["stt" "llm"]]]
-                 ["status" :int]
-                 ["body" [:map
-                          ["text" {:description "Transcribed text"} :string]
-                          ["language" {:optional true} :string]]]
-                 ["content-type" {:optional true} :string]]
+   "stt-to-llm" {"type" "object"
+                 "description" "STT service response"
+                 "additionalProperties" false
+                 "required" ["id" "status" "body"]
+                 "properties"
+                 {"id" {"const" ["stt" "llm"]}
+                  "status" {"type" "integer"}
+                  "body" {"type" "object"
+                          "required" ["text"]
+                          "properties"
+                          {"text" {"type" "string"
+                                   "description" "Transcribed text"}
+                           "language" {"type" "string"}}}
+                  "content-type" {"type" "string"}}}
 
    ;; LLM → TTS: LLM produces text for synthesis
-   "llm-to-tts" [:map {:closed true
-                       :description "LLM response for TTS synthesis"}
-                 ["id" [:= ["llm" "tts"]]]
-                 ["text" {:description "Response text to synthesize"} :string]]
+   "llm-to-tts" {"type" "object"
+                 "description" "LLM response for TTS synthesis"
+                 "additionalProperties" false
+                 "required" ["id" "text"]
+                 "properties"
+                 {"id" {"const" ["llm" "tts"]}
+                  "text" {"type" "string"
+                          "description" "Response text to synthesize"}}}
 
    ;; TTS → end: openapi-call response with audio bytes in body
-   "exit" [:map {:closed true
-                 :description "TTS service response - synthesized audio"}
-           ["id" [:= ["tts" "end"]]]
-           ["status" :int]
-           ["body" {:description "WAV audio bytes"} :any]
-           ["content-type" {:optional true} :string]]})
-
-(def bdd-registry
-  "Malli registry for BDD FSM validation."
-  (mr/composite-registry
-   base-registry
-   bdd-schemas))
+   "exit" {"type" "object"
+           "description" "TTS service response - synthesized audio"
+           "additionalProperties" false
+           "required" ["id" "status" "body"]
+           "properties"
+           {"id" {"const" ["tts" "end"]}
+            "status" {"type" "integer"}
+            "body" {"description" "WAV audio bytes"}
+            "content-type" {"type" "string"}}}})
 
 ;;; ============================================================
 ;;; FSM Definition
@@ -161,22 +170,22 @@
    [;; Entry: audio bytes in
     {"id" ["start" "stt"]
      "label" "audio in"
-     "schema" [:ref "entry"]}
+     "schema" {"$ref" "#/$defs/entry"}}
 
     ;; STT → LLM: openapi-call response with text in body
     {"id" ["stt" "llm"]
      "label" "transcribed"
-     "schema" [:ref "stt-to-llm"]}
+     "schema" {"$ref" "#/$defs/stt-to-llm"}}
 
     ;; LLM → TTS: LLM response text for synthesis
     {"id" ["llm" "tts"]
      "label" "response"
-     "schema" [:ref "llm-to-tts"]}
+     "schema" {"$ref" "#/$defs/llm-to-tts"}}
 
     ;; TTS → end: audio bytes out
     {"id" ["tts" "end"]
      "label" "audio out"
-     "schema" [:ref "exit"]}]})
+     "schema" {"$ref" "#/$defs/exit"}}]})
 
 ;;; ============================================================
 ;;; Context Setup
