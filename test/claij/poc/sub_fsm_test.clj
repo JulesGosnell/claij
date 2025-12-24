@@ -32,9 +32,9 @@
 
 (def-action antonym-action
   "Maps a word to its antonym."
-  {:config [:map]
-   :input [:map ["word" :string]]
-   :output [:map ["word" :string] ["antonym" :string]]}
+  {:config {}
+   :input {"type" "object" "required" ["word"] "properties" {"word" {"type" "string"}}}
+   :output {"type" "object" "required" ["word" "antonym"] "properties" {"word" {"type" "string"} "antonym" {"type" "string"}}}}
   [_config _fsm _ix _state]
   (fn [context {word "word"} _trail handler]
     (let [antonym (get antonyms word "unknown")]
@@ -54,14 +54,16 @@
              {"id" "end"
               "action" "end"}]
    "xitions" [{"id" ["start" "processing"]
-               "schema" [:map
-                         ["id" [:= ["start" "processing"]]]
-                         ["word" :string]]}
+               "schema" {"type" "object"
+                         "required" ["id" "word"]
+                         "properties" {"id" {"const" ["start" "processing"]}
+                                       "word" {"type" "string"}}}}
               {"id" ["processing" "end"]
-               "schema" [:map
-                         ["id" [:= ["processing" "end"]]]
-                         ["word" :string]
-                         ["antonym" :string]]}]})
+               "schema" {"type" "object"
+                         "required" ["id" "word" "antonym"]
+                         "properties" {"id" {"const" ["processing" "end"]}
+                                       "word" {"type" "string"}
+                                       "antonym" {"type" "string"}}}}]})
 
 ;;; ============================================================
 ;;; Super-FSM that invokes sub-FSM
@@ -69,9 +71,9 @@
 
 (def-action wrapper-action
   "Wraps input for sub-FSM invocation."
-  {:config [:map]
-   :input [:map ["input-word" :string]]
-   :output [:map ["word" :string]]}
+  {:config {}
+   :input {"type" "object" "required" ["input-word"] "properties" {"input-word" {"type" "string"}}}
+   :output {"type" "object" "required" ["word"] "properties" {"word" {"type" "string"}}}}
   [_config _fsm _ix _state]
   (fn [context {input-word "input-word"} _trail handler]
     (log/info "wrapper-action: preparing" input-word "for sub-fsm")
@@ -81,9 +83,9 @@
 
 (def-action unwrapper-action
   "Unwraps result from sub-FSM."
-  {:config [:map]
-   :input [:map ["result" :map]]
-   :output [:map ["original" :string] ["opposite" :string]]}
+  {:config {}
+   :input {"type" "object" "required" ["result"] "properties" {"result" {"type" "object"}}}
+   :output {"type" "object" "required" ["original" "opposite"] "properties" {"original" {"type" "string"} "opposite" {"type" "string"}}}}
   [_config _fsm _ix _state]
   (fn [context {result "result"} _trail handler]
     (let [{word "word" antonym "antonym"} result]
@@ -110,23 +112,27 @@
              {"id" "end"
               "action" "end"}]
    "xitions" [{"id" ["start" "wrapping"]
-               "schema" [:map
-                         ["id" [:= ["start" "wrapping"]]]
-                         ["input-word" :string]]}
+               "schema" {"type" "object"
+                         "required" ["id" "input-word"]
+                         "properties" {"id" {"const" ["start" "wrapping"]}
+                                       "input-word" {"type" "string"}}}}
               {"id" ["wrapping" "calling"]
-               "schema" [:map
-                         ["id" [:= ["wrapping" "calling"]]]
-                         ["word" :string]]}
+               "schema" {"type" "object"
+                         "required" ["id" "word"]
+                         "properties" {"id" {"const" ["wrapping" "calling"]}
+                                       "word" {"type" "string"}}}}
               {"id" ["calling" "unwrapping"]
-               "schema" [:map
-                         ["id" [:= ["calling" "unwrapping"]]]
-                         ["result" :map]
-                         ["child-trail" {:optional true} :any]]}
+               "schema" {"type" "object"
+                         "required" ["id" "result"]
+                         "properties" {"id" {"const" ["calling" "unwrapping"]}
+                                       "result" {"type" "object"}
+                                       "child-trail" {}}}}
               {"id" ["unwrapping" "end"]
-               "schema" [:map
-                         ["id" [:= ["unwrapping" "end"]]]
-                         ["original" :string]
-                         ["opposite" :string]]}]})
+               "schema" {"type" "object"
+                         "required" ["id" "original" "opposite"]
+                         "properties" {"id" {"const" ["unwrapping" "end"]}
+                                       "original" {"type" "string"}
+                                       "opposite" {"type" "string"}}}}]})
 
 ;;; ============================================================
 ;;; Stub FSM Loader for Testing

@@ -50,9 +50,10 @@
 
 (def-action test-broken-config-action
   "Action that requires specific config for testing validation."
-  [:map
-   ["required-field" :string]
-   ["count" :int]]
+  {"type" "object"
+   "required" ["required-field" "count"]
+   "properties" {"required-field" {"type" "string"}
+                 "count" {"type" "integer"}}}
   [config fsm ix state]
   (fn [context event trail handler]
     (handler context {"id" "ok"})))
@@ -68,7 +69,7 @@
 
 (def mock-ix
   {"id" ["start" "end"]
-   "schema" :any})
+   "schema" true})
 
 (def mock-state
   {"id" "test-state"
@@ -84,11 +85,13 @@
     (is (= "test-end-action" (action-name #'test-end-action))))
 
   (testing "Action has config schema in metadata"
-    (is (= [:map
-            ["provider" [:enum "anthropic" "google" "openai" "xai"]]
-            ["model" :string]]
+    (is (= {"type" "object"
+            "required" ["provider" "model"]
+            "properties"
+            {"provider" {"enum" ["anthropic" "google" "openai" "xai"]}
+             "model" {"type" "string"}}}
            (action-config-schema #'test-llm-action)))
-    (is (= [:map] (action-config-schema #'test-end-action))))
+    (is (= {"type" "object"} (action-config-schema #'test-end-action))))
 
   (testing "Action has standard Clojure docstring"
     (is (= "LLM action - calls configured provider and model."
@@ -204,11 +207,13 @@
     (let [registry {"llm" #'test-llm-action
                     "end" #'test-end-action
                     "timeout" #'test-timeout-action}]
-      (is (= [:map
-              ["provider" [:enum "anthropic" "google" "openai" "xai"]]
-              ["model" :string]]
+      (is (= {"type" "object"
+              "required" ["provider" "model"]
+              "properties"
+              {"provider" {"enum" ["anthropic" "google" "openai" "xai"]}
+               "model" {"type" "string"}}}
              (action-config-schema (get registry "llm"))))
-      (is (= [:map] (action-config-schema (get registry "end"))))))
+      (is (= {"type" "object"} (action-config-schema (get registry "end"))))))
 
   (testing "Can instantiate and invoke actions from registry"
     (let [registry {"llm" test-llm-action
@@ -336,9 +341,9 @@
 
 (def-action child-process-action
   "Doubles the input value."
-  {:config [:map]
-   :input :any
-   :output :any}
+  {:config {}
+   :input true
+   :output true}
   [_config _fsm _ix _state]
   (fn [context event _trail handler]
     (let [value (get event "value")
@@ -358,9 +363,13 @@
     {"id" "end" "action" "end"}]
    "xitions"
    [{"id" ["start" "process"]
-     "schema" [:map ["id" :any] ["value" :int]]}
+     "schema" {"type" "object"
+               "required" ["id" "value"]
+               "properties" {"id" {} "value" {"type" "integer"}}}}
     {"id" ["process" "end"]
-     "schema" [:map ["id" :any] ["result" :int]]}]})
+     "schema" {"type" "object"
+               "required" ["id" "result"]
+               "properties" {"id" {} "result" {"type" "integer"}}}}]})
 
 (def mock-fsm-store
   (atom {"child-doubler" {1 child-fsm}}))
@@ -507,12 +516,12 @@
   {"id" "reuse-test"
    "states" [{"id" "echo" "action" "echo"}
              {"id" "end" "action" "end"}]
-   "xitions" [{"id" ["start" "echo"] "schema" :any}
-              {"id" ["echo" "end"] "schema" :any}]})
+   "xitions" [{"id" ["start" "echo"] "schema" true}
+              {"id" ["echo" "end"] "schema" true}]})
 
 (def-action echo-action
   "Echoes input to output."
-  {:config [:map] :input :any :output :any}
+  {:config {} :input true :output true}
   [_config _fsm _ix _state]
   (fn [context event _trail handler]
     (handler context {"id" ["echo" "end"]
@@ -612,9 +621,9 @@
 
 (def-action parent-start-action
   "Prepares data for child FSM."
-  {:config [:map]
-   :input :any
-   :output :any}
+  {:config {}
+   :input true
+   :output true}
   [_config _fsm _ix _state]
   (fn [context event _trail handler]
     ;; Pass through to delegate state with the value
@@ -623,9 +632,9 @@
 
 (def-action parent-collect-action
   "Collects result from child FSM."
-  {:config [:map]
-   :input :any
-   :output :any}
+  {:config {}
+   :input true
+   :output true}
   [_config _fsm _ix _state]
   (fn [context event _trail handler]
     ;; Extract child result and format final output
@@ -647,13 +656,17 @@
     {"id" "end" "action" "end"}]
    "xitions"
    [{"id" ["start" "prepare"]
-     "schema" [:map ["id" :any] ["input" :int]]}
+     "schema" {"type" "object" "required" ["id" "input"]
+               "properties" {"id" {} "input" {"type" "integer"}}}}
     {"id" ["prepare" "delegate"]
-     "schema" [:map ["id" :any] ["value" :int]]}
+     "schema" {"type" "object" "required" ["id" "value"]
+               "properties" {"id" {} "value" {"type" "integer"}}}}
     {"id" ["delegate" "collect"]
-     "schema" [:map ["id" :any] ["result" :any] ["child-trail" {:optional true} :any]]}
+     "schema" {"type" "object" "required" ["id" "result"]
+               "properties" {"id" {} "result" {} "child-trail" {}}}}
     {"id" ["collect" "end"]
-     "schema" [:map ["id" :any] ["final-result" :int] ["source" :string]]}]})
+     "schema" {"type" "object" "required" ["id" "final-result" "source"]
+               "properties" {"id" {} "final-result" {"type" "integer"} "source" {"type" "string"}}}}]})
 
 (deftest parent-child-fsm-integration-test
   (testing "Parent FSM can delegate to child FSM via fsm-action"

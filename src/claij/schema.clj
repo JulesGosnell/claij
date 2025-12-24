@@ -108,9 +108,20 @@
   {"$ref" (str "#/$defs/" def-name)})
 
 (defn any-of-schema
-  "Create an anyOf (union) schema."
+  "Create an anyOf (union) schema - at least one schema must match.
+   
+   Prefer one-of-schema for discriminated unions (like FSM xition schemas)
+   where exactly one schema should match based on a discriminator field."
   [& schemas]
   {"anyOf" (vec schemas)})
+
+(defn one-of-schema
+  "Create a oneOf (discriminated union) schema - exactly one schema must match.
+   
+   Use for FSM xition schemas where the 'id' const field acts as a discriminator,
+   ensuring unambiguous schema matching to determine the correct output xition."
+  [& schemas]
+  {"oneOf" (vec schemas)})
 
 (defn all-of-schema
   "Create an allOf (intersection) schema."

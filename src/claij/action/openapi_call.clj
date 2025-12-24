@@ -42,15 +42,16 @@
   "Extract the constrained id value from an output schema.
    
    For deterministic states, the output schema is either:
-   - JSON Schema: {\"anyOf\": [{\"properties\": {\"id\": {\"const\": [from, to]}} ...}]}
-   - Or a single schema without anyOf
+   - JSON Schema: {\"oneOf\": [{\"properties\": {\"id\": {\"const\": [from, to]}} ...}]}
+   - JSON Schema: {\"anyOf\": [...]} (legacy, same structure)
+   - Or a single schema without oneOf/anyOf
    
    Returns the id vector, or throws if schema doesn't have exactly one deterministic route."
   [output-schema]
-  (let [;; Handle both anyOf (multiple) and single schema cases
-        alternatives (if-let [any-of (get output-schema "anyOf")]
-                       any-of
-                       [output-schema])
+  (let [;; Handle oneOf (preferred), anyOf (legacy), and single schema cases
+        alternatives (or (get output-schema "oneOf")
+                         (get output-schema "anyOf")
+                         [output-schema])
 
         _ (when (not= 1 (count alternatives))
             (throw (ex-info "Deterministic action requires exactly one output xition"

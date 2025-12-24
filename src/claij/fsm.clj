@@ -56,9 +56,9 @@
 ;; this either comes from a request (us->llm) or a response (llm->us)
 ;; the fsm is direction agnostic
 ;; each xition carries a schema
-;; the document will be validated against one of these schemas (JSON Schema anyOf)
-;; it will make the xition of which it validates against the schema
-;; when making a request, we will send the anyOf of xition schemas from our state
+;; the document will be validated against one of these schemas (JSON Schema oneOf)
+;; it will make the xition of which it validates against the schema (discriminated by "id" const)
+;; when making a request, we will send the oneOf of xition schemas from our state
 ;; the llm will make a response that conforms to the xition it wants to make
 ;; if it validates, we will make the xition, otherwise we go back to the llm til it gets it right
 
@@ -225,14 +225,14 @@
 (defn state-schema
   "Make the schema for a state - to be valid for a state, you must be valid for one (only) of its output xitions.
    Resolves dynamic schemas via context :id->schema lookup.
-   Returns a JSON Schema with anyOf for multiple options."
+   Returns a JSON Schema with oneOf for multiple options (discriminated by id const)."
   [context {fid "id" fv "version" fs "schema" :as _fsm} {sid "id" :as _state} xs]
   (let [schemas (mapv (fn [{s "schema" :as xition}]
                         (resolve-schema context xition s))
                       xs)]
     (if (= 1 (count schemas))
       (first schemas)
-      {"anyOf" schemas})))
+      {"oneOf" schemas})))
 
 (defn xform [context {fsm-schema "schema" :as fsm} {[from to] "id" ix-schema "schema" ix-omit? "omit" :as ix} {a "action" :as state} ox-and-cs event trail]
   (try
@@ -434,8 +434,11 @@
    - :schema/defs - Additional JSON Schema definitions
    
    Returns:
-   - :input-schema - JSON Schema (anyOf) of all transitions FROM 'start'
-   - :output-schema - JSON Schema (anyOf) of all transitions TO 'end'
+   - :input-schema - JSON Schema (oneOf) of all transitions FROM 'start'
+   - :output-schema - JSON Schema (oneOf) of all transitions TO 'end'
+   
+   The oneOf is discriminated by the 'id' const in each schema, ensuring
+   exactly one schema matches any valid document.
    
    Usage:
      (let [{:keys [input-schema output-schema]} (fsm-schemas {} my-fsm)]
@@ -454,13 +457,13 @@
                                             xitions)]
                           (if (= 1 (count schemas))
                             (first schemas)
-                            {"anyOf" schemas})))
+                            {"oneOf" schemas})))
 
-         ;; Compute input-schema: anyOf all xition schemas FROM "start"
+         ;; Compute input-schema: oneOf all xition schemas FROM "start"
          start-xitions (get sid->ox "start")
          input-schema (build-schema start-xitions)
 
-         ;; Compute output-schema: anyOf all xition schemas TO "end"
+         ;; Compute output-schema: oneOf all xition schemas TO "end"
          end-xitions (get sid->ix "end")
          output-schema (build-schema end-xitions)]
      {:input-schema input-schema
@@ -900,7 +903,7 @@
              output-schemas (mapv #(resolve-schema context % (get % "schema")) output-xitions)
              s-schema-raw (if (= 1 (count output-schemas))
                             (first output-schemas)
-                            {"anyOf" output-schemas})
+                            {"oneOf" output-schemas})
              s-schema (expand s-schema-raw)]
          (cond
            ;; Error entry - always user message with error feedback
@@ -998,8 +1001,8 @@
    
    Service registry is taken from context :llm/registry or uses default-registry.
    
-   Passes the output schema (JSON Schema anyOf of valid output transitions) to call
-   for structured output enforcement."
+   Passes the output schema (JSON Schema oneOf of valid output transitions) to call
+   for structured output enforcement. The oneOf is discriminated by the 'id' const."
   {"type" "object"
    "properties" {"service" {"type" "string"}
                  "model" {"type" "string"}}}

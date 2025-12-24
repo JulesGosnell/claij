@@ -11,12 +11,10 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.tools.logging :as log]
-   [malli.core :as m]
-   [malli.error :as me]
-   [claij.fsm :as fsm :refer [start-fsm run-sync]]
+   [claij.schema :as schema]
+   [claij.fsm :as fsm :refer [start-fsm run-sync build-fsm-registry]]
    [claij.actions :as actions]
-   [claij.fsm.code-review-fsm :refer [code-review-registry
-                                      code-review-fsm]]))
+   [claij.fsm.code-review-fsm :refer [code-review-fsm]]))
 
 ;; Simple code snippet for testing
 (def test-code "(defn add [a b] (+ a b))")
@@ -138,7 +136,7 @@
   (test-model model 30000)) ;; 30 second timeout
 
 ;; Integration test that can be run with lein test
-(deftest ^:long-running ollama-mistral-test
+(deftest ^:integration ^:long-running ollama-mistral-test
   (testing "Mistral 7b can complete code-review FSM"
     (let [result (test-model "mistral:7b" (* 3 60 1000))]
       (is (:success? result) (str "Mistral should succeed: " (:error result))))))

@@ -1056,7 +1056,7 @@
           {:success true :response last-evt}
           {:success false :response last-evt :error "Validation failed"})))))
 
-(deftest ^:long-running minimal-fsm-test
+(deftest ^:long-running ^:integration minimal-fsm-test
   (testing "Minimal FSM works with POC-identical schemas"
     (let [{:keys [success response error]} (test-minimal-fsm)]
       (is success (str "Should succeed. Error: " error " Response: " response))
