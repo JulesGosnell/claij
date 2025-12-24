@@ -134,7 +134,7 @@
 
 (def-action ctx-state-a-action
   "Action A - adds cache to context and transitions to state-b."
-  :any
+  true
   [_config _fsm _ix _state]
   (fn [context _event _trail handler]
     (handler (assoc context :cache {:tools []})
@@ -143,7 +143,7 @@
 
 (def-action ctx-state-b-action
   "Action B - asserts cache from A, adds more, transitions to end."
-  :any
+  true
   [_config _fsm _ix _state]
   (fn [context _event _trail handler]
     (assert (= {:tools []} (:cache context)) "Cache should be present from state-a")
@@ -152,7 +152,7 @@
 
 (def-action ctx-end-action
   "End action - delivers completion promise and verifies final context."
-  :any
+  true
   [_config _fsm _ix _state]
   (fn [context _event trail _handler]
     (assert (= {:tools ["bash" "read_file"]} (:cache context)) "Cache should have accumulated")
@@ -166,16 +166,22 @@
                               {"id" "state-b" "action" "action-b"}
                               {"id" "end" "action" "end"}]
                     "xitions" [{"id" ["start" "state-a"]
-                                "schema" [:map {:closed true}
-                                          ["id" [:= ["start" "state-a"]]]
-                                          ["input" :string]]}
+                                "schema" {"type" "object"
+                                          "additionalProperties" false
+                                          "required" ["id" "input"]
+                                          "properties" {"id" {"const" ["start" "state-a"]}
+                                                        "input" {"type" "string"}}}}
                                {"id" ["state-a" "state-b"]
-                                "schema" [:map {:closed true}
-                                          ["id" [:= ["state-a" "state-b"]]]
-                                          ["data" :string]]}
+                                "schema" {"type" "object"
+                                          "additionalProperties" false
+                                          "required" ["id" "data"]
+                                          "properties" {"id" {"const" ["state-a" "state-b"]}
+                                                        "data" {"type" "string"}}}}
                                {"id" ["state-b" "end"]
-                                "schema" [:map {:closed true}
-                                          ["id" [:= ["state-b" "end"]]]]}]}
+                                "schema" {"type" "object"
+                                          "additionalProperties" false
+                                          "required" ["id"]
+                                          "properties" {"id" {"const" ["state-b" "end"]}}}}]}
           initial-context {:id->action {"action-a" #'ctx-state-a-action
                                         "action-b" #'ctx-state-b-action
                                         "end" #'ctx-end-action}}
@@ -207,13 +213,15 @@
                      {"id" "servicing" "action" "mcp"}
                      {"id" "end"}]
            "xitions" [{"id" ["start" "llm"]
-                       "schema" {:type :string}}
+                       "schema" {"type" "string"}}
                       {"id" ["llm" "servicing"]
                        "schema" "mcp-request"}
                       {"id" ["servicing" "llm"]
                        "schema" "mcp-response"}
                       {"id" ["llm" "end"]
-                       "schema" [:map ["result" :string]]}]}]
+                       "schema" {"type" "object"
+                                 "required" ["result"]
+                                 "properties" {"result" {"type" "string"}}}}]}]
       (is (= "string-schema-test" (get fsm-with-string-schema "id")))
       (is (= "mcp-request" (get-in fsm-with-string-schema ["xitions" 1 "schema"])))
       (is (= "mcp-response" (get-in fsm-with-string-schema ["xitions" 2 "schema"])))
@@ -234,19 +242,23 @@
   (testing "resolve-schema with map schema passes through unchanged"
     (let [context {}
           xition {"id" ["a" "b"]}
-          schema [:map ["name" :string]]]
+          schema {"type" "object" "properties" {"name" {"type" "string"}}}]
       (is (= schema (resolve-schema context xition schema)))))
 
   (testing "resolve-schema with string key looks up and calls schema function"
     (let [my-schema-fn (fn [ctx xition]
-                         [:map {:closed true}
-                          ["tool" [:= (get ctx :selected-tool)]]])
+                         {"type" "object"
+                          "additionalProperties" false
+                          "required" ["tool"]
+                          "properties" {"tool" {"const" (get ctx :selected-tool)}}})
           context {:id->schema {"my-schema" my-schema-fn}
                    :selected-tool "clojure_eval"}
           xition {"id" ["llm" "servicing"]}
           resolved (resolve-schema context xition "my-schema")]
-      (is (= [:map {:closed true}
-              ["tool" [:= "clojure_eval"]]]
+      (is (= {"type" "object"
+              "additionalProperties" false
+              "required" ["tool"]
+              "properties" {"tool" {"const" "clojure_eval"}}}
              resolved))))
 
   (testing "resolve-schema with missing key returns true and logs warning"
@@ -258,38 +270,47 @@
 
   (testing "state-schema resolves string schemas in transitions"
     (let [request-schema-fn (fn [ctx xition]
-                              [:map {:closed true}
-                               ["method" [:= "tools/call"]]])
+                              {"type" "object"
+                               "additionalProperties" false
+                               "required" ["method"]
+                               "properties" {"method" {"const" "tools/call"}}})
           context {:id->schema {"mcp-request" request-schema-fn}}
           fsm {"id" "test" "version" 0}
           state {"id" "llm"}
           xitions [{"id" ["llm" "servicing"] "schema" "mcp-request"}
-                   {"id" ["llm" "end"] "schema" :string}]
+                   {"id" ["llm" "end"] "schema" {"type" "string"}}]
           result (state-schema context fsm state xitions)]
-      (is (= :or (first result)) "state-schema should return [:or ...]")
-      (is (= 2 (dec (count result))) "Should have 2 alternatives")
-      (is (= [:map {:closed true} ["method" [:= "tools/call"]]]
-             (second result)))
-      (is (= :string (nth result 2))))))
+      (is (contains? result "oneOf") "state-schema should return {\"oneOf\": [...]}")
+      (is (= 2 (count (get result "oneOf"))) "Should have 2 alternatives")
+      (is (= {"type" "object"
+              "additionalProperties" false
+              "required" ["method"]
+              "properties" {"method" {"const" "tools/call"}}}
+             (first (get result "oneOf"))))
+      (is (= {"type" "string"} (second (get result "oneOf")))))))
 
 ;;==============================================================================
 ;; Trail Infrastructure Tests
 ;;==============================================================================
 
 (def ^:private infra-test-fsm
-  "Test FSM using Malli schemas for transitions."
+  "Test FSM using JSON Schema for transitions."
   {"id" "infra-test"
    "schema" nil
    "states" [{"id" "processor" "action" "llm"}
              {"id" "end" "action" "end"}]
    "xitions" [{"id" ["start" "processor"]
-               "schema" [:map {:closed true}
-                         ["id" [:= ["start" "processor"]]]
-                         ["input" :string]]}
+               "schema" {"type" "object"
+                         "additionalProperties" false
+                         "required" ["id" "input"]
+                         "properties" {"id" {"const" ["start" "processor"]}
+                                       "input" {"type" "string"}}}}
               {"id" ["processor" "end"]
-               "schema" [:map {:closed true}
-                         ["id" [:= ["processor" "end"]]]
-                         ["result" :string]]}]})
+               "schema" {"type" "object"
+                         "additionalProperties" false
+                         "required" ["id" "result"]
+                         "properties" {"id" {"const" ["processor" "end"]}
+                                       "result" {"type" "string"}}}}]})
 
 (deftest trail->prompts-test
   (testing "trail->prompts assigns role based on source state"
@@ -315,7 +336,7 @@
           prompts (trail->prompts {} infra-test-fsm sample-trail)]
       (is (= 2 (count prompts)))
       (is (= "user" (get (nth prompts 1) "role")))
-      (is (= "Validation failed" (get-in (nth prompts 1) ["content" 1])))))
+      (is (= "Validation failed" (get-in (nth prompts 1) ["content" 0])))))
 
   (testing "trail->prompts handles empty trail"
     (is (= [] (vec (trail->prompts {} infra-test-fsm [])))
@@ -372,11 +393,11 @@
           (is (re-find #"Be concise" content)
               "State prompts should be included")))
 
-      (testing "system message contains EDN format instructions"
+      (testing "system message contains JSON format instructions"
         (let [content (get (first prompts) "content")]
           ;; Verify structural elements are present (not specific wording)
-          (is (re-find #"(?i)EDN" content)
-              "Should mention EDN format")
+          (is (re-find #"(?i)JSON" content)
+              "Should mention JSON format")
           (is (re-find #"(?i)schema" content)
               "Should mention schema")))))
 
@@ -467,13 +488,15 @@
    "states" [{"id" "process" "action" "pass-through"}
              {"id" "end" "action" "end"}]
    "xitions" [{"id" ["start" "process"]
-               "schema" [:map
-                         ["id" [:= ["start" "process"]]]
-                         ["value" :any]]}
+               "schema" {"type" "object"
+                         "required" ["id" "value"]
+                         "properties" {"id" {"const" ["start" "process"]}
+                                       "value" {}}}}
               {"id" ["process" "end"]
-               "schema" [:map
-                         ["id" [:= ["process" "end"]]]
-                         ["value" :any]]}]})
+               "schema" {"type" "object"
+                         "required" ["id" "value"]
+                         "properties" {"id" {"const" ["process" "end"]}
+                                       "value" {}}}}]})
 
 (def pass-through-action
   (lift (fn [event]
@@ -485,13 +508,15 @@
    "states" [{"id" "process" "action" "increment"}
              {"id" "end" "action" "end"}]
    "xitions" [{"id" ["start" "process"]
-               "schema" [:map
-                         ["id" [:= ["start" "process"]]]
-                         ["value" :int]]}
+               "schema" {"type" "object"
+                         "required" ["id" "value"]
+                         "properties" {"id" {"const" ["start" "process"]}
+                                       "value" {"type" "integer"}}}}
               {"id" ["process" "end"]
-               "schema" [:map
-                         ["id" [:= ["process" "end"]]]
-                         ["value" :int]]}]})
+               "schema" {"type" "object"
+                         "required" ["id" "value"]
+                         "properties" {"id" {"const" ["process" "end"]}
+                                       "value" {"type" "integer"}}}}]})
 
 (def increment-action
   (lift (fn [event]
@@ -502,7 +527,7 @@
 
 (def-action chain-end-action
   "End action - delivers completion to promise."
-  :any
+  true
   [_config _fsm _ix _state]
   (fn [context _event trail _handler]
     (when-let [p (:fsm/completion-promise context)]
@@ -638,7 +663,9 @@
     (let [hanging-fsm {"id" "hanging"
                        "states" [{"id" "process" "action" "hang"}]
                        "xitions" [{"id" ["start" "process"]
-                                   "schema" [:map ["id" [:= ["start" "process"]]]]}]}
+                                   "schema" {"type" "object"
+                                             "required" ["id"]
+                                             "properties" {"id" {"const" ["start" "process"]}}}}]}
           hang-action (lift (fn [_] nil) {:name "hang"})
           ctx {:id->action {"hang" hang-action}}
           {:keys [start stop submit await]} (chain ctx hanging-fsm hanging-fsm)]
@@ -661,31 +688,37 @@
    "xitions"
    [{"id" ["start" "middle"]
      "omit" true
-     "schema" [:map {:closed true}
-               ["id" [:= ["start" "middle"]]]
-               ["data" :string]]}
+     "schema" {"type" "object"
+               "additionalProperties" false
+               "required" ["id" "data"]
+               "properties" {"id" {"const" ["start" "middle"]}
+                             "data" {"type" "string"}}}}
     {"id" ["middle" "end"]
-     "schema" [:map {:closed true}
-               ["id" [:= ["middle" "end"]]]
-               ["result" :string]]}
+     "schema" {"type" "object"
+               "additionalProperties" false
+               "required" ["id" "result"]
+               "properties" {"id" {"const" ["middle" "end"]}
+                             "result" {"type" "string"}}}}
     {"id" ["end" "final"]
-     "schema" [:map {:closed true}
-               ["id" [:= ["end" "final"]]]
-               ["done" :boolean]]}]})
+     "schema" {"type" "object"
+               "additionalProperties" false
+               "required" ["id" "done"]
+               "properties" {"id" {"const" ["end" "final"]}
+                             "done" {"type" "boolean"}}}}]})
 
 (def captured-trail-at-middle (atom nil))
 (def captured-trail-at-end (atom nil))
 
 (def-action omit-start-action
   "Start action - transitions to middle state."
-  :any
+  true
   [_config _fsm _ix _state]
   (fn [context _event _trail handler]
     (handler context {"id" ["start" "middle"] "data" "going to middle"})))
 
 (def-action omit-middle-action
   "Middle action - captures trail and transitions to end."
-  :any
+  true
   [_config _fsm _ix _state]
   (fn [context _event trail handler]
     (reset! captured-trail-at-middle trail)
@@ -693,7 +726,7 @@
 
 (def-action omit-end-action
   "End action - captures trail and transitions to final."
-  :any
+  true
   [_config _fsm _ix _state]
   (fn [context _event trail handler]
     (reset! captured-trail-at-end trail)
@@ -701,7 +734,7 @@
 
 (def-action omit-final-action
   "Final action - delivers completion promise."
-  :any
+  true
   [_config _fsm _ix _state]
   (fn [context _event trail _handler]
     (when-let [p (:fsm/completion-promise context)]
@@ -758,17 +791,23 @@
     {"id" "option-c" "action" "c-action"}]
    "xitions"
    [{"id" ["choice" "option-a"]
-     "schema" [:map {:closed true}
-               ["id" [:= ["choice" "option-a"]]]
-               ["value" :string]]}
+     "schema" {"type" "object"
+               "additionalProperties" false
+               "required" ["id" "value"]
+               "properties" {"id" {"const" ["choice" "option-a"]}
+                             "value" {"type" "string"}}}}
     {"id" ["choice" "option-b"]
-     "schema" [:map {:closed true}
-               ["id" [:= ["choice" "option-b"]]]
-               ["count" :int]]}
+     "schema" {"type" "object"
+               "additionalProperties" false
+               "required" ["id" "count"]
+               "properties" {"id" {"const" ["choice" "option-b"]}
+                             "count" {"type" "integer"}}}}
     {"id" ["choice" "option-c"]
-     "schema" [:map {:closed true}
-               ["id" [:= ["choice" "option-c"]]]
-               ["flag" :boolean]]}]})
+     "schema" {"type" "object"
+               "additionalProperties" false
+               "required" ["id" "flag"]
+               "properties" {"id" {"const" ["choice" "option-c"]}
+                             "flag" {"type" "boolean"}}}}]})
 
 (def dynamic-schema-fsm
   {"schema" {"$$id" "dynamic-test-fsm" "type" "object"}
@@ -783,14 +822,18 @@
      "schema" "dynamic-schema-y"}]})
 
 (defn resolve-dynamic-x [_context _xition]
-  [:map {:closed true}
-   ["id" [:= ["router" "handler-x"]]]
-   ["x-data" [:vector :any]]])
+  {"type" "object"
+   "additionalProperties" false
+   "required" ["id" "x-data"]
+   "properties" {"id" {"const" ["router" "handler-x"]}
+                 "x-data" {"type" "array"}}})
 
 (defn resolve-dynamic-y [_context _xition]
-  [:map {:closed true}
-   ["id" [:= ["router" "handler-y"]]]
-   ["y-data" :double]])
+  {"type" "object"
+   "additionalProperties" false
+   "required" ["id" "y-data"]
+   "properties" {"id" {"const" ["router" "handler-y"]}
+                 "y-data" {"type" "number"}}})
 
 (def dynamic-context
   {:id->schema {"dynamic-schema-x" resolve-dynamic-x
@@ -804,81 +847,81 @@
     {"id" "end" "action" "end"}]
    "xitions"
    [{"id" ["start" "processor"]
-     "schema" [:map {:closed true}
-               ["id" [:= ["start" "processor"]]]
-               ["data" :string]]}
+     "schema" {"type" "object"
+               "additionalProperties" false
+               "required" ["id" "data"]
+               "properties" {"id" {"const" ["start" "processor"]}
+                             "data" {"type" "string"}}}}
     {"id" ["start" "validator"]
-     "schema" [:map {:closed true}
-               ["id" [:= ["start" "validator"]]]
-               ["payload" :int]]}
+     "schema" {"type" "object"
+               "additionalProperties" false
+               "required" ["id" "payload"]
+               "properties" {"id" {"const" ["start" "validator"]}
+                             "payload" {"type" "integer"}}}}
     {"id" ["processor" "validator"]
-     "schema" [:map {:closed true}
-               ["id" [:= ["processor" "validator"]]]
-               ["processed" :boolean]]}
+     "schema" {"type" "object"
+               "additionalProperties" false
+               "required" ["id" "processed"]
+               "properties" {"id" {"const" ["processor" "validator"]}
+                             "processed" {"type" "boolean"}}}}
     {"id" ["processor" "end"]
-     "schema" [:map {:closed true}
-               ["id" [:= ["processor" "end"]]]
-               ["result" :string]]}
+     "schema" {"type" "object"
+               "additionalProperties" false
+               "required" ["id" "result"]
+               "properties" {"id" {"const" ["processor" "end"]}
+                             "result" {"type" "string"}}}}
     {"id" ["validator" "end"]
-     "schema" [:map {:closed true}
-               ["id" [:= ["validator" "end"]]]
-               ["valid" :boolean]
-               ["errors" {:optional true} [:vector :string]]]}]})
+     "schema" {"type" "object"
+               "additionalProperties" false
+               "required" ["id" "valid"]
+               "properties" {"id" {"const" ["validator" "end"]}
+                             "valid" {"type" "boolean"}
+                             "errors" {"type" "array" "items" {"type" "string"}}}}}]})
 
 (deftest state-schema-test
-  (testing "static schemas produce :or with all output transitions"
+  (testing "static schemas produce oneOf with all output transitions"
     (let [choice-state {"id" "choice" "action" "choice-action"}
           output-xitions (get static-schema-fsm "xitions")
           result (state-schema {} static-schema-fsm choice-state output-xitions)]
 
-      (is (= :or (first result)) "Result should be [:or ...]")
-      (is (= 3 (dec (count result))) ":or should have 3 alternatives")
+      (is (contains? result "oneOf") "Result should be {\"oneOf\": [...]}")
+      (is (= 3 (count (get result "oneOf"))) "oneOf should have 3 alternatives")
 
-      (let [schemas (rest result)
+      (let [schemas (get result "oneOf")
             extract-id (fn [schema]
-                         (->> schema
-                              (filter vector?)
-                              (filter #(= "id" (first %)))
-                              first
-                              second
-                              second))
+                         (get-in schema ["properties" "id" "const"]))
             ids (map extract-id schemas)]
         (is (some #(= ["choice" "option-a"] %) ids) "Should include option-a schema")
         (is (some #(= ["choice" "option-b"] %) ids) "Should include option-b schema")
         (is (some #(= ["choice" "option-c"] %) ids) "Should include option-c schema"))))
 
-  (testing "dynamic schemas produce :or with resolved schemas"
+  (testing "dynamic schemas produce oneOf with resolved schemas"
     (let [router-state {"id" "router" "action" "router-action"}
           output-xitions (get dynamic-schema-fsm "xitions")
           result (state-schema dynamic-context dynamic-schema-fsm router-state output-xitions)]
 
-      (is (= :or (first result)) "Result should be [:or ...]")
-      (is (= 2 (dec (count result))) ":or should have 2 alternatives")
+      (is (contains? result "oneOf") "Result should be {\"oneOf\": [...]}")
+      (is (= 2 (count (get result "oneOf"))) "oneOf should have 2 alternatives")
 
-      (let [schemas (rest result)]
-        (is (every? vector? schemas) "All schemas should be resolved vectors, not strings")
+      (let [schemas (get result "oneOf")]
+        (is (every? map? schemas) "All schemas should be resolved maps, not strings")
 
         (let [extract-id (fn [schema]
-                           (->> schema
-                                (filter vector?)
-                                (filter #(= "id" (first %)))
-                                first
-                                second
-                                second))
+                           (get-in schema ["properties" "id" "const"]))
               ids (map extract-id schemas)]
           (is (some #(= ["router" "handler-x"] %) ids) "Should include handler-x schema")
           (is (some #(= ["router" "handler-y"] %) ids) "Should include handler-y schema"))
 
         (let [has-field? (fn [schema field-name]
-                           (some #(and (vector? %) (= field-name (first %))) schema))
+                           (contains? (get schema "properties") field-name))
               x-schema (first (filter #(has-field? % "x-data") schemas))
               y-schema (first (filter #(has-field? % "y-data") schemas))]
           (is (some? x-schema) "x schema should have x-data field")
           (is (some? y-schema) "y schema should have y-data field")))))
 
-  (testing "empty output transitions produce empty :or"
+  (testing "empty output transitions produce empty oneOf"
     (let [result (state-schema {} static-schema-fsm {"id" "terminal"} [])]
-      (is (= [:or] result) "Empty transitions should produce [:or]"))))
+      (is (= {"oneOf" []} result) "Empty transitions should produce {\"oneOf\": []}"))))
 
 (deftest start-fsm-schema-test
   (testing "start-fsm returns map with :input-schema and :output-schema"
@@ -904,35 +947,25 @@
         (is (contains? result :input-schema) "should have :input-schema")
         (is (contains? result :output-schema) "should have :output-schema"))
 
-      (testing ":input-schema is :or of all transitions FROM start"
+      (testing ":input-schema is oneOf of all transitions FROM start"
         (let [input-schema (:input-schema result)]
-          (is (= :or (first input-schema)) "input-schema should be [:or ...]")
-          (is (= 2 (dec (count input-schema))) "should have 2 entry transitions")
+          (is (contains? input-schema "oneOf") "input-schema should be {\"oneOf\": [...]}")
+          (is (= 2 (count (get input-schema "oneOf"))) "should have 2 entry transitions")
 
           (let [extract-id (fn [schema]
-                             (->> schema
-                                  (filter vector?)
-                                  (filter #(= "id" (first %)))
-                                  first
-                                  second
-                                  second))
-                ids (set (map extract-id (rest input-schema)))]
+                             (get-in schema ["properties" "id" "const"]))
+                ids (set (map extract-id (get input-schema "oneOf")))]
             (is (contains? ids ["start" "processor"]) "should include start->processor")
             (is (contains? ids ["start" "validator"]) "should include start->validator"))))
 
-      (testing ":output-schema is :or of all transitions TO end"
+      (testing ":output-schema is oneOf of all transitions TO end"
         (let [output-schema (:output-schema result)]
-          (is (= :or (first output-schema)) "output-schema should be [:or ...]")
-          (is (= 2 (dec (count output-schema))) "should have 2 exit transitions")
+          (is (contains? output-schema "oneOf") "output-schema should be {\"oneOf\": [...]}")
+          (is (= 2 (count (get output-schema "oneOf"))) "should have 2 exit transitions")
 
           (let [extract-id (fn [schema]
-                             (->> schema
-                                  (filter vector?)
-                                  (filter #(= "id" (first %)))
-                                  first
-                                  second
-                                  second))
-                ids (set (map extract-id (rest output-schema)))]
+                             (get-in schema ["properties" "id" "const"]))
+                ids (set (map extract-id (get output-schema "oneOf")))]
             (is (contains? ids ["processor" "end"]) "should include processor->end")
             (is (contains? ids ["validator" "end"]) "should include validator->end"))))
 
@@ -957,16 +990,20 @@
                       "states" [{"id" "work" "action" "work-action"}
                                 {"id" "end" "action" "end"}]
                       "xitions" [{"id" ["start" "work"]
-                                  "schema" [:map ["id" [:= ["start" "work"]]]
-                                            ["input" :string]]}
+                                  "schema" {"type" "object"
+                                            "required" ["id" "input"]
+                                            "properties" {"id" {"const" ["start" "work"]}
+                                                          "input" {"type" "string"}}}}
                                  {"id" ["work" "end"]
-                                  "schema" [:map ["id" [:= ["work" "end"]]]
-                                            ["output" :int]]}]}
+                                  "schema" {"type" "object"
+                                            "required" ["id" "output"]
+                                            "properties" {"id" {"const" ["work" "end"]}
+                                                          "output" {"type" "integer"}}}}]}
           result (fsm-schemas simple-fsm)]
 
       (testing "works without explicit context"
-        (is (= :or (first (:input-schema result))))
-        (is (= :or (first (:output-schema result))))))))
+        (is (map? (:input-schema result)) "should return input schema as map")
+        (is (map? (:output-schema result)) "should return output schema as map")))))
 
 ;;==============================================================================
 ;; Minimal FSM Integration Test (Long-Running)
@@ -1036,18 +1073,19 @@
 ;; Define test actions with explicit input/output schemas
 (def-action typed-processor-action
   "Action with explicit input/output schemas"
-  {:config :any
-   :input [:map ["value" :int]]
-   :output [:map ["result" :int] ["id" [:tuple :string :string]]]}
+  {:config true
+   :input {"type" "object" "required" ["value"] "properties" {"value" {"type" "integer"}}}
+   :output {"type" "object" "required" ["result" "id"]
+            "properties" {"result" {"type" "integer"} "id" {"type" "array"}}}}
   [_config _fsm _ix _state]
   (fn [context event _trail handler]
-    (let [result {:result (* 2 (get event "value"))
-                  :id ["processor" "end"]}]
+    (let [result {"result" (* 2 (get event "value"))
+                  "id" ["processor" "end"]}]
       (handler context result))))
 
 (def-action untyped-action
   "Action with no input/output schemas (legacy form)"
-  [:map] ; config-only schema
+  {"type" "object"} ; config-only schema
   [_config _fsm _ix _state]
   (fn [context event _trail handler]
     (handler context event)))
@@ -1071,14 +1109,14 @@
                                 "untyped" #'untyped-action}}]
 
       ;; Typed action has explicit input schema
-      (is (= [:map ["value" :int]]
+      (is (= {"type" "object" "required" ["value"] "properties" {"value" {"type" "integer"}}}
              (state-action-input-schema context {"id" "x" "action" "typed"}))
           "Should return declared input schema")
 
-      ;; Untyped action defaults to :any
-      (is (= :any
+      ;; Untyped action defaults to true
+      (is (= true
              (state-action-input-schema context {"id" "x" "action" "untyped"}))
-          "Should return :any for legacy actions")
+          "Should return true for legacy actions")
 
       ;; Missing action returns :any
       (is (= :any
@@ -1095,14 +1133,15 @@
                                 "untyped" #'untyped-action}}]
 
       ;; Typed action has explicit output schema
-      (is (= [:map ["result" :int] ["id" [:tuple :string :string]]]
+      (is (= {"type" "object" "required" ["result" "id"]
+              "properties" {"result" {"type" "integer"} "id" {"type" "array"}}}
              (state-action-output-schema context {"id" "x" "action" "typed"}))
           "Should return declared output schema")
 
-      ;; Untyped action defaults to :any
-      (is (= :any
+      ;; Untyped action defaults to true
+      (is (= true
              (state-action-output-schema context {"id" "x" "action" "untyped"}))
-          "Should return :any for legacy actions")
+          "Should return true for legacy actions")
 
       ;; Missing action returns :any
       (is (= :any
@@ -1116,18 +1155,19 @@
           start-ctx {:id->action {"typed" #'typed-processor-action}} ; Populated at start
           runtime-ctx {:id->action {"typed" #'typed-processor-action}
                        :extra "runtime-data"} ; Additional runtime state
-          state {"id" "x" "action" "typed"}]
+          state {"id" "x" "action" "typed"}
+          expected-schema {"type" "object" "required" ["value"] "properties" {"value" {"type" "integer"}}}]
 
       ;; Config time: no actions yet
       (is (= :any (state-action-input-schema config-ctx state))
           "Config time returns :any (no actions)")
 
       ;; Start time: actions available
-      (is (= [:map ["value" :int]] (state-action-input-schema start-ctx state))
+      (is (= expected-schema (state-action-input-schema start-ctx state))
           "Start time returns declared schema")
 
       ;; Runtime: same result (extra context doesn't affect lookup)
-      (is (= [:map ["value" :int]] (state-action-input-schema runtime-ctx state))
+      (is (= expected-schema (state-action-input-schema runtime-ctx state))
           "Runtime returns declared schema"))))
 
 ;;------------------------------------------------------------------------------
@@ -1138,7 +1178,7 @@
   (testing "resolve-schema with explicit schema (no fallback needed)"
     (let [context {:id->action {"typed" #'typed-processor-action}}
           xition {"id" ["a" "b"]}
-          explicit-schema [:map ["x" :int]]]
+          explicit-schema {"type" "object" "properties" {"x" {"type" "integer"}}}]
 
       ;; Explicit schema returned as-is
       (is (= explicit-schema (resolve-schema context xition explicit-schema))
@@ -1153,15 +1193,18 @@
   (testing "resolve-schema with nil schema falls back to action schema"
     (let [context {:id->action {"typed" #'typed-processor-action}}
           xition {"id" ["processor" "end"]}
-          typed-state {"id" "processor" "action" "typed"}]
+          typed-state {"id" "processor" "action" "typed"}
+          expected-input {"type" "object" "required" ["value"] "properties" {"value" {"type" "integer"}}}
+          expected-output {"type" "object" "required" ["result" "id"]
+                           "properties" {"result" {"type" "integer"} "id" {"type" "array"}}}]
 
       ;; Nil schema + state + :input -> action input schema
-      (is (= [:map ["value" :int]]
+      (is (= expected-input
              (resolve-schema context xition nil typed-state :input))
           "Falls back to action input schema")
 
       ;; Nil schema + state + :output -> action output schema
-      (is (= [:map ["result" :int] ["id" [:tuple :string :string]]]
+      (is (= expected-output
              (resolve-schema context xition nil typed-state :output))
           "Falls back to action output schema")))
 
@@ -1181,29 +1224,30 @@
       (is (true? (resolve-schema context xition nil {"id" "x"} nil))
           "Nil direction means no fallback")))
 
-  (testing "resolve-schema fallback with untyped action returns :any"
+  (testing "resolve-schema fallback with untyped action returns true"
     (let [context {:id->action {"untyped" #'untyped-action}}
           xition {"id" ["a" "b"]}
           untyped-state {"id" "processor" "action" "untyped"}]
 
-      (is (= :any (resolve-schema context xition nil untyped-state :input))
-          "Untyped action falls back to :any")
-      (is (= :any (resolve-schema context xition nil untyped-state :output))
-          "Untyped action falls back to :any")))
+      (is (= true (resolve-schema context xition nil untyped-state :input))
+          "Untyped action falls back to true")
+      (is (= true (resolve-schema context xition nil untyped-state :output))
+          "Untyped action falls back to true")))
 
   (testing "resolve-schema string lookup still works"
-    (let [dynamic-schema-fn (fn [_ctx _xition] [:map ["dynamic" :string]])
+    (let [dynamic-schema-fn (fn [_ctx _xition] {"type" "object" "properties" {"dynamic" {"type" "string"}}})
           context {:id->schema {"my-schema" dynamic-schema-fn}}
           xition {"id" ["a" "b"]}]
 
-      (is (= [:map ["dynamic" :string]]
+      (is (= {"type" "object" "properties" {"dynamic" {"type" "string"}}}
              (resolve-schema context xition "my-schema"))
           "String schema still resolves via :id->schema")))
 
   (testing "same code path at all three times"
     ;; Fallback works consistently regardless of when called
     (let [typed-state {"id" "x" "action" "typed"}
-          xition {"id" ["x" "y"]}]
+          xition {"id" ["x" "y"]}
+          expected-schema {"type" "object" "required" ["value"] "properties" {"value" {"type" "integer"}}}]
 
       ;; Config time: no actions -> fallback to :any
       (is (= :any (resolve-schema {} xition nil typed-state :input))
@@ -1211,7 +1255,7 @@
 
       ;; Start/Runtime: actions available -> falls back to declared schema
       (let [ctx {:id->action {"typed" #'typed-processor-action}}]
-        (is (= [:map ["value" :int]]
+        (is (= expected-schema
                (resolve-schema ctx xition nil typed-state :input))
             "Start/Runtime: falls back to declared schema")))))
 
