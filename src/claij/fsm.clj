@@ -151,7 +151,7 @@
   "Get the input schema for a state's action.
    
    Looks up the action in context and extracts :action/input-schema from metadata.
-   Returns :any if:
+   Returns true (JSON Schema 'any') if:
    - State has no action
    - Action not found in context
    - Action has no input schema declared
@@ -160,13 +160,13 @@
   [context state]
   (if-let [action (state-action context state)]
     (action-input-schema action)
-    :any))
+    true))
 
 (defn state-action-output-schema
   "Get the output schema for a state's action.
    
    Looks up the action in context and extracts :action/output-schema from metadata.
-   Returns :any if:
+   Returns true (JSON Schema 'any') if:
    - State has no action  
    - Action not found in context
    - Action has no output schema declared
@@ -175,7 +175,7 @@
   [context state]
   (if-let [action (state-action context state)]
     (action-output-schema action)
-    :any))
+    true))
 
 (defn resolve-schema
   "Resolve a transition schema, supporting dynamic schema generation and fallback.
@@ -212,7 +212,7 @@
      (case direction
        :input (state-action-input-schema context state)
        :output (state-action-output-schema context state)
-       :any)
+       true)
 
      ;; Nil schema without fallback -> permissive (validates anything)
      (nil? schema)
@@ -731,9 +731,9 @@
          (let [output (f event)]
            (handler context output))))
      {:action/name name
-      :action/config-schema :any
-      :action/input-schema :any
-      :action/output-schema :any})))
+      :action/config-schema true
+      :action/input-schema true
+      :action/output-schema true})))
 
 ;;------------------------------------------------------------------------------
 ;; FSM Chaining
@@ -1075,13 +1075,15 @@
    - \"summary\" - {:all-succeeded? bool, :completed-count n, :timed-out-ids [...]}
    
    Uses claij.parallel/collect-async for concurrent execution with timeout handling."
-  [:map
-   ["timeout-ms" {:optional true} :int]
-   ["parallel?" {:optional true} :boolean]
-   ["llms" [:vector [:map
-                     ["id" :string]
-                     ["service" :string]
-                     ["model" :string]]]]]
+  {"type" "object"
+   "properties" {"timeout-ms" {"type" "integer"}
+                 "parallel?" {"type" "boolean"}
+                 "llms" {"type" "array"
+                         "items" {"type" "object"
+                                  "required" ["id" "service" "model"]
+                                  "properties" {"id" {"type" "string"}
+                                                "service" {"type" "string"}
+                                                "model" {"type" "string"}}}}}}
   [config {xs "xitions" :as fsm} ix {sid "id" :as state}]
   (fn [context event trail handler]
     (let [{:strs [timeout-ms llms]

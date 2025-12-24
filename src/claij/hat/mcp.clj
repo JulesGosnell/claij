@@ -323,7 +323,7 @@
    
    Returns:
    - \"results\" map: {\"server-name\" [<responses>...], ...}"
-  [:map] ;; No config required
+  {} ;; No config required
   [_config _fsm _ix {state-id "id" :as _state}]
   (fn [context event _trail handler]
     (let [servers (get-in context [:hats :mcp :servers] {})
