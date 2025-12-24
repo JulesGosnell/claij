@@ -66,7 +66,7 @@
   (testing "routes to generate when store is empty"
     (let [result (atom nil)
           handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
-          f2 (triage-action {} {} {"schema" [:map]} {})
+          f2 (triage-action {} {} {"schema" {"type" "object"}} {})
           context {:store nil :llm/service "test" :llm/model "test"}
           event {"document" "Please review my code"}]
       (with-redefs [store/fsm-list-all (fn [_] [])]
@@ -83,7 +83,9 @@
     (let [result (atom nil)
           llm-called (atom nil)
           handler (fn [ctx event] (reset! result {:ctx ctx :event event}))
-          f2 (triage-action {} {} {"schema" [:map ["fsm-id" :string]]} {})
+          f2 (triage-action {} {} {"schema" {"type" "object"
+                                             "required" ["fsm-id"]
+                                             "properties" {"fsm-id" {"type" "string"}}}} {})
           context {:store nil :llm/service "openrouter" :llm/model "openai/gpt-4o"}
           event {"document" "Please review my code"}
           mock-fsms [{"id" "code-review" "version" 1 "description" "Reviews code"}
@@ -114,7 +116,7 @@
 (deftest triage-action-prompt-formatting-test
   (testing "formats FSM list correctly in prompt"
     (let [llm-prompts (atom nil)
-          f2 (triage-action {} {} {"schema" [:map]} {})
+          f2 (triage-action {} {} {"schema" {"type" "object"}} {})
           context {:store nil :llm/service "p" :llm/model "m"}
           event {"document" "user request"}
           mock-fsms [{"id" "fsm-a" "version" 3 "description" "Does A things"}

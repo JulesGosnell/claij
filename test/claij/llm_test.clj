@@ -54,11 +54,11 @@
         (let [retry-messages (second @attempts)
               last-message (last retry-messages)
               content (get last-message "content")]
-          (is (re-find #"not valid EDN" content) "Error message should mention invalid EDN")
-          (is (re-find #"EDN" content) "Error message should mention EDN"))
+          (is (re-find #"not valid JSON" content) "Error message should mention invalid JSON")
+          (is (re-find #"JSON" content) "Error message should mention JSON"))
 
         ;; Should eventually succeed
-        (is (= (get final-result "id") ["a" "b"]) "Should parse valid EDN on retry")))))
+        (is (= (get final-result "id") ["a" "b"]) "Should parse valid JSON on retry")))))
 
 (deftest edn-parse-max-retries-test
   (testing "EDN parse gives up after max retries"

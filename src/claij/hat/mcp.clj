@@ -163,18 +163,21 @@
    Each server gets a batch of JSON-RPC tool call requests."
   [context {xid "id" :as _xition}]
   (let [servers (get-in context [:hats :mcp :servers] {})
-        server-names (keys servers)
+        server-names (vec (keys servers))
         ;; Merge all caches to build combined tool schema
         all-caches (map :cache (vals servers))
         merged-cache {"tools" (vec (mapcat #(get % "tools" []) all-caches))}
         single-request-schema (mcp-schema/mcp-cache->request-schema merged-cache)
-        batch-request-schema [:vector single-request-schema]
-        server-enum (if (seq server-names)
-                      (into [:enum] server-names)
-                      :string)]
-    [:map {:closed true}
-     ["id" [:= xid]]
-     ["calls" [:map-of server-enum batch-request-schema]]]))
+        batch-request-schema {"type" "array" "items" single-request-schema}]
+    {"type" "object"
+     "additionalProperties" false
+     "required" ["id" "calls"]
+     "properties" {"id" {"const" xid}
+                   "calls" {"type" "object"
+                            "propertyNames" (if (seq server-names)
+                                              {"enum" server-names}
+                                              {"type" "string"})
+                            "additionalProperties" batch-request-schema}}}))
 
 (defn hat-mcp-response-schema-fn
   "Schema function for hat-based MCP responses with cross-server results.
@@ -188,14 +191,18 @@
    Uses discriminated union (result vs error key) for JSON-RPC responses."
   [context {xid "id" :as _xition}]
   (let [servers (get-in context [:hats :mcp :servers] {})
-        server-names (keys servers)
-        server-enum (if (seq server-names)
-                      (into [:enum] server-names)
-                      :string)]
-    [:map {:closed true}
-     ["id" [:= xid]]
-     ["document" {:optional true} :string]
-     ["results" [:map-of server-enum [:vector mcp-schema/tool-call-jsonrpc-response-schema]]]]))
+        server-names (vec (keys servers))]
+    {"type" "object"
+     "additionalProperties" false
+     "required" ["id" "results"]
+     "properties" {"id" {"const" xid}
+                   "document" {"type" "string"}
+                   "results" {"type" "object"
+                              "propertyNames" (if (seq server-names)
+                                                {"enum" server-names}
+                                                {"type" "string"})
+                              "additionalProperties" {"type" "array"
+                                                      "items" mcp-schema/tool-call-jsonrpc-response-schema}}}}))
 
 ;;==============================================================================
 ;; MCP Hat Maker
