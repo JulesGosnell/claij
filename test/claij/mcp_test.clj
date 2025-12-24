@@ -203,9 +203,9 @@
 
           request-schema (tool-cache->request-schema tool-cache)]
 
-      ;; Schema structure is Malli [:map ...]
-      (is (= "object" (get request-schema "type")) "Request schema should be [:map ...]")
-      (is (= {:closed true} (second request-schema)) "Schema should be closed")
+      ;; Schema structure is JSON Schema
+      (is (= "object" (get request-schema "type")) "Request schema should be object type")
+      (is (false? (get request-schema "additionalProperties")) "Schema should be closed")
 
       ;; Valid request passes
       (is (schema-valid? request-schema tool-request)
@@ -310,10 +310,10 @@
       (is (contains? logging-level-strings "debug"))
       (is (contains? logging-level-strings "emergency"))
 
-      ;; Set-level requests - these are still refs to Malli schemas
-      (is (schema-valid? [:ref "logging-set-level-request"] set-debug))
-      (is (schema-valid? [:ref "logging-set-level-request"] set-error))
-      (is (not (schema-valid? [:ref "logging-set-level-request"] invalid-level)))))
+      ;; Set-level requests - using JSON Schema now
+      (is (schema-valid? logging-set-level-request-schema set-debug))
+      (is (schema-valid? logging-set-level-request-schema set-error))
+      (is (not (schema-valid? logging-set-level-request-schema invalid-level)))))
 
   (testing "combined MCP cache schema generation"
     (let [cache {"tools" [{"name" "eval"
@@ -404,16 +404,15 @@
 
       ;; mcp-request-xition-schema-fn builds complete envelope
       (let [schema (mcp-request-xition-schema-fn context llm->servicing)]
-        (is (= "object" (get schema "type")) "Request xition schema should be [:map ...]")
-        ;; Check that schema has "id" and "message" entries
-        (let [entries (filter vector? (rest schema))
-              entry-names (map first entries)]
-          (is (some #{"id"} entry-names) "Should have id field")
-          (is (some #{"message"} entry-names) "Should have message field")))
+        (is (= "object" (get schema "type")) "Request xition schema should be object type")
+        ;; Check that schema has "id" and "message" properties
+        (let [props (get schema "properties")]
+          (is (contains? props "id") "Should have id field")
+          (is (contains? props "message") "Should have message field")))
 
       ;; mcp-response-xition-schema-fn builds complete envelope
       (let [schema (mcp-response-xition-schema-fn context servicing->llm)]
-        (is (= "object" (get schema "type")) "Response xition schema should be [:map ...]"))
+        (is (= "object" (get schema "type")) "Response xition schema should be object type"))
 
       ;; Validate actual events against generated schemas
       (let [request-schema (mcp-request-xition-schema-fn context llm->servicing)
@@ -491,7 +490,10 @@
 
 (deftest make-envelope-schema-test
   (testing "make-request-envelope-schema builds typed envelopes"
-    (let [tools-call-schema (make-request-envelope-schema "tools/call" [:map ["name" :string]])]
+    (let [tools-call-schema (make-request-envelope-schema "tools/call"
+                                                          {"type" "object"
+                                                           "required" ["name"]
+                                                           "properties" {"name" {"type" "string"}}})]
       ;; Valid tool call
       (is (schema-valid? tools-call-schema
                          {"jsonrpc" "2.0" "id" 1 "method" "tools/call" "params" {"name" "bash"}})
@@ -505,7 +507,7 @@
                               {"jsonrpc" "2.0" "id" 1 "method" "tools/call" "params" {"name" 123}}))
           "Wrong params type should fail")))
 
-  (testing "make-request-envelope-schema with nil params uses :any"
+  (testing "make-request-envelope-schema with nil params uses empty schema"
     (let [any-params-schema (make-request-envelope-schema "test/method" nil)]
       (is (schema-valid? any-params-schema
                          {"jsonrpc" "2.0" "id" 1 "method" "test/method" "params" "anything"})
@@ -515,7 +517,10 @@
           "Array params should be valid when schema is nil")))
 
   (testing "make-response-envelope-schema builds typed envelopes"
-    (let [tool-result-schema (make-response-envelope-schema [:map ["content" [:vector :map]]])]
+    (let [tool-result-schema (make-response-envelope-schema
+                              {"type" "object"
+                               "required" ["content"]
+                               "properties" {"content" {"type" "array" "items" {"type" "object"}}}})]
       ;; Valid response
       (is (schema-valid? tool-result-schema
                          {"jsonrpc" "2.0" "id" 1 "result" {"content" [{"type" "text" "text" "hello"}]}})
@@ -525,7 +530,7 @@
                               {"jsonrpc" "2.0" "id" 1 "result" {"content" "not-a-vector"}}))
           "Wrong result type should fail")))
 
-  (testing "make-response-envelope-schema with nil result uses :any"
+  (testing "make-response-envelope-schema with nil result uses empty schema"
     (let [any-result-schema (make-response-envelope-schema nil)]
       (is (schema-valid? any-result-schema
                          {"jsonrpc" "2.0" "id" 1 "result" "anything"})
@@ -566,11 +571,10 @@
 (deftest resolve-mcp-tool-input-schema-test
   (testing "resolves tool with inputSchema"
     (let [schema (resolve-mcp-tool-input-schema test-tool-cache "clojure_eval")]
-      (is (= :json-schema (first schema)) "Should be :json-schema type")
       (is (= {"type" "object"
               "properties" {"code" {"type" "string"}}
               "required" ["code"]}
-             (:schema (second schema))))))
+             schema) "Should return the JSON Schema directly")))
 
   (testing "returns {} for tool without inputSchema"
     (is (= {} (resolve-mcp-tool-input-schema test-tool-cache "simple_tool"))))
@@ -736,9 +740,9 @@
           s2 (mcp-tool-request-schema-fn start-ctx xition-no-tool)
           s3 (mcp-tool-request-schema-fn runtime-ctx xition-with-tool)]
 
-      ;; All produce map schemas
-      (is (every? #(= :map (first %)) [s1 s2 s3])
-          "All contexts should produce map schemas")
+      ;; All produce object schemas (JSON Schema)
+      (is (every? #(= "object" (get % "type")) [s1 s2 s3])
+          "All contexts should produce object schemas")
 
       ;; The runtime schema should be more specific (closed with tool name)
       ;; s1 and s2 should be equivalent (both have :any params)

@@ -344,9 +344,7 @@
                   (seq resources) (conj (wrap-jsonrpc-request "resources/read" (resources-cache->request-schema resources)))
                   (seq prompts) (conj (wrap-jsonrpc-request "prompts/get" (prompts-cache->request-schema prompts)))
                   true (conj (wrap-jsonrpc-request "logging/setLevel" logging-set-level-request-schema)))]
-    (if (> (count schemas) 1)
-      {"oneOf" schemas}
-      (first schemas))))
+    {"oneOf" schemas}))
 
 (defn mcp-cache->response-schema
   "Generate combined response schema for all MCP methods."
