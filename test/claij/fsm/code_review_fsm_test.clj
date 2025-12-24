@@ -2,13 +2,11 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.tools.logging :as log]
-   [malli.core :as m]
-   [malli.error :as me]
+   [claij.schema :as schema]
    [claij.action :refer [def-action]]
-   [claij.fsm :as fsm :refer [start-fsm]]
+   [claij.fsm :as fsm :refer [start-fsm build-fsm-registry]]
    [claij.actions :as actions]
-   [claij.fsm.code-review-fsm :refer [code-review-registry
-                                      code-review-fsm
+   [claij.fsm.code-review-fsm :refer [code-review-fsm
                                       example-code-review-concerns]]))
 
 ;;==============================================================================
@@ -20,7 +18,7 @@
 
 (def-action mock-llm-action
   "Mock LLM action that looks up response in :test/event-map context."
-  :any
+  true
   [_config _fsm _ix _state]
   (fn [context event _trail handler]
     (let [event-map (:test/event-map context)
@@ -29,11 +27,22 @@
 
 (def-action mock-end-action
   "Mock end action that delivers completion via promise."
-  :any
+  true
   [_config _fsm _ix _state]
   (fn [context _event trail _handler]
     (when-let [p (:fsm/completion-promise context)]
       (deliver p [(dissoc context :fsm/completion-promise) trail]))))
+
+;;==============================================================================
+;; Helper for JSON Schema validation
+;;==============================================================================
+
+(defn schema-valid?
+  "Validate data against a JSON Schema ref using the FSM's registry."
+  [schema-name data]
+  (let [registry (build-fsm-registry code-review-fsm {})
+        schema (get-in code-review-fsm ["schemas" schema-name])]
+    (:valid? (schema/validate schema data registry))))
 
 ;;==============================================================================
 ;; Tests
@@ -46,7 +55,7 @@
                    "document" "test code"
                    "llms" [{"service" "openrouter" "model" "openai/gpt-4o"}]
                    "concerns" ["Simplicity"]}]
-        (is (m/validate [:ref "entry"] entry {:registry code-review-registry}))))
+        (is (schema-valid? "entry" entry))))
 
     (testing "request validates"
       (let [request {"id" ["chairman" "reviewer"]
@@ -54,20 +63,20 @@
                      "notes" "Please review"
                      "concerns" ["Simplicity"]
                      "llm" {"service" "openrouter" "model" "openai/gpt-4o"}}]
-        (is (m/validate [:ref "request"] request {:registry code-review-registry}))))
+        (is (schema-valid? "request" request))))
 
     (testing "response validates"
       (let [response {"id" ["reviewer" "chairman"]
                       "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
                       "comments" ["Looks good"]
                       "notes" "Approved"}]
-        (is (m/validate [:ref "response"] response {:registry code-review-registry}))))
+        (is (schema-valid? "response" response))))
 
     (testing "summary validates"
       (let [summary {"id" ["chairman" "end"]
                      "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
                      "notes" "Review complete"}]
-        (is (m/validate [:ref "summary"] summary {:registry code-review-registry})))))
+        (is (schema-valid? "summary" summary)))))
 
   (testing "example-code-review-concerns"
     (testing "is a vector of strings"
@@ -227,12 +236,9 @@
                 "FSM should end with chairman→end transition"))
 
           (testing "Final event is valid summary"
-            (is (m/validate [:ref "summary"] final-event {:registry code-review-registry})
+            (is (schema-valid? "summary" final-event)
                 (str "Final event should be valid summary schema. Got: "
-                     (pr-str final-event)
-                     "\nErrors: "
-                     (pr-str (me/humanize (m/explain [:ref "summary"] final-event
-                                                     {:registry code-review-registry}))))))
+                     (pr-str final-event))))
 
           (testing "Trail contains expected transitions"
             ;; Trail should have at least: entry → request → response → summary

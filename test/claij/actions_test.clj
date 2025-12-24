@@ -7,7 +7,7 @@
                           with-actions with-default-actions make-context
                           fsm-action-factory reuse-action]]
    [claij.fsm :refer [start-fsm last-event]]
-   [claij.malli :refer [def-fsm]]
+   [claij.schema :refer [def-fsm]]
    [claij.store :as store]))
 
 ;;==============================================================================
@@ -16,9 +16,11 @@
 
 (def-action test-llm-action
   "LLM action - calls configured provider and model."
-  [:map
-   ["provider" [:enum "anthropic" "google" "openai" "xai"]]
-   ["model" :string]]
+  {"type" "object"
+   "required" ["provider" "model"]
+   "properties"
+   {"provider" {"enum" ["anthropic" "google" "openai" "xai"]}
+    "model" {"type" "string"}}}
   [config fsm ix state]
   (fn [context event trail handler]
     (let [provider (get config "provider")
@@ -31,7 +33,7 @@
 (def-action test-end-action
   "Terminal action - delivers result to completion promise.
    No config needed, but must accept empty map."
-  [:map]
+  {"type" "object"}
   [config fsm ix state]
   (fn [context _event trail _handler]
     (when-let [p (:fsm/completion-promise context)]
@@ -39,8 +41,8 @@
 
 (def-action test-timeout-action
   "Action with optional timeout config."
-  [:map
-   ["timeout-ms" {:optional true} :int]]
+  {"type" "object"
+   "properties" {"timeout-ms" {"type" "integer"}}}
   [config fsm ix state]
   (fn [context event trail handler]
     (let [timeout (get config "timeout-ms" 5000)]

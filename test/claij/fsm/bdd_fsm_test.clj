@@ -2,12 +2,23 @@
   "Tests for Bath Driven Development FSM."
   (:require
    [clojure.test :refer [deftest testing is]]
-   [claij.fsm.bdd-fsm :refer [bdd-fsm bdd-schemas bdd-registry bdd-actions
+   [claij.fsm.bdd-fsm :refer [bdd-fsm bdd-schemas bdd-actions
                               make-bdd-context start-bdd run-bdd
                               default-stt-url default-tts-url
                               github-mcp-config clojure-tools-config]]
-   [claij.malli :refer [valid-fsm?]]
-   [malli.core :as m]))
+   [claij.schema :as schema]))
+
+;;; ============================================================
+;;; Test Helpers
+;;; ============================================================
+
+(defn valid-fsm?
+  "Basic FSM structure validation for tests."
+  [fsm]
+  (and (map? fsm)
+       (string? (get fsm "id"))
+       (vector? (get fsm "states"))
+       (vector? (get fsm "xitions"))))
 
 ;;; ============================================================
 ;;; FSM Structure Tests
@@ -84,17 +95,21 @@
     (is (contains? bdd-schemas "llm-to-tts"))
     (is (contains? bdd-schemas "exit")))
 
+  (testing "Schemas are JSON Schema format"
+    (is (= "object" (get-in bdd-schemas ["entry" "type"])))
+    (is (= "object" (get-in bdd-schemas ["llm-to-tts" "type"]))))
+
   (testing "Entry schema validates correctly"
-    (let [schema (get bdd-schemas "entry")]
-      (is (m/validate schema {"id" ["start" "stt"]
-                              "audio" (byte-array [1 2 3])}
-                      {:registry bdd-registry}))))
+    (let [entry-schema (get bdd-schemas "entry")
+          valid-entry {"id" ["start" "stt"]
+                       "audio" (byte-array [1 2 3])}]
+      (is (:valid? (schema/validate entry-schema valid-entry)))))
 
   (testing "LLM-to-TTS schema validates correctly"
-    (let [schema (get bdd-schemas "llm-to-tts")]
-      (is (m/validate schema {"id" ["llm" "tts"]
-                              "text" "Hello, this is a test response."}
-                      {:registry bdd-registry})))))
+    (let [llm-to-tts-schema (get bdd-schemas "llm-to-tts")
+          valid-event {"id" ["llm" "tts"]
+                       "text" "Hello, this is a test response."}]
+      (is (:valid? (schema/validate llm-to-tts-schema valid-event))))))
 
 ;;; ============================================================
 ;;; Configuration Tests

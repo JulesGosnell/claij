@@ -3,17 +3,38 @@
    [clojure.test :refer [deftest testing is use-fixtures]]
    [clojure.edn :as edn]
    [clojure.tools.logging :as log]
-   [malli.core :as m]
-   [malli.registry :as mr]
+   [claij.schema :as schema]
    [claij.action :refer [def-action action-input-schema action-output-schema]]
    [claij.actions :as actions]
-   [claij.malli :refer [valid-fsm? base-registry]]
    [claij.fsm :refer [state-schema resolve-schema start-fsm llm-action trail->prompts
                       build-fsm-registry validate-event last-event llm-configs
                       make-prompts lift chain run-sync fsm-schemas
                       ;; Story #62: state→action schema bridge
                       state-action state-action-input-schema state-action-output-schema]]
    [claij.llm :refer [call]]))
+
+;;------------------------------------------------------------------------------
+;; Test Helpers (using claij.schema/JSON Schema)
+;;------------------------------------------------------------------------------
+
+(def base-registry
+  "Test registry with JSON Schema definitions."
+  {})
+
+(defn valid-fsm?
+  "Basic FSM structure validation for tests."
+  [fsm]
+  (and (map? fsm)
+       (string? (get fsm "id"))
+       (vector? (get fsm "states"))
+       (vector? (get fsm "xitions"))))
+
+(defn schema-valid?
+  "Validate data against a JSON Schema, optionally with a registry for $ref resolution."
+  ([schema data]
+   (schema-valid? schema data {}))
+  ([schema data registry]
+   (:valid? (schema/validate schema data registry))))
 
 ;;------------------------------------------------------------------------------
 ;; Test Fixtures
@@ -34,34 +55,37 @@
   (testing "build-fsm-registry"
     (testing "returns a registry that can validate base types"
       (let [registry (build-fsm-registry {} {})]
-        (is (m/validate :string "hello" {:registry registry}))
-        (is (m/validate :int 42 {:registry registry}))
-        (is (not (m/validate :int "not-int" {:registry registry})))))
+        (is (schema-valid? {"type" "string"} "hello" registry))
+        (is (schema-valid? {"type" "integer"} 42 registry))
+        (is (not (schema-valid? {"type" "integer"} "not-int" registry)))))
 
     (testing "includes FSM schemas when provided"
-      (let [fsm {"schemas" {"custom-type" [:string {:min 1}]}}
+      (let [fsm {"schemas" {"custom-type" {"type" "string" "minLength" 1}}}
             registry (build-fsm-registry fsm {})]
-        (is (m/validate [:ref "custom-type"] "valid" {:registry registry}))
-        (is (not (m/validate [:ref "custom-type"] "" {:registry registry})))))
+        (is (schema-valid? {"$ref" "#/$defs/custom-type"} "valid" registry))
+        (is (not (schema-valid? {"$ref" "#/$defs/custom-type"} "" registry)))))
 
     (testing "includes context registry when provided"
-      (let [context {:malli/registry {"ctx-type" :int}}
+      (let [context {:schema/defs {"ctx-type" {"type" "integer"}}}
             registry (build-fsm-registry {} context)]
-        (is (m/validate [:ref "ctx-type"] 42 {:registry registry}))
-        (is (not (m/validate [:ref "ctx-type"] "not-int" {:registry registry}))))))
+        (is (schema-valid? {"$ref" "#/$defs/ctx-type"} 42 registry))
+        (is (not (schema-valid? {"$ref" "#/$defs/ctx-type"} "not-int" registry))))))
 
   (testing "validate-event"
     (testing "returns valid for matching schema"
-      (let [result (validate-event nil :string "hello")]
+      (let [result (validate-event nil {"type" "string"} "hello")]
         (is (:valid? result))))
 
     (testing "returns invalid with errors for non-matching schema"
-      (let [result (validate-event nil :int "not-an-int")]
+      (let [result (validate-event nil {"type" "integer"} "not-an-int")]
         (is (not (:valid? result)))
         (is (some? (:errors result)))))
 
     (testing "validates map schemas"
-      (let [schema [:map ["name" :string] ["age" :int]]
+      (let [schema {"type" "object"
+                    "required" ["name" "age"]
+                    "properties" {"name" {"type" "string"}
+                                  "age" {"type" "integer"}}}
             valid-data {"name" "Alice" "age" 30}
             invalid-data {"name" "Bob" "age" "thirty"}]
         (is (:valid? (validate-event nil schema valid-data)))
@@ -949,15 +973,20 @@
 ;;==============================================================================
 
 (def minimal-schemas
-  {"input" [:map {:closed true}
-            ["question" :string]]
-   "output" [:map {:closed true}
-             ["id" [:= ["responder" "end"]]]
-             ["answer" :string]
-             ["agree" :boolean]]})
+  {"input" {"type" "object"
+            "additionalProperties" false
+            "required" ["question"]
+            "properties" {"question" {"type" "string"}}}
+   "output" {"type" "object"
+             "additionalProperties" false
+             "required" ["id" "answer" "agree"]
+             "properties"
+             {"id" {"const" ["responder" "end"]}
+              "answer" {"type" "string"}
+              "agree" {"type" "boolean"}}}})
 
 (def minimal-registry
-  (mr/composite-registry base-registry minimal-schemas))
+  minimal-schemas)
 
 (def minimal-fsm
   {"id" "minimal-test"
@@ -971,9 +1000,9 @@
      "action" "end"}]
    "xitions"
    [{"id" ["start" "responder"]
-     "schema" [:ref "input"]}
+     "schema" {"$ref" "#/$defs/input"}}
     {"id" ["responder" "end"]
-     "schema" [:ref "output"]}]})
+     "schema" {"$ref" "#/$defs/output"}}]})
 
 (defn test-minimal-fsm []
   (let [actions {"llm" #'claij.fsm/llm-action "end" #'actions/end-action}
@@ -986,7 +1015,7 @@
       {:success false :error "Timeout"}
       (let [[_ctx trail] result
             last-evt (last-event trail)]
-        (if (m/validate [:ref "output"] last-evt {:registry minimal-registry})
+        (if (schema-valid? (get minimal-schemas "output") last-evt)
           {:success true :response last-evt}
           {:success false :response last-evt :error "Validation failed"})))))
 

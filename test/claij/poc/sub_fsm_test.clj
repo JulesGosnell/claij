@@ -11,7 +11,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.tools.logging :as log]
-   [claij.malli :refer [def-fsm]]
+   [claij.schema :refer [def-fsm]]
    [claij.action :refer [def-action]]
    [claij.fsm :refer [run-sync last-event]]
    [claij.actions :refer [default-actions with-actions make-fsm-action*]]))
