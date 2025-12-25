@@ -49,32 +49,75 @@
    
    Returns {:subsumed? bool :reason string (when false)}
    
+   Options:
+     :resolve-ref - fn [ref-uri] -> schema, for $ref resolution (single-level)
+     :seen - internal, tracks refs to detect circular expansion
+   
    Use at FSM boundaries to verify type safety:
      (subsumes? next-state-input previous-action-output)"
-  [input output]
+  [input output & {:keys [resolve-ref seen]
+                   :or {seen {:input #{} :output #{}}}}]
   (let [in-type (schema-type input)
-        out-type (schema-type output)]
+        out-type (schema-type output)
+        ;; Helper to recurse with same options
+        recurse (fn [i o & {:keys [seen-update]}]
+                  (subsumes? i o 
+                             :resolve-ref resolve-ref 
+                             :seen (merge-with into seen (or seen-update {}))))]
     (cond
       ;; Equality is trivially true
       (= input output)
       {:subsumed? true}
       
-      ;; true/{} (any) subsumes everything
+      ;; true/{} (any) subsumes everything - no need to expand output $ref
       (= :any in-type)
       {:subsumed? true}
       
       ;; false (none) is only subsumed by itself (already handled by equality)
+      ;; No need to expand input $ref
       (= :none out-type)
-      {:subsumed? true}  ;; Nothing validates against false, so vacuously true
+      {:subsumed? true}
       
       ;; Nothing subsumes false except false itself
       (= :none in-type)
       {:subsumed? false :reason "false schema accepts nothing"}
       
+      ;; $ref on output - expand only if input is specific (not :any, handled above)
+      (= :ref out-type)
+      (let [ref-uri (get output "$ref")]
+        (cond
+          (nil? resolve-ref)
+          {:subsumed? false :reason (str "$ref requires :resolve-ref option: " ref-uri)}
+          
+          ;; Circularity check - already expanded this ref on output side?
+          (contains? (:output seen) ref-uri)
+          {:subsumed? true :reason "circular ref - assuming compatible"}
+          
+          :else
+          (if-let [resolved (resolve-ref ref-uri)]
+            (recurse input resolved :seen-update {:output #{ref-uri}})
+            {:subsumed? false :reason (str "could not resolve $ref: " ref-uri)})))
+      
+      ;; $ref on input - expand only if output is specific (not :none, handled above)
+      (= :ref in-type)
+      (let [ref-uri (get input "$ref")]
+        (cond
+          (nil? resolve-ref)
+          {:subsumed? false :reason (str "$ref requires :resolve-ref option: " ref-uri)}
+          
+          ;; Circularity check
+          (contains? (:input seen) ref-uri)
+          {:subsumed? true :reason "circular ref - assuming compatible"}
+          
+          :else
+          (if-let [resolved (resolve-ref ref-uri)]
+            (recurse resolved output :seen-update {:input #{ref-uri}})
+            {:subsumed? false :reason (str "could not resolve $ref: " ref-uri)})))
+      
       ;; oneOf/anyOf on output: input must subsume ALL branches
       (#{:oneOf :anyOf} out-type)
       (let [branches (or (get output "oneOf") (get output "anyOf"))
-            results (map #(subsumes? input %) branches)]
+            results (map #(recurse input %) branches)]
         (if (every? :subsumed? results)
           {:subsumed? true}
           {:subsumed? false 
@@ -83,29 +126,25 @@
       ;; oneOf/anyOf on input: ANY branch subsumes output
       (#{:oneOf :anyOf} in-type)
       (let [branches (or (get input "oneOf") (get input "anyOf"))
-            results (map #(subsumes? % output) branches)]
+            results (map #(recurse % output) branches)]
         (if (some :subsumed? results)
           {:subsumed? true}
           {:subsumed? false 
            :reason (str "no " (name in-type) " branch subsumes output")}))
       
-      ;; allOf on output: output satisfies intersection of all branches
-      ;; For input to subsume this, input must subsume EACH branch
-      ;; (since valid output instances must satisfy all branches)
+      ;; allOf on output: input must subsume EACH branch
       (= :allOf out-type)
       (let [branches (get output "allOf")
-            results (map #(subsumes? input %) branches)]
+            results (map #(recurse input %) branches)]
         (if (every? :subsumed? results)
           {:subsumed? true}
           {:subsumed? false
            :reason "input doesn't subsume all allOf branches in output"}))
       
-      ;; allOf on input: input is intersection of all branches
-      ;; ALL branches must subsume output for input to subsume output
-      ;; (since input requires satisfying every constraint)
+      ;; allOf on input: ALL branches must subsume output
       (= :allOf in-type)
       (let [branches (get input "allOf")
-            results (map #(subsumes? % output) branches)]
+            results (map #(recurse % output) branches)]
         (if (every? :subsumed? results)
           {:subsumed? true}
           {:subsumed? false
@@ -709,17 +748,72 @@
       (is (not (:subsumed? result)))
       (is (re-find #"required.*missing" (:reason result))))))
 
+(def ^:private test-defs
+  "Test $defs for $ref resolution tests"
+  {"StringType" {"type" "string"}
+   "IntType" {"type" "integer"}
+   "PositiveInt" {"type" "integer" "minimum" 0}
+   "Person" {"type" "object" 
+             "properties" {"name" {"type" "string"}
+                           "age" {"type" "integer"}}}
+   ;; Circular: LinkedList references itself
+   "LinkedList" {"type" "object"
+                 "properties" {"value" {"type" "integer"}
+                               "next" {"$ref" "#/$defs/LinkedList"}}}})
+
+(defn- test-resolver 
+  "Simple resolver for #/$defs/Name pattern"
+  [ref-uri]
+  (when-let [[_ name] (re-matches #"#/\$defs/(\w+)" ref-uri)]
+    (get test-defs name)))
+
 (deftest test-ref-handling
-  (testing "$ref requires expansion before subsumption"
-    ;; $ref is detected as a distinct type - can't subsume without expansion
+  (testing "$ref without resolver gives clear error"
     (let [result (subsumes? {"type" "string"} {"$ref" "#/$defs/foo"})]
       (is (not (:subsumed? result)))
-      (is (re-find #"ref" (:reason result))))
-    
-    ;; NOTE: In practice, expand refs first using claij.schema/expand-refs
-    ;; Example workflow:
-    ;; (require '[claij.schema :as schema])
-    ;; (let [defs (get fsm-schemas "$defs")
-    ;;       expanded (schema/expand-refs output-schema defs)]
-    ;;   (subsumes? input-schema expanded))
-    ))
+      (is (re-find #"\$ref requires :resolve-ref" (:reason result)))))
+  
+  (testing "$ref on output - expanded and compared"
+    (is (:subsumed? (subsumes? {"type" "string"} 
+                               {"$ref" "#/$defs/StringType"}
+                               :resolve-ref test-resolver)))
+    (is (not (:subsumed? (subsumes? {"type" "integer"} 
+                                    {"$ref" "#/$defs/StringType"}
+                                    :resolve-ref test-resolver)))))
+  
+  (testing "$ref on input - expanded and compared"
+    (is (:subsumed? (subsumes? {"$ref" "#/$defs/IntType"}
+                               {"type" "integer" "minimum" 0}
+                               :resolve-ref test-resolver)))
+    (is (not (:subsumed? (subsumes? {"$ref" "#/$defs/PositiveInt"}
+                                    {"type" "integer"}  ;; unconstrained
+                                    :resolve-ref test-resolver)))))
+  
+  (testing "$ref on both sides"
+    (is (:subsumed? (subsumes? {"$ref" "#/$defs/IntType"}
+                               {"$ref" "#/$defs/PositiveInt"}
+                               :resolve-ref test-resolver))))
+  
+  (testing "true (any) subsumes $ref without expansion"
+    (is (:subsumed? (subsumes? true 
+                               {"$ref" "#/$defs/Person"}
+                               :resolve-ref test-resolver))))
+  
+  (testing "circular $ref bails out gracefully"
+    ;; Same ref on both sides - equality check before expansion
+    (is (:subsumed? (subsumes? {"$ref" "#/$defs/LinkedList"}
+                               {"$ref" "#/$defs/LinkedList"}
+                               :resolve-ref test-resolver)))
+    ;; Nested circular - when we hit the same ref twice, bail out
+    (is (:subsumed? (subsumes? {"type" "object"
+                                "properties" {"list" {"$ref" "#/$defs/LinkedList"}}}
+                               {"type" "object"
+                                "properties" {"list" {"$ref" "#/$defs/LinkedList"}}}
+                               :resolve-ref test-resolver))))
+  
+  (testing "unresolvable $ref gives clear error"
+    (let [result (subsumes? {"type" "string"}
+                            {"$ref" "#/$defs/Unknown"}
+                            :resolve-ref test-resolver)]
+      (is (not (:subsumed? result)))
+      (is (re-find #"could not resolve" (:reason result))))))
