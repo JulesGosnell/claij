@@ -89,6 +89,28 @@
           {:subsumed? false 
            :reason (str "no " (name in-type) " branch subsumes output")}))
       
+      ;; allOf on output: output satisfies intersection of all branches
+      ;; For input to subsume this, input must subsume EACH branch
+      ;; (since valid output instances must satisfy all branches)
+      (= :allOf out-type)
+      (let [branches (get output "allOf")
+            results (map #(subsumes? input %) branches)]
+        (if (every? :subsumed? results)
+          {:subsumed? true}
+          {:subsumed? false
+           :reason "input doesn't subsume all allOf branches in output"}))
+      
+      ;; allOf on input: input is intersection of all branches
+      ;; ALL branches must subsume output for input to subsume output
+      ;; (since input requires satisfying every constraint)
+      (= :allOf in-type)
+      (let [branches (get input "allOf")
+            results (map #(subsumes? % output) branches)]
+        (if (every? :subsumed? results)
+          {:subsumed? true}
+          {:subsumed? false
+           :reason "not all allOf branches in input subsume output"}))
+      
       ;; Delegate to multimethod for specific type pairs
       :else
       (try
@@ -109,32 +131,122 @@
        :reason (str "incompatible types: " in-type " vs " out-type)})))
 
 ;;------------------------------------------------------------------------------
+;; Constraint Checking Helpers
+;;------------------------------------------------------------------------------
+
+(defn- check-numeric-constraints
+  "Check if input's numeric constraints subsume output's.
+   Input subsumes output if input's range contains output's range."
+  [input output]
+  (let [;; Get bounds, treating exclusive as slightly tighter
+        in-min (or (get input "minimum") 
+                   (some-> (get input "exclusiveMinimum") (+ 0.0001))
+                   Double/NEGATIVE_INFINITY)
+        in-max (or (get input "maximum")
+                   (some-> (get input "exclusiveMaximum") (- 0.0001))
+                   Double/POSITIVE_INFINITY)
+        out-min (or (get output "minimum")
+                    (some-> (get output "exclusiveMinimum") (+ 0.0001))
+                    Double/NEGATIVE_INFINITY)
+        out-max (or (get output "maximum")
+                    (some-> (get output "exclusiveMaximum") (- 0.0001))
+                    Double/POSITIVE_INFINITY)
+        ;; multipleOf: input's must divide output's evenly
+        in-mult (get input "multipleOf")
+        out-mult (get output "multipleOf")]
+    (cond
+      ;; Output's range must be within input's range
+      (< out-min in-min)
+      {:subsumed? false :reason (str "output minimum " out-min " < input minimum " in-min)}
+      
+      (> out-max in-max)
+      {:subsumed? false :reason (str "output maximum " out-max " > input maximum " in-max)}
+      
+      ;; multipleOf: if input requires multipleOf, output must too (and be compatible)
+      (and in-mult (not out-mult))
+      {:subsumed? false :reason (str "input requires multipleOf " in-mult ", output doesn't")}
+      
+      (and in-mult out-mult (not (zero? (mod out-mult in-mult))))
+      {:subsumed? false :reason (str "output multipleOf " out-mult " not divisible by input " in-mult)}
+      
+      :else
+      {:subsumed? true})))
+
+(defn- check-string-constraints
+  "Check if input's string constraints subsume output's."
+  [input output]
+  (let [in-min-len (get input "minLength" 0)
+        in-max-len (get input "maxLength" Long/MAX_VALUE)
+        out-min-len (get output "minLength" 0)
+        out-max-len (get output "maxLength" Long/MAX_VALUE)
+        in-pattern (get input "pattern")
+        out-pattern (get output "pattern")]
+    (cond
+      ;; Output's length range must be within input's
+      (< out-min-len in-min-len)
+      {:subsumed? false :reason (str "output minLength " out-min-len " < input minLength " in-min-len)}
+      
+      (> out-max-len in-max-len)
+      {:subsumed? false :reason (str "output maxLength " out-max-len " > input maxLength " in-max-len)}
+      
+      ;; Pattern: if input has pattern, output must have same or compatible pattern
+      ;; (Pattern subsumption is undecidable in general, so we're conservative)
+      (and in-pattern (not out-pattern))
+      {:subsumed? false :reason "input requires pattern, output doesn't"}
+      
+      (and in-pattern out-pattern (not= in-pattern out-pattern))
+      ;; Different patterns - can't determine subsumption, be conservative
+      {:subsumed? false :reason "pattern subsumption cannot be determined"}
+      
+      :else
+      {:subsumed? true})))
+
+(defn- check-array-constraints
+  "Check if input's array constraints subsume output's."
+  [input output]
+  (let [in-min (get input "minItems" 0)
+        in-max (get input "maxItems" Long/MAX_VALUE)
+        out-min (get output "minItems" 0)
+        out-max (get output "maxItems" Long/MAX_VALUE)
+        in-unique (get input "uniqueItems" false)
+        out-unique (get output "uniqueItems" false)]
+    (cond
+      (< out-min in-min)
+      {:subsumed? false :reason (str "output minItems " out-min " < input minItems " in-min)}
+      
+      (> out-max in-max)
+      {:subsumed? false :reason (str "output maxItems " out-max " > input maxItems " in-max)}
+      
+      ;; If input requires uniqueItems, output must too
+      (and in-unique (not out-unique))
+      {:subsumed? false :reason "input requires uniqueItems, output doesn't"}
+      
+      :else
+      {:subsumed? true})))
+
+;;------------------------------------------------------------------------------
 ;; Primitive Types
 ;;------------------------------------------------------------------------------
 
-;; Same primitive types - check constraints
-(doseq [t [:string :boolean :null :integer :number]]
-  (defmethod -subsumes? [t t] [input output]
-    (let [in-props (dissoc input "type")
-          out-props (dissoc output "type")]
-      (cond
-        ;; Both unconstrained - trivially true
-        (and (empty? in-props) (empty? out-props))
-        {:subsumed? true}
-        
-        ;; Input unconstrained, output constrained - true (output is narrower)
-        (empty? in-props)
-        {:subsumed? true}
-        
-        ;; Input constrained, output unconstrained - false (output might violate)
-        (empty? out-props)
-        {:subsumed? false :reason "input has constraints, output doesn't"}
-        
-        ;; Both constrained - need to check ranges
-        :else
-        ;; For now, be conservative with complex constraints
-        ;; TODO: implement range checking (min/max, minLength/maxLength, pattern)
-        {:subsumed? false :reason "constraint comparison not fully implemented"}))))
+;; String with constraint checking
+(defmethod -subsumes? [:string :string] [input output]
+  (check-string-constraints input output))
+
+;; Boolean - no constraints beyond type
+(defmethod -subsumes? [:boolean :boolean] [_ _]
+  {:subsumed? true})
+
+;; Null - no constraints beyond type  
+(defmethod -subsumes? [:null :null] [_ _]
+  {:subsumed? true})
+
+;; Integer with constraint checking
+(defmethod -subsumes? [:integer :integer] [input output]
+  (check-numeric-constraints input output))
+
+;; Number with constraint checking
+(defmethod -subsumes? [:number :number] [input output]
+  (check-numeric-constraints input output))
 
 ;; Cross-numeric: number subsumes integer (every integer is a valid number)
 (defmethod -subsumes? [:number :integer] [_ _]
@@ -250,9 +362,14 @@
 ;;------------------------------------------------------------------------------
 
 (defmethod -subsumes? [:array :array] [input output]
-  (let [in-items (get input "items" true)  ;; default: any items allowed
-        out-items (get output "items" true)]
-    (subsumes? in-items out-items)))
+  (let [;; First check array-level constraints
+        constraint-result (check-array-constraints input output)]
+    (if-not (:subsumed? constraint-result)
+      constraint-result
+      ;; Then check items schema
+      (let [in-items (get input "items" true)  ;; default: any items allowed
+            out-items (get output "items" true)]
+        (subsumes? in-items out-items)))))
 
 ;;------------------------------------------------------------------------------
 ;; Union Types (type: ["string", "integer"])
@@ -322,6 +439,73 @@
                                {"type" "string" "minLength" 5})))
     (is (:subsumed? (subsumes? {"type" "integer"}
                                {"type" "integer" "minimum" 0})))))
+
+(deftest test-numeric-constraints
+  (testing "Wider range subsumes narrower range"
+    (is (:subsumed? (subsumes? {"type" "integer" "minimum" 0 "maximum" 100}
+                               {"type" "integer" "minimum" 10 "maximum" 50})))
+    (is (:subsumed? (subsumes? {"type" "number" "minimum" 0}
+                               {"type" "number" "minimum" 5 "maximum" 10}))))
+  
+  (testing "Narrower range doesn't subsume wider"
+    (is (not (:subsumed? (subsumes? {"type" "integer" "minimum" 10 "maximum" 50}
+                                    {"type" "integer" "minimum" 0 "maximum" 100}))))
+    (is (not (:subsumed? (subsumes? {"type" "number" "maximum" 100}
+                                    {"type" "number"})))))
+  
+  (testing "Exclusive bounds"
+    (is (:subsumed? (subsumes? {"type" "integer" "exclusiveMinimum" 0}
+                               {"type" "integer" "minimum" 1})))
+    (is (:subsumed? (subsumes? {"type" "number" "exclusiveMaximum" 100}
+                               {"type" "number" "maximum" 99}))))
+  
+  (testing "multipleOf constraints"
+    (is (:subsumed? (subsumes? {"type" "integer" "multipleOf" 2}
+                               {"type" "integer" "multipleOf" 4})))  ;; 4 divides by 2
+    (is (not (:subsumed? (subsumes? {"type" "integer" "multipleOf" 4}
+                                    {"type" "integer" "multipleOf" 2}))))  ;; 2 doesn't divide by 4
+    (is (not (:subsumed? (subsumes? {"type" "integer" "multipleOf" 3}
+                                    {"type" "integer"}))))))  ;; no multipleOf
+
+(deftest test-string-constraints
+  (testing "Length constraints"
+    (is (:subsumed? (subsumes? {"type" "string" "minLength" 1 "maxLength" 100}
+                               {"type" "string" "minLength" 5 "maxLength" 50})))
+    (is (not (:subsumed? (subsumes? {"type" "string" "minLength" 10}
+                                    {"type" "string" "minLength" 5}))))
+    (is (not (:subsumed? (subsumes? {"type" "string" "maxLength" 50}
+                                    {"type" "string" "maxLength" 100})))))
+  
+  (testing "Pattern constraints"
+    (is (:subsumed? (subsumes? {"type" "string" "pattern" "^[a-z]+$"}
+                               {"type" "string" "pattern" "^[a-z]+$"})))  ;; same pattern
+    (is (not (:subsumed? (subsumes? {"type" "string" "pattern" "^[a-z]+$"}
+                                    {"type" "string"}))))  ;; no pattern
+    (is (not (:subsumed? (subsumes? {"type" "string" "pattern" "^[a-z]+$"}
+                                    {"type" "string" "pattern" "^[0-9]+$"}))))))  ;; different pattern
+
+(deftest test-array-constraints
+  (testing "Items count constraints"
+    (is (:subsumed? (subsumes? {"type" "array" "minItems" 1 "maxItems" 10}
+                               {"type" "array" "minItems" 2 "maxItems" 5})))
+    (is (not (:subsumed? (subsumes? {"type" "array" "minItems" 5}
+                                    {"type" "array" "minItems" 1}))))
+    (is (not (:subsumed? (subsumes? {"type" "array" "maxItems" 5}
+                                    {"type" "array" "maxItems" 10})))))
+  
+  (testing "uniqueItems constraint"
+    (is (:subsumed? (subsumes? {"type" "array" "uniqueItems" true}
+                               {"type" "array" "uniqueItems" true})))
+    (is (:subsumed? (subsumes? {"type" "array"}
+                               {"type" "array" "uniqueItems" true})))  ;; more constrained output
+    (is (not (:subsumed? (subsumes? {"type" "array" "uniqueItems" true}
+                                    {"type" "array"})))))  ;; input requires unique, output doesn't
+  
+  (testing "Combined items schema and constraints"
+    (is (:subsumed? (subsumes? {"type" "array" "items" {"type" "number"} "minItems" 1}
+                               {"type" "array" "items" {"type" "integer"} "minItems" 2})))
+    (is (not (:subsumed? (subsumes? {"type" "array" "items" {"type" "integer"} "minItems" 1}
+                                    {"type" "array" "items" {"type" "number"} "minItems" 2}))))))
 
 (deftest test-enum-and-const
   (testing "Enum subsumption"
@@ -432,6 +616,42 @@
     (is (not (:subsumed? (subsumes?
                           {"oneOf" [{"type" "string"} {"type" "integer"}]}
                           {"type" "boolean"}))))))
+
+(deftest test-allOf
+  (testing "allOf on output - input must subsume each branch"
+    ;; Output is intersection: must be both >= 0 AND <= 100
+    ;; Input (number) subsumes both constraints
+    (is (:subsumed? (subsumes?
+                     {"type" "number"}
+                     {"allOf" [{"type" "number" "minimum" 0}
+                               {"type" "number" "maximum" 100}]})))
+    ;; Input has narrower range than one branch
+    (is (not (:subsumed? (subsumes?
+                          {"type" "number" "minimum" 50}
+                          {"allOf" [{"type" "number" "minimum" 0}
+                                    {"type" "number" "maximum" 100}]})))))
+  
+  (testing "allOf on input - all branches must subsume output"
+    ;; Input requires both string AND minLength 5
+    ;; Output (string with minLength 10) satisfies both
+    (is (:subsumed? (subsumes?
+                     {"allOf" [{"type" "string"}
+                               {"type" "string" "minLength" 5}]}
+                     {"type" "string" "minLength" 10})))
+    ;; Output doesn't satisfy minLength constraint
+    (is (not (:subsumed? (subsumes?
+                          {"allOf" [{"type" "string"}
+                                    {"type" "string" "minLength" 10}]}
+                          {"type" "string" "minLength" 5})))))
+  
+  (testing "allOf with object schemas (common pattern)"
+    ;; Combining base object with additional properties
+    (is (:subsumed? (subsumes?
+                     {"allOf" [{"type" "object" "properties" {"id" {"type" "string"}}}
+                               {"type" "object" "properties" {"name" {"type" "string"}}}]}
+                     {"type" "object" 
+                      "properties" {"id" {"type" "string"} "name" {"type" "string"}}
+                      "required" ["id" "name"]})))))
 
 (deftest test-fsm-realistic-scenarios
   (testing "LLM action input (any) subsumes transition output"
