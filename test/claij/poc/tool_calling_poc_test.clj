@@ -23,7 +23,7 @@
    - Smaller/faster models for cost optimization
    
    PREREQUISITES:
-   - Ollama must be running on localhost:11434
+   - Ollama must be running (set OLLAMA_HOST env var, default: localhost)
    - Cloud provider tests require respective API keys
    
    Current validated services:
@@ -208,24 +208,33 @@ Respond ONLY with a JSON object containing your tool calls. No prose. Example fo
 ;; Ollama Tests (Local Inference - Ollama must be running!)
 ;;------------------------------------------------------------------------------
 
+(def ollama-host
+  "Ollama server host from OLLAMA_HOST env var (default: localhost)"
+  (or (System/getenv "OLLAMA_HOST") "localhost"))
+
+(def ollama-port
+  "Ollama server port from OLLAMA_PORT env var (default: 11434)"
+  (or (System/getenv "OLLAMA_PORT") "11434"))
+
 (defn ollama-available?
-  "Check if Ollama is running by attempting to list models"
+  "Check if Ollama is running by attempting to list models.
+   Uses OLLAMA_HOST env var (default: localhost) and OLLAMA_PORT (default: 11434)."
   []
-  (try
-    (let [resp (http/get "http://localhost:11434/api/tags"
-                         {:throw-exceptions false
-                          :conn-timeout 1000})]
-      (= 200 (:status resp)))
-    (catch Exception _ false)))
+  (let [url (str "http://" ollama-host ":" ollama-port "/api/tags")]
+    (try
+      (let [resp (http/get url {:throw-exceptions false
+                                :conn-timeout 1000})]
+        (= 200 (:status resp)))
+      (catch Exception _ false))))
 
 (deftest ^:integration test-ollama-mistral-tool-calling
   (testing "Ollama mistral:7b emits valid tool calls from MCP schema"
-    (when-service-available ollama-available? "Ollama/mistral" "OLLAMA (localhost:11434)"
+    (when-service-available ollama-available? "Ollama/mistral" (str "OLLAMA (" ollama-host ":" ollama-port ")")
                             (let [response (call-llm-sync "ollama:local" "mistral:7b")]
                               (validate-tool-calls response)))))
 
 (deftest ^:integration test-ollama-qwen-tool-calling
   (testing "Ollama qwen2.5-coder:7b emits valid tool calls from MCP schema"
-    (when-service-available ollama-available? "Ollama/qwen" "OLLAMA (localhost:11434)"
+    (when-service-available ollama-available? "Ollama/qwen" (str "OLLAMA (" ollama-host ":" ollama-port ")")
                             (let [response (call-llm-sync "ollama:local" "qwen2.5-coder:7b")]
                               (validate-tool-calls response)))))
