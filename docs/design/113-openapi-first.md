@@ -165,6 +165,108 @@ MCP JSON Schema → Direct passthrough → OpenAPI 3.1
 - [ ] Update documentation
 - [ ] Final test pass
 
+## Dynamic OpenAPI at Runtime
+
+### Jules' Preference
+Register each FSM individually with OpenAPI (not a single base endpoint) so all extant FSMs 
+are visible via the OpenAPI API description.
+
+### Can OpenAPI Description Vary at Runtime?
+
+**Yes!** Reitit generates OpenAPI spec at request-time by walking the router. If we rebuild 
+the router when FSMs are loaded/unloaded, the `/openapi.json` endpoint automatically reflects 
+the current routes.
+
+```clojure
+;; From reitit docs: "collects at request-time data from all routes"
+["/openapi.json" {:get {:handler (openapi/create-openapi-handler)}}]
+```
+
+So the approach is:
+1. Keep router in an atom
+2. When FSM loads → add route → rebuild router → swap atom
+3. When FSM unloads → remove route → rebuild router → swap atom
+4. OpenAPI handler automatically reflects current router state
+
+---
+
+## Schema Subsumption (`subsumes?`)
+
+### What Happened
+The `subsumes?` function was **fully implemented** for Malli (~200 lines) with multimethod 
+dispatch for different type pairs. It was **deleted** during the JSON Schema migration 
+(commit 95fe38a).
+
+### Why It Matters
+Schema compatibility checking at the earliest possible moment:
+- **Config-time**: FSM definition validation (transition output ⊆ action input)
+- **Load-time**: Hat expansion validation
+- **Runtime**: Dynamic tool schema compatibility
+
+Example: If a transition outputs `{"type": "object", "properties": {"x": {"type": "integer"}}}` 
+and the next action expects `{"type": "object", "properties": {"x": {"type": "number"}}}`, 
+this is valid because integer ⊆ number.
+
+### IBM jsonsubschema
+IBM published a tool and [ISSTA 2021 paper](https://github.com/IBM/jsonsubschema) on exactly this:
+- "Finding Data Compatibility Bugs with JSON Subschema Checking"
+- 93.5% recall, 100% precision
+- Algorithm: canonicalize schemas, then type-specific checkers
+
+### Implementation Plan for JSON Schema `subsumes?`
+
+The algorithm mirrors what we had for Malli:
+
+```clojure
+(defn subsumes?
+  "True if input-schema subsumes output-schema.
+   i.e., every valid instance of output is also valid for input.
+   
+   Returns {:subsumed? bool :reason string}"
+  [input output]
+  (cond
+    ;; true (any) subsumes everything
+    (= true input) {:subsumed? true}
+    
+    ;; Same schema trivially subsumes
+    (= input output) {:subsumed? true}
+    
+    ;; oneOf/anyOf on output: input must subsume ALL branches
+    (get output "oneOf")
+    (let [results (map #(subsumes? input %) (get output "oneOf"))]
+      (if (every? :subsumed? results)
+        {:subsumed? true}
+        {:subsumed? false :reason "input doesn't subsume all oneOf branches"}))
+    
+    ;; oneOf/anyOf on input: ANY branch subsumes output
+    (get input "oneOf")
+    (let [results (map #(subsumes? % output) (get input "oneOf"))]
+      (if (some :subsumed? results)
+        {:subsumed? true}
+        {:subsumed? false :reason "no input branch subsumes output"}))
+    
+    ;; Type-specific dispatch
+    :else (-subsumes? input output)))
+
+;; Type-specific rules (multimethod on ["type" "type"] pairs)
+(defmethod -subsumes? ["object" "object"] [input output]
+  ;; Every required key in input must exist in output with compatible schema
+  ...)
+
+(defmethod -subsumes? ["number" "integer"] [_ _]
+  {:subsumed? true}) ;; integer ⊆ number
+
+(defmethod -subsumes? ["array" "array"] [input output]
+  ;; items schema must subsume
+  (subsumes? (get input "items") (get output "items")))
+```
+
+### Where to Put It
+- **Short term**: `claij.schema/subsumes?` alongside `validate`
+- **Long term**: Contribute to m3 library (more generally useful)
+
+---
+
 ## Open Questions for Jules
 
 1. **Router hot-reload strategy**: Rebuild on every FSM change, or batch updates?
