@@ -1012,8 +1012,8 @@
     (let [{event-service "service" event-model "model"} (get event "llm")
           {config-service "service" config-model "model"} config
           ;; Precedence: config → event → context → defaults
-          service (or config-service event-service (:llm/service context) "google")
-          model (or config-model event-model (:llm/model context) "gemini-2.0-flash")
+          service (or config-service event-service (:llm/service context) "anthropic")
+          model (or config-model event-model (:llm/model context) "claude-sonnet-4-20250514")
 
           ;; Get LLM service registry from context or use default
           llm-registry (or (:llm/registry context) llm-service/default-registry)

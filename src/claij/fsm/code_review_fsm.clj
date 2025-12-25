@@ -229,11 +229,13 @@
   [& body]
   (let [code-str (pr-str (cons 'do body))]
     `(let [code-review-actions# {"llm" #'fsm/llm-action "end" #'actions/end-action}
-           context# {:id->action code-review-actions#}
+           ;; Context with default LLM for chairman
+           context# {:id->action code-review-actions#
+                     :llm/service "anthropic"
+                     :llm/model "claude-sonnet-4-20250514"}
            {:keys [~'submit ~'await ~'stop]} (fsm/start-fsm context# code-review-fsm)
            ;; Available LLMs - must match schema enum exactly
            llms# [{"service" "anthropic" "model" "claude-sonnet-4-20250514"}
-                  {"service" "google" "model" "gemini-2.0-flash"}
                   {"service" "openrouter" "model" "openai/gpt-4o"}
                   {"service" "xai" "model" "grok-3-beta"}]
            ;; Construct entry message with document and llms

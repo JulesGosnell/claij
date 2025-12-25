@@ -214,7 +214,10 @@
           ;; Use vars to preserve action metadata for curried dispatch
           code-review-actions {"llm" #'fsm/llm-action "end" #'actions/end-action}
 
-          context {:id->action code-review-actions}
+          ;; Context with default LLM for chairman (reviewers get llm from event)
+          context {:id->action code-review-actions
+                   :llm/service "anthropic"
+                   :llm/model "claude-sonnet-4-20250514"}
 
           entry-msg {"id" ["start" "chairman"]
                      "document" (str "Please review this Clojure code: " code)
