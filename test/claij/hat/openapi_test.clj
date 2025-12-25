@@ -76,15 +76,15 @@
       (is (nil? (openapi/resolve-schema spec nil))))))
 
 (deftest test-tools->request-schema
-  (testing "tools->request-schema generates valid schema"
+  (testing "tools->request-schema generates valid JSON Schema"
     (let [tools [{:operation-id "test" :request-schema {"type" "object"}}]
           schema (openapi/tools->request-schema tools)]
-      (is (vector? schema)) ;; Malli schemas are vectors
-      (is (= :map (first schema))))))
+      (is (map? schema))
+      (is (= "object" (get schema "type"))))))
 
 (deftest test-tools->response-schema
-  (testing "tools->response-schema generates valid schema"
+  (testing "tools->response-schema generates valid JSON Schema"
     (let [tools [{:operation-id "test"}]
           schema (openapi/tools->response-schema tools)]
-      (is (vector? schema)) ;; Malli schemas are vectors
-      (is (= :map (first schema))))))
+      (is (map? schema))
+      (is (= "object" (get schema "type"))))))

@@ -64,9 +64,13 @@
        {"states" [{"id" service-id
                    "action" "echo-service"}]
         "xitions" [{"id" [state-id service-id]
-                    "schema" [:map ["request" :string]]}
+                    "schema" {"type" "object"
+                              "required" ["request"]
+                              "properties" {"request" {"type" "string"}}}}
                    {"id" [service-id state-id]
-                    "schema" [:map ["response" :string]]}]
+                    "schema" {"type" "object"
+                              "required" ["response"]
+                              "properties" {"response" {"type" "string"}}}}]
         "prompts" [(str "You can echo messages via " service-id)]}])))
 
 ;;==============================================================================
@@ -86,17 +90,27 @@
         [context
          {"states" [{"id" service-id "action" "counter-service"}]
           "xitions" [{"id" [state-id service-id]
-                      "schema" [:map ["increment" [:int {:min 1 :max counter-val}]]]}
+                      "schema" {"type" "object"
+                                "required" ["increment"]
+                                "properties" {"increment" {"type" "integer"
+                                                           "minimum" 1
+                                                           "maximum" counter-val}}}}
                      {"id" [service-id state-id]
-                      "schema" [:map ["new-value" :int]]}]
+                      "schema" {"type" "object"
+                                "required" ["new-value"]
+                                "properties" {"new-value" {"type" "integer"}}}}]
           "prompts" [(str "Counter available (max increment: " counter-val ")")]}]
         ;; Dynamic: no counter yet, initialize and return loose schema
         [(assoc context :counter/value 100)
          {"states" [{"id" service-id "action" "counter-service"}]
           "xitions" [{"id" [state-id service-id]
-                      "schema" [:map ["increment" :int]]}
+                      "schema" {"type" "object"
+                                "required" ["increment"]
+                                "properties" {"increment" {"type" "integer"}}}}
                      {"id" [service-id state-id]
-                      "schema" [:map ["new-value" :int]]}]
+                      "schema" {"type" "object"
+                                "required" ["new-value"]
+                                "properties" {"new-value" {"type" "integer"}}}}]
           "prompts" ["Counter service initializing..."]}]))))
 
 ;;==============================================================================

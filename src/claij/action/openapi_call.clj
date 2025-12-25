@@ -311,7 +311,11 @@
   [config {xs "xitions" :as fsm} _ix {state-id "id" :as state}]
 
   ;; Factory time: fetch spec and find operation
-  (let [{:keys [spec-url operation base-url auth timeout-ms]} config
+  (let [spec-url (get config "spec-url")
+        operation (get config "operation")
+        base-url (get config "base-url")
+        auth (get config "auth")
+        timeout-ms (get config "timeout-ms")
         spec (get-cached-spec spec-url)
         operations (openapi/extract-operations spec)
         tools (openapi/operations->tools operations)

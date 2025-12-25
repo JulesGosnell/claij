@@ -53,9 +53,12 @@
       ;; Context should be enriched
       (is (= 100 (:counter/value ctx)) "Should initialize counter in context")
 
-      ;; Fragment should have loose schema
-      (let [out-xition (first (get frag "xitions"))]
-        (is (= [:map ["increment" :int]] (get out-xition "schema"))
+      ;; Fragment should have loose schema (JSON Schema with just type: integer)
+      (let [out-xition (first (get frag "xitions"))
+            schema (get out-xition "schema")]
+        (is (= "object" (get schema "type")))
+        (is (= {"type" "integer"} (get-in schema ["properties" "increment"])))
+        (is (nil? (get-in schema ["properties" "increment" "maximum"]))
             "Should have loose schema when initializing"))
 
       ;; Prompts indicate initialization
@@ -70,9 +73,11 @@
       ;; Context should be unchanged (resource already exists)
       (is (= 50 (:counter/value ctx)) "Should not modify existing counter")
 
-      ;; Fragment should have specific schema based on context
-      (let [out-xition (first (get frag "xitions"))]
-        (is (= [:map ["increment" [:int {:min 1 :max 50}]]] (get out-xition "schema"))
+      ;; Fragment should have specific schema based on context (with max constraint)
+      (let [out-xition (first (get frag "xitions"))
+            schema (get out-xition "schema")]
+        (is (= "object" (get schema "type")))
+        (is (= 50 (get-in schema ["properties" "increment" "maximum"]))
             "Should have specific schema from context"))
 
       ;; Prompts should reflect the context

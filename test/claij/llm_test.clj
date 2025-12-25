@@ -24,15 +24,15 @@
                         (swap! attempts conj messages)
 
                         (cond
-                          ;; First attempt: return malformed EDN (unbalanced braces)
+                          ;; First attempt: return malformed JSON (has EDN keyword :bad)
                           (= attempt-num 0)
                           (success-callback {:body (json/write-str
-                                                    {"choices" [{"message" {"content" "{\"id\" [\"a\" \"b\"] :bad"}}]})})
+                                                    {"choices" [{"message" {"content" "{\"id\": [\"a\", \"b\"], :bad"}}]})})
 
-                          ;; Second attempt: return valid EDN
+                          ;; Second attempt: return valid JSON
                           :else
                           (success-callback {:body (json/write-str
-                                                    {"choices" [{"message" {"content" "{\"id\" [\"a\" \"b\"] \"data\" \"ok\"}"}}]})}))))
+                                                    {"choices" [{"message" {"content" "{\"id\": [\"a\", \"b\"], \"data\": \"ok\"}"}}]})}))))
 
           result (promise)]
 

@@ -447,9 +447,9 @@
     (let [action (lift identity)]
       (is (fn? action))
       (is (= "lifted" (-> action meta :action/name)))
-      (is (= :any (-> action meta :action/config-schema)))
-      (is (= :any (-> action meta :action/input-schema)))
-      (is (= :any (-> action meta :action/output-schema)))))
+      (is (= true (-> action meta :action/config-schema)))
+      (is (= true (-> action meta :action/input-schema)))
+      (is (= true (-> action meta :action/output-schema)))))
 
   (testing "lift with custom name"
     (let [action (lift identity {:name "my-processor"})]
@@ -1118,15 +1118,15 @@
              (state-action-input-schema context {"id" "x" "action" "untyped"}))
           "Should return true for legacy actions")
 
-      ;; Missing action returns :any
-      (is (= :any
+      ;; Missing action returns true
+      (is (= true
              (state-action-input-schema context {"id" "x" "action" "missing"}))
-          "Should return :any when action not found")
+          "Should return true when action not found")
 
-      ;; No action key returns :any
-      (is (= :any
+      ;; No action key returns true
+      (is (= true
              (state-action-input-schema context {"id" "x"}))
-          "Should return :any when state has no action")))
+          "Should return true when state has no action")))
 
   (testing "state-action-output-schema extracts output schema"
     (let [context {:id->action {"typed" #'typed-processor-action
@@ -1143,10 +1143,10 @@
              (state-action-output-schema context {"id" "x" "action" "untyped"}))
           "Should return true for legacy actions")
 
-      ;; Missing action returns :any
-      (is (= :any
+      ;; Missing action returns true
+      (is (= true
              (state-action-output-schema context {"id" "x" "action" "missing"}))
-          "Should return :any when action not found")))
+          "Should return true when action not found")))
 
   (testing "same code path works at all three times"
     ;; The functions work identically regardless of when called
@@ -1159,8 +1159,8 @@
           expected-schema {"type" "object" "required" ["value"] "properties" {"value" {"type" "integer"}}}]
 
       ;; Config time: no actions yet
-      (is (= :any (state-action-input-schema config-ctx state))
-          "Config time returns :any (no actions)")
+      (is (= true (state-action-input-schema config-ctx state))
+          "Config time returns true (no actions)")
 
       ;; Start time: actions available
       (is (= expected-schema (state-action-input-schema start-ctx state))
@@ -1249,9 +1249,9 @@
           xition {"id" ["x" "y"]}
           expected-schema {"type" "object" "required" ["value"] "properties" {"value" {"type" "integer"}}}]
 
-      ;; Config time: no actions -> fallback to :any
-      (is (= :any (resolve-schema {} xition nil typed-state :input))
-          "Config time: action not found, falls back to :any")
+      ;; Config time: no actions -> fallback to true
+      (is (= true (resolve-schema {} xition nil typed-state :input))
+          "Config time: action not found, falls back to true")
 
       ;; Start/Runtime: actions available -> falls back to declared schema
       (let [ctx {:id->action {"typed" #'typed-processor-action}}]

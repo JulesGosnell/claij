@@ -108,46 +108,53 @@
 
 (defn tool->call-schema
   "Build Malli schema for a single tool call.
-   Embeds the raw JSON schema for params using [:json-schema {:schema ...}]"
+   Embeds the raw JSON schema for params."
   [{:keys [operation-id request-schema path-params query-params]}]
   (let [;; Build params schema from path/query params + body
-        has-params (or (seq path-params) (seq query-params) request-schema)
-        params-schema (if has-params
-                        [:map
-                         (when (seq path-params)
-                           (into [] (for [p path-params] [p :string])))
-                         (when (seq query-params)
-                           (into [] (for [q query-params] [q {:optional true} :string])))
-                         (when request-schema
-                           ["body" [:json-schema {:schema request-schema}]])]
-                        :any)]
-    [:map {:closed true}
-     ["operation" [:= operation-id]]
-     ["params" {:optional true} (if (= params-schema :any) :any params-schema)]]))
+        path-props (into {} (for [p path-params] [p {"type" "string"}]))
+        query-props (into {} (for [q query-params] [q {"type" "string"}]))
+        body-prop (when request-schema {"body" request-schema})
+        all-props (merge path-props query-props body-prop)
+        params-schema (if (seq all-props)
+                        {"type" "object"
+                         "required" (vec path-params)
+                         "properties" all-props}
+                        {})]
+    {"type" "object"
+     "additionalProperties" false
+     "required" ["operation"]
+     "properties" {"operation" {"const" operation-id}
+                   "params" params-schema}}))
 
 (defn tools->request-schema
-  "Build Malli schema for OpenAPI request (multiple tool calls).
+  "Build JSON Schema for OpenAPI request (multiple tool calls).
    Returns schema for {\"calls\": [{\"operation\": \"...\", \"params\": {...}}, ...]}"
   [tools]
   (let [call-schemas (mapv tool->call-schema tools)]
-    [:map {:closed true}
-     ["calls" [:vector (if (seq call-schemas)
-                         (into [:or] call-schemas)
-                         :any)]]]))
+    {"type" "object"
+     "additionalProperties" false
+     "required" ["calls"]
+     "properties" {"calls" {"type" "array"
+                            "items" (if (seq call-schemas)
+                                      {"oneOf" call-schemas}
+                                      {})}}}))
 
 (defn tools->response-schema
-  "Build Malli schema for OpenAPI response.
+  "Build JSON Schema for OpenAPI response.
    Results contain HTTP status and body (raw JSON, no schema translation)."
   [_tools]
-  ;; Response bodies vary by operation - use :any for body
-  [:map {:closed true}
-   ["results" [:vector
-               [:or
-                [:map
-                 ["status" :int]
-                 ["body" :any]]
-                [:map
-                 ["error" :string]]]]]])
+  {"type" "object"
+   "additionalProperties" false
+   "required" ["results"]
+   "properties" {"results" {"type" "array"
+                            "items" {"oneOf"
+                                     [{"type" "object"
+                                       "required" ["status"]
+                                       "properties" {"status" {"type" "integer"}
+                                                     "body" {}}}
+                                      {"type" "object"
+                                       "required" ["error"]
+                                       "properties" {"error" {"type" "string"}}}]}}}})
 
 (defn openapi-request-schema-fn
   "Schema function for OpenAPI requests.

@@ -167,42 +167,38 @@
                                                                        "inputSchema" {"type" "object"}}]}}}}}}
           xition {"id" ["mc" "mc-mcp"]}
           schema (hat-mcp-request-schema-fn context xition)]
-      (is (vector? schema))
-      (is (= :map (first schema)))
-      ;; Find calls field spec
-      (let [fields (filter vector? (rest schema))
-            calls-spec (some (fn [[k v]] (when (= k "calls") v)) fields)]
-        (is (some? calls-spec))
-        ;; Should be map-of with server enum as key
-        (is (= :map-of (first calls-spec))))))
+      (is (map? schema))
+      (is (= "object" (get schema "type")))
+      ;; Should have calls in properties
+      (is (contains? (get schema "properties") "calls"))
+      ;; Calls should allow additional properties (map-of pattern)
+      (let [calls-schema (get-in schema ["properties" "calls"])]
+        (is (= "object" (get calls-schema "type"))))))
 
   (testing "generates request schema with multiple server enum"
     (let [context {:hats {:mcp {:servers {"github" {:cache {"tools" [{"name" "list_issues"}]}}
                                           "tools" {:cache {"tools" [{"name" "bash"}]}}}}}}
           xition {"id" ["mc" "mc-mcp"]}
           schema (hat-mcp-request-schema-fn context xition)]
-      (is (vector? schema))
-      ;; Calls field should have server enum with both servers
-      (let [fields (filter vector? (rest schema))
-            calls-spec (some (fn [[k v]] (when (= k "calls") v)) fields)
-            ;; calls-spec is [:map-of server-enum batch-schema]
-            server-enum (second calls-spec)]
-        (is (= :enum (first server-enum)))
-        (is (= #{"github" "tools"} (set (rest server-enum))))))))
+      (is (map? schema))
+      ;; Calls field should have propertyNames with server enum
+      (let [calls-schema (get-in schema ["properties" "calls"])
+            property-names (get calls-schema "propertyNames")]
+        (is (some? property-names))
+        (is (= #{"github" "tools"} (set (get property-names "enum"))))))))
 
 (deftest hat-mcp-response-schema-fn-test
   (testing "generates response schema with results field"
     (let [context {:hats {:mcp {:servers {"default" {:cache {"tools" [{"name" "test_tool"}]}}}}}}
           xition {"id" ["mc-mcp" "mc"]}
           schema (hat-mcp-response-schema-fn context xition)]
-      (is (vector? schema))
-      (is (= :map (first schema)))
-      ;; Find results field spec
-      (let [fields (filter vector? (rest schema))
-            results-spec (some (fn [[k v]] (when (= k "results") v)) fields)]
-        (is (some? results-spec))
-        ;; Should be map-of string to batch response
-        (is (= :map-of (first results-spec)))))))
+      (is (map? schema))
+      (is (= "object" (get schema "type")))
+      ;; Should have results in properties
+      (is (contains? (get schema "properties") "results"))
+      ;; Results should be object type (map-of pattern)
+      (let [results-schema (get-in schema ["properties" "results"])]
+        (is (= "object" (get results-schema "type")))))))
 
 ;;------------------------------------------------------------------------------
 ;; mcp-service-action Tests
