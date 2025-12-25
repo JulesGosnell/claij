@@ -31,7 +31,7 @@
    - google / gemini-2.0-flash
    - openrouter / openai/gpt-4o
    - xai / grok-3-beta
-   - ollama:local / mistral:7b, qwen2.5-coder:7b"
+   - ollama:local / mistral:7b, qwen2.5-coder:14b"
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
@@ -234,7 +234,7 @@ Respond ONLY with a JSON object containing your tool calls. No prose. Example fo
                               (validate-tool-calls response)))))
 
 (deftest ^:integration test-ollama-qwen-tool-calling
-  (testing "Ollama qwen2.5-coder:7b emits valid tool calls from MCP schema"
+  (testing "Ollama qwen2.5-coder:14b emits valid tool calls from MCP schema"
     (when-service-available ollama-available? "Ollama/qwen" (str "OLLAMA (" ollama-host ":" ollama-port ")")
-                            (let [response (call-llm-sync "ollama:local" "qwen2.5-coder:7b")]
+                            (let [response (call-llm-sync "ollama:local" "qwen2.5-coder:14b")]
                               (validate-tool-calls response)))))
