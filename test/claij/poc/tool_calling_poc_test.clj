@@ -3,8 +3,8 @@
    
    PURPOSE: Validates that LLMs understand CLAIJ's core pattern:
    - Parse JSON Schema tool definitions from prompt text
-   - Emit properly structured EDN tool_calls
-   - Produce output that validates against Malli schema
+   - Emit properly structured JSON tool_calls
+   - Produce output that validates against JSON Schema
    
    This demonstrates LLMs have 'muscle memory' for tool calling -
    no native tool API needed, just schema in prompt. This is the
@@ -34,31 +34,36 @@
    - ollama:local / mistral:7b, qwen2.5-coder:7b"
   (:require
    [clojure.test :refer [deftest testing is]]
-   [malli.core :as m]
+   [clojure.string :as str]
+   [claij.schema :as schema]
    [claij.llm :as llm]))
 
 ;;------------------------------------------------------------------------------
-;; Malli Schema for Tool Calls
+;; JSON Schema for Tool Calls
 ;;------------------------------------------------------------------------------
 
 (def CalculatorArguments
   "Schema for calculator tool arguments"
-  [:map
-   [:op [:enum "add" "multiply"]]
-   [:a [:or :int :double]]
-   [:b [:or :int :double]]])
+  {"type" "object"
+   "required" ["op" "a" "b"]
+   "properties" {"op" {"enum" ["add" "multiply"]}
+                 "a" {"type" "number"}
+                 "b" {"type" "number"}}})
 
 (def ToolCall
   "Schema for a single tool call"
-  [:map
-   [:id :string]
-   [:name :string]
-   [:arguments CalculatorArguments]])
+  {"type" "object"
+   "required" ["id" "name" "arguments"]
+   "properties" {"id" {"type" "string"}
+                 "name" {"type" "string"}
+                 "arguments" CalculatorArguments}})
 
 (def ToolCallResponse
   "Schema for LLM response containing tool calls"
-  [:map
-   [:tool_calls [:vector ToolCall]]])
+  {"type" "object"
+   "required" ["tool_calls"]
+   "properties" {"tool_calls" {"type" "array"
+                               "items" ToolCall}}})
 
 ;;------------------------------------------------------------------------------
 ;; Service Availability Checks
@@ -67,7 +72,7 @@
 (defn env-key-set?
   "Check if an environment variable is set and non-empty"
   [key]
-  (not (clojure.string/blank? (System/getenv key))))
+  (not (str/blank? (System/getenv key))))
 
 (defn google-available? [] (env-key-set? "GOOGLE_API_KEY"))
 (defn anthropic-available? [] (env-key-set? "ANTHROPIC_API_KEY"))
@@ -109,8 +114,8 @@ Using this MCP tool, compute:
 2. 6 * 7
 3. 100 + 23
 
-Respond ONLY with an EDN data structure containing your tool calls. No prose. Example format:
-{:tool_calls [{:id \"call_1\" :name \"calculator\" :arguments {:op \"add\" :a 1 :b 2}}]}")
+Respond ONLY with a JSON object containing your tool calls. No prose. Example format:
+{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"calculator\", \"arguments\": {\"op\": \"add\", \"a\": 1, \"b\": 2}}]}")
 
 ;;------------------------------------------------------------------------------
 ;; Helpers
@@ -133,13 +138,13 @@ Respond ONLY with an EDN data structure containing your tool calls. No prose. Ex
   "Validate response structure and semantic correctness"
   [response]
   ;; Structure validation
-  (is (m/validate ToolCallResponse response)
-      (str "Response should match ToolCallResponse schema: "
-           (m/explain ToolCallResponse response)))
+  (let [result (schema/validate ToolCallResponse response)]
+    (is (:valid? result)
+        (str "Response should match ToolCallResponse schema: " (pr-str (:errors result)))))
 
   ;; Semantic validation - correct operations requested
-  (let [calls (:tool_calls response)
-        ops (set (map #(get-in % [:arguments :op]) calls))]
+  (let [calls (get response "tool_calls")
+        ops (set (map #(get-in % ["arguments" "op"]) calls))]
     (is (= 3 (count calls)) "Should have exactly 3 tool calls")
     (is (contains? ops "add") "Should include add operation")
     (is (contains? ops "multiply") "Should include multiply operation")))
@@ -183,19 +188,19 @@ Respond ONLY with an EDN data structure containing your tool calls. No prose. Ex
            openai (call-llm-sync "openrouter" "openai/gpt-4o")
            grok (call-llm-sync "xai" "grok-3-beta")]
 
-        ;; All should have same structure
-       (is (= (count (:tool_calls claude))
-              (count (:tool_calls gemini))
-              (count (:tool_calls openai))
-              (count (:tool_calls grok)))
+       ;; All should have same structure
+       (is (= (count (get claude "tool_calls"))
+              (count (get gemini "tool_calls"))
+              (count (get openai "tool_calls"))
+              (count (get grok "tool_calls")))
            "All providers should return same number of tool calls")
 
-        ;; All should use same tool
-       (is (every? #(= "calculator" (:name %))
-                   (concat (:tool_calls claude)
-                           (:tool_calls gemini)
-                           (:tool_calls openai)
-                           (:tool_calls grok)))
+       ;; All should use same tool
+       (is (every? #(= "calculator" (get % "name"))
+                   (concat (get claude "tool_calls")
+                           (get gemini "tool_calls")
+                           (get openai "tool_calls")
+                           (get grok "tool_calls")))
            "All tool calls should reference 'calculator' tool")))))
 
 ;;------------------------------------------------------------------------------

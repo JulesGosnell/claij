@@ -18,7 +18,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
-   [malli.core :as m]
+   [claij.schema :as schema]
    [claij.llm :as llm]))
 
 ;;------------------------------------------------------------------------------
@@ -43,38 +43,33 @@
        (is true "Skipped - API key not configured"))))
 
 ;;------------------------------------------------------------------------------
-;; Tuple-3 System Prompt (extracted from fsm.clj for reuse)
+;; Tuple-3 System Prompt (JSON Schema version)
 ;;------------------------------------------------------------------------------
 
 (def tuple3-system-prompt
   "We are living in a Clojure world.
-All communications will be in EDN (Extensible Data Notation) format.
+All communications will be in JSON format.
 
 YOUR REQUEST:
 - will contain [INPUT-SCHEMA INPUT-DOCUMENT OUTPUT-SCHEMA] triples.
-- INPUT-SCHEMA: Malli schema describing the INPUT-DOCUMENT
+- INPUT-SCHEMA: JSON Schema describing the INPUT-DOCUMENT
 - INPUT-DOCUMENT: The actual data to process
-- OUTPUT-SCHEMA: Malli schema your response MUST conform to
+- OUTPUT-SCHEMA: JSON Schema your response MUST conform to
 
 YOUR RESPONSE - the OUTPUT-DOCUMENT:
-- Must be ONLY valid EDN (no markdown, no backticks, no explanation)
-- The OUTPUT-SCHEMA will offer you a set (possibly only one) of choices/sub-schemas
+- Must be ONLY valid JSON (no markdown, no backticks, no explanation)
+- Must use string keys like \"id\" not keyword keys like :id
+- The OUTPUT-SCHEMA will offer you a set (possibly only one) of choices via \"oneOf\"
 - Your OUTPUT-DOCUMENT must conform strictly to one of these - it is a document NOT a schema itself
 - Each sub-schema will contain a discriminator called \"id\". You must include this
-- You must include all non-optional fields with a valid value
-
-STRING KEYS ONLY - KEYWORD KEYS ARE FORBIDDEN:
-- Every map key MUST be a quoted string (begins with \")
-- No key may start with a colon character
-- CORRECT: {\"id\" \"tool_calls\" \"calls\" [...]}
-- WRONG:   {:id \"tool_calls\" :calls [...]}
+- You must include all required fields with a valid value
 
 SELF-CHECK BEFORE RESPONDING:
 - All map keys are strings (every key begins with a quote character)
 - Zero keyword keys (no key starts with a colon)
 - Output matches OUTPUT-SCHEMA and includes \"id\"
 
-CRITICAL: Your entire response must be ONLY the EDN data structure.")
+CRITICAL: Your entire response must be ONLY the JSON data structure.")
 
 ;;------------------------------------------------------------------------------
 ;; MCP Tool Definition (JSON Schema format, as MCP provides)
@@ -91,53 +86,64 @@ CRITICAL: Your entire response must be ONLY the EDN data structure.")
                   "required" ["op" "a" "b"]}})
 
 ;;------------------------------------------------------------------------------
-;; Malli Schemas for Tuple-3 Protocol
+;; JSON Schemas for Tuple-3 Protocol
 ;;------------------------------------------------------------------------------
 
 (def CalculatorArgs
-  [:map
-   ["op" [:enum "add" "multiply"]]
-   ["a" [:or :int :double]]
-   ["b" [:or :int :double]]])
+  {"type" "object"
+   "required" ["op" "a" "b"]
+   "properties" {"op" {"enum" ["add" "multiply"]}
+                 "a" {"type" "number"}
+                 "b" {"type" "number"}}})
 
 (def ToolCall
-  [:map
-   ["id" :string]
-   ["name" [:= "calculator"]]
-   ["arguments" CalculatorArgs]])
+  {"type" "object"
+   "required" ["id" "name" "arguments"]
+   "properties" {"id" {"type" "string"}
+                 "name" {"const" "calculator"}
+                 "arguments" CalculatorArgs}})
 
 (def ToolCallsResponse
-  [:map
-   ["id" [:= "tool_calls"]]
-   ["calls" [:vector {:min 1} ToolCall]]])
+  {"type" "object"
+   "required" ["id" "calls"]
+   "properties" {"id" {"const" "tool_calls"}
+                 "calls" {"type" "array"
+                          "minItems" 1
+                          "items" ToolCall}}})
 
 (def ToolResult
-  [:map
-   ["call_id" :string]
-   ["result" [:or :int :double]]])
+  {"type" "object"
+   "required" ["call_id" "result"]
+   "properties" {"call_id" {"type" "string"}
+                 "result" {"type" "number"}}})
 
 (def FinalAnswer
-  [:map
-   ["id" [:= "answer"]]
-   ["value" [:or :int :double]]
-   ["explanation" {:optional true} :string]])
+  {"type" "object"
+   "required" ["id" "value"]
+   "properties" {"id" {"const" "answer"}
+                 "value" {"type" "number"}
+                 "explanation" {"type" "string"}}})
 
 (def OutputSchema
-  [:or ToolCallsResponse FinalAnswer])
+  {"oneOf" [ToolCallsResponse FinalAnswer]})
 
 ;;------------------------------------------------------------------------------
 ;; Input Schemas
 ;;------------------------------------------------------------------------------
 
 (def TaskInput
-  [:map
-   ["task" :string]
-   ["available_tools" [:vector :map]]])
+  {"type" "object"
+   "required" ["task" "available_tools"]
+   "properties" {"task" {"type" "string"}
+                 "available_tools" {"type" "array"
+                                    "items" {"type" "object"}}}})
 
 (def ToolResultsInput
-  [:map
-   ["task" :string]
-   ["tool_results" [:vector ToolResult]]])
+  {"type" "object"
+   "required" ["task" "tool_results"]
+   "properties" {"task" {"type" "string"}
+                 "tool_results" {"type" "array"
+                                 "items" ToolResult}}})
 
 ;;------------------------------------------------------------------------------
 ;; Helper Functions
@@ -178,6 +184,11 @@ CRITICAL: Your entire response must be ONLY the EDN data structure.")
                  "multiply" (* a b))]
     {"call_id" id "result" result}))
 
+(defn valid?
+  "Validate response against schema, return true if valid"
+  [schema response]
+  (:valid? (schema/validate schema response)))
+
 ;;------------------------------------------------------------------------------
 ;; Integration Tests
 ;;------------------------------------------------------------------------------
@@ -197,7 +208,7 @@ CRITICAL: Your entire response must be ONLY the EDN data structure.")
                                             input-doc
                                             OutputSchema)
                                   response (call-llm-sync "anthropic" "claude-sonnet-4-20250514" messages)]
-                              (is (m/validate OutputSchema response)
+                              (is (valid? OutputSchema response)
                                   (str "Response should match OutputSchema: " (pr-str response)))
                               (is (= "tool_calls" (get response "id"))
                                   "First response should be tool_calls")
@@ -219,7 +230,7 @@ CRITICAL: Your entire response must be ONLY the EDN data structure.")
                                             input-doc
                                             OutputSchema)
                                   response (call-llm-sync "google" "gemini-2.0-flash" messages)]
-                              (is (m/validate OutputSchema response)
+                              (is (valid? OutputSchema response)
                                   (str "Response should match OutputSchema: " (pr-str response)))
                               (is (= "tool_calls" (get response "id"))
                                   "First response should be tool_calls")
@@ -241,7 +252,7 @@ CRITICAL: Your entire response must be ONLY the EDN data structure.")
                                             input-doc
                                             OutputSchema)
                                   response (call-llm-sync "openrouter" "openai/gpt-4o" messages)]
-                              (is (m/validate OutputSchema response)
+                              (is (valid? OutputSchema response)
                                   (str "Response should match OutputSchema: " (pr-str response)))
                               (is (= "tool_calls" (get response "id"))
                                   "First response should be tool_calls")
@@ -263,7 +274,7 @@ CRITICAL: Your entire response must be ONLY the EDN data structure.")
                                             input-doc
                                             OutputSchema)
                                   response (call-llm-sync "xai" "grok-3-beta" messages)]
-                              (is (m/validate OutputSchema response)
+                              (is (valid? OutputSchema response)
                                   (str "Response should match OutputSchema: " (pr-str response)))
                               (is (= "tool_calls" (get response "id"))
                                   "First response should be tool_calls")
@@ -304,7 +315,7 @@ CRITICAL: Your entire response must be ONLY the EDN data structure.")
                                               input-doc-2
                                               OutputSchema)
                                   response-2 (call-llm-sync "anthropic" "claude-sonnet-4-20250514" messages-2)]
-                              (is (m/validate OutputSchema response-2)
+                              (is (valid? OutputSchema response-2)
                                   (str "Response 2 should match OutputSchema: " (pr-str response-2)))
                               (is (= "answer" (get response-2 "id"))
                                   "Turn 2 should be final answer")
