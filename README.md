@@ -42,7 +42,8 @@
 | 2025-12-19 | **🛁 Bath Driven Development** | Voice UI working on iPhone! Record voice → STT → LLM → TTS → playback, all from Safari on iOS. HTTPS with self-signed certs, WebAudio fixes for iOS. Talk to Claude from the bathtub. |
 | 2025-12-18 | **OpenAPI Hat & Actions** | Direct OpenAPI endpoint invocation with binary support (audio/wav, multipart). Enables declarative voice pipelines—TTS and STT as simple FSM actions. |
 | 2025-12-17 | **Hat System** | Modular capability injection for FSM states. Hats wrap actions with cross-cutting concerns (MCP tools, OpenAPI specs, REPL access) without touching FSM structure. |
-| 2025-12-06 | **Malli Migration** | Replaced JSON Schema with Malli for native Clojure schemas—more token-efficient, better error messages, and enabling the reflexive m1→m2→m3→m3 hierarchy that grounds the architecture. |
+| 2025-12-27 | **JSON Schema Migration** | Migrated back from Malli to JSON Schema for validation. Smaller LLMs understand JSON Schema better (more training data), and it's native to MCP/OpenAPI integrations. Uses m3 library with draft-2020-12 for proper nested `$ref` resolution. |
+| 2025-12-06 | **Malli Migration** | *(Superseded)* Briefly used Malli for Clojure-native schemas. Reverted due to LLM compatibility issues. |
 | 2025-11-14 | **MCP Integration** | Model Context Protocol support lets LLMs call external tools (GitHub, filesystem, databases) through a standardized interface. Multi-server batching for efficiency. |
 
 *Next up: FSM-FSM—an FSM that generates FSMs from workflow descriptions.*
@@ -151,12 +152,12 @@ In CLAIJ, guardrails are structural rather than bolted-on:
 
 | Industry Concept | CLAIJ Implementation |
 |-----------------|---------------------|
-| Output filtering | **Malli schemas** constrain LLM responses to valid structure |
+| Output filtering | **JSON Schemas** constrain LLM responses to valid structure |
 | Conversation boundaries | **FSM transitions** enforce valid conversation flows |
 | Self-correction | **Validation with retry** gives LLMs feedback to fix their own errors |
 | Role constraints | **State-specific prompts** focus each LLM on a single concern |
 
-The philosophy: rather than filtering bad outputs, make bad outputs *structurally impossible*. An LLM that must produce valid EDN matching a schema has far less room to hallucinate.
+The philosophy: rather than filtering bad outputs, make bad outputs *structurally impossible*. An LLM that must produce valid JSON matching a schema has far less room to hallucinate.
 
 ### Evals
 

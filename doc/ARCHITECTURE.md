@@ -19,7 +19,7 @@ Instead of manually bolting things together in LangChain or LangGraph, you give 
 3. [Core Architectural Principles](#core-architectural-principles)
 4. [Finite State Machines](#finite-state-machines)
 5. [Schema-Guided Conversations](#schema-guided-conversations)
-6. [Malli Schemas](#malli-schemas)
+6. [JSON Schemas](#json-schemas)
 7. [Actions](#actions)
 8. [MCP Integration](#mcp-integration)
 9. [Foldable Trail Architecture](#foldable-trail-architecture)
@@ -79,7 +79,7 @@ This is not optional. A self-improving system *must* be a reflexively self-descr
 
 ### Foundational Structured Messaging
 
-All interactions in the LLM society rely on structured EDN messages—both requests and responses—treated symmetrically as proposals. Each message is validated against Malli schemas tied to FSM transitions, ensuring no invalid or hallucinated data slips through, with `:closed` maps to lock down structures and prevent extra fields.
+All interactions in the LLM society rely on structured JSON messages—both requests and responses—treated symmetrically as proposals. Each message is validated against JSON Schemas tied to FSM transitions, ensuring no invalid or hallucinated data slips through.
 
 ### Finite State Machine as Control Flow
 
@@ -95,7 +95,7 @@ Memory is bound to the active path: log all prompts, requests, and responses raw
 
 ### Emergent DSL for Efficiency
 
-As the society runs on structured messages and accumulates memory/logs, agents dynamically evolve a domain-specific language (DSL) as a compression layer atop EDN. This shorthand is negotiated via toolsmith or retros, inserted into prompts for efficiency, without replacing core Malli validation.
+As the society runs on structured messages and accumulates memory/logs, agents dynamically evolve a domain-specific language (DSL) as a compression layer. This shorthand is negotiated via toolsmith or retros, inserted into prompts for efficiency, without replacing core JSON Schema validation.
 
 ### Dynamism
 
@@ -105,7 +105,7 @@ All features—including roles, states, transitions, FSM, tools, schemas, DSLs, 
 
 ## Finite State Machines
 
-The CLAIJ FSM system enables **schema-guided multi-agent LLM workflows** where LLMs dynamically assume different roles and cooperate on clearly defined tasks. Each state transition is governed by Malli Schema, creating a self-describing, evolvable system where **FSMs can create, modify, and orchestrate other FSMs**.
+The CLAIJ FSM system enables **schema-guided multi-agent LLM workflows** where LLMs dynamically assume different roles and cooperate on clearly defined tasks. Each state transition is governed by JSON Schema, creating a self-describing, evolvable system where **FSMs can create, modify, and orchestrate other FSMs**.
 
 ### FSM Definition Structure
 
@@ -113,7 +113,7 @@ An FSM is defined by:
 
 - **States**: Nodes representing different roles/responsibilities (Chairman, reviewer, BA, end, etc.)
 - **Transitions** (xitions): Edges between states, each backed by a `core.async` channel
-- **Schemas**: Malli definitions constraining valid transitions
+- **Schemas**: JSON Schema definitions constraining valid transitions
 - **Actions**: Functions executed when entering a state (LLM calls, MCP services, human endpoints)
 
 Each state's `go-loop` monitors all incoming transition channels using `alts!`, routing events to the appropriate handler based on the transition schema.
@@ -169,30 +169,43 @@ This enforces **token compression**: The FSM schema (with all definitions) is pr
 
 ---
 
-## Malli Schemas
+## JSON Schemas
 
-All validation uses [Malli](https://github.com/metosin/malli) schemas—Clojure data describing Clojure data.
+All validation uses JSON Schema via the [m3](https://github.com/julesgosnell/m3) library (draft-2020-12).
+
+**Why JSON Schema?**
+- **LLM compatibility** - LLMs have extensive training on JSON Schema; smaller/local models struggle with alternative formats
+- **Integration native** - MCP tools and OpenAPI endpoints define schemas in JSON Schema
+- **Composition layer** - CLAIJ connects external integrations using their native schema format
 
 ### Schema Registry Pattern
 
-```clojure
-;; FSM definitions include schemas
-{"id" "my-fsm"
- "schemas" {:event/foo [:map ["x" :int]]
-            :event/bar [:map ["y" :string]]}
- "xitions" [{"schema" [:ref :event/foo]}   ;; Compact ref
-            {"schema" [:ref :event/bar]}]}
+```json
+// FSM definitions include schemas in $defs
+{
+  "id": "my-fsm",
+  "schemas": {
+    "$defs": {
+      "foo": {"type": "object", "properties": {"x": {"type": "integer"}}},
+      "bar": {"type": "object", "properties": {"y": {"type": "string"}}}
+    }
+  },
+  "xitions": [
+    {"schema": {"$ref": "#/$defs/foo"}},
+    {"schema": {"$ref": "#/$defs/bar"}}
+  ]
+}
+```
 
-;; At runtime, build composite registry
-(mr/composite-registry 
-  base-registry           ;; :string, :int, :any, etc.
-  (get fsm "schemas"))    ;; FSM-specific types
+```clojure
+;; At runtime, xition schemas inherit FSM's $defs
+(schema/validate xition-schema fsm-defs value)
 ```
 
 ### Schema Types in Transitions
 
-1. **Inline Malli** - Full schema (avoid for large schemas)
-2. **Ref** - `[:ref :type-key]` resolved against FSM registry (preferred)
+1. **Inline JSON Schema** - Full schema (avoid for large schemas)
+2. **$ref** - `{"$ref": "#/$defs/type-key"}` resolved against FSM's `$defs` (preferred)
 3. **String** - Dynamic lookup in `context[:id->schema]`
 
 ---
@@ -719,7 +732,7 @@ The FSM system is **experimental prototype code**:
 - Multi-turn LLM coordination: ✅ Working
 - Schema constraints and validation: ✅ Working
 - Token-optimized schema references: ✅ Working
-- Malli migration: ✅ Complete
+- JSON Schema migration: ✅ Complete (draft-2020-12 via m3)
 - Sub-FSM composition: ✅ Implemented (fsm-action)
 - Channel lifecycle management: ❌ Not implemented
 - FSM interruptibility: ❌ Not implemented
@@ -735,7 +748,7 @@ The FSM system is **experimental prototype code**:
 
 1. ✅ Re-enable validation
 2. ✅ Schema constraints tightening
-3. ✅ Malli migration
+3. ✅ JSON Schema migration (draft-2020-12)
 4. Channel lifecycle management (cleanup on FSM completion)
 5. FSM interruptibility (suspend/resume)
 6. Better error handling
@@ -798,5 +811,5 @@ The FSM system is **experimental prototype code**:
 - [FSM-COMPOSITION.md](FSM-COMPOSITION.md) - Composition patterns, prompt synthesis, persistence
 - [CODING_GUIDELINES.md](CODING_GUIDELINES.md) - Development standards
 - [DEPLOYMENT.md](DEPLOYMENT.md) - Fly.io deployment
-- [Malli](https://github.com/metosin/malli) - Schema library
+- [m3](https://github.com/julesgosnell/m3) - JSON Schema validation library
 - [MCP Spec](https://spec.modelcontextprotocol.io/) - Model Context Protocol
