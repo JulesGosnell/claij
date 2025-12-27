@@ -17,6 +17,82 @@ This skill defines the standard workflow for developing CLAIJ features using Git
 
 ---
 
+## CRITICAL: Real-Time Progress Updates
+
+**This rule is non-negotiable and takes priority over efficiency.**
+
+When working on any story with incremental results (testing, migration, data collection, etc.):
+
+### The Rule
+
+**Update the GitHub issue IMMEDIATELY after EACH significant result.**
+
+Do NOT:
+- Batch updates for later
+- Wait until "a few more" results are in
+- Rely on memory or context to preserve progress
+- Promise to update "when done"
+
+### Why This Matters
+
+1. **Session fragility**: Claude sessions can crash, timeout, or hit token limits at any moment
+2. **Context loss**: Without immediate updates, ALL progress is lost on session death
+3. **Human visibility**: Jules cannot see progress happening unless it's in the issue
+4. **Audit trail**: The issue IS the source of truth, not Claude's memory
+
+### Implementation Pattern
+
+```
+FOR EACH test/task/item:
+  1. Execute the test/task
+  2. IMMEDIATELY call update_issue with result
+  3. THEN proceed to next item
+
+NOT:
+  1. Execute all tests
+  2. Update issue with all results  // TOO LATE - session may die
+```
+
+### Example: Testing Multiple Models
+
+```clojure
+;; WRONG - batching results
+(let [results (for [model models] (test-model model))]
+  (update-issue-with-all-results results))  ;; Session dies here = all lost
+
+;; RIGHT - immediate updates
+(doseq [model models]
+  (let [result (test-model model)]
+    (update-issue-with-result model result)  ;; Preserved even if next test crashes
+    ))
+```
+
+### Tracking Table Pattern
+
+For multi-item testing/verification, ALWAYS:
+
+1. Create a tracking table in the issue BEFORE starting
+2. Update the table row IMMEDIATELY after each item completes
+3. Include: status emoji, result, timing, notes
+
+Example table format:
+```markdown
+| Item | Status | Result | Time | Notes |
+|------|--------|--------|------|-------|
+| item-1 | ✅ | PASS | 4.2s | Clean |
+| item-2 | ❌ | FAIL | 10s | Schema validation |
+| item-3 | ⏳ | - | - | Testing... |
+```
+
+### Git Conventions Reminder
+
+When updating issues frequently:
+- Use `claij-github:update_issue` tool
+- Preserve existing content, only modify the results table
+- If the update is a significant milestone, also commit local code
+
+---
+
 ## Work Hierarchy
 
 Stories are decomposed into a two-level hierarchy:
