@@ -193,7 +193,7 @@ Only after tests pass:
 Split mcp.clj (293 lines) into:
 - mcp/protocol.clj: JSON-RPC message construction
 - mcp/cache.clj: Cache management
-- mcp/schema.clj: Malli schema generation
+- mcp/schema.clj: JSON Schema generation
 
 Deleted dead code, updated imports.
 ```

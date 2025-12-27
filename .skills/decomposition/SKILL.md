@@ -74,7 +74,7 @@ Update after each meaningful step. If interrupted, can resume from scratch pad s
 ### 5. Granularity Adjustment
 **If stalling, increase granularity.**
 
-Too coarse: "Update all FSM files to use Malli"
+Too coarse: "Update all FSM files to use new schema format"
 Better: 
 1. Update fsm.clj ns requires
 2. Remove old fsm-m2 definition  
