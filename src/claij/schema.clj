@@ -6,7 +6,7 @@
    - $ref resolution for schema composition
    - def-fsm macro for FSM definition with validation
    
-   Uses JSON Schema draft-07 for validation."
+   Uses JSON Schema draft-2020-12 for validation (required for nested $ref resolution)."
   (:require
    [clojure.tools.logging :as log]
    [m3.validate :as m3]))
@@ -32,7 +32,7 @@
          full-schema (if (seq defs)
                        (assoc schema "$defs" defs)
                        schema)
-         result (m3/validate {:draft :draft7} full-schema {} value)]
+         result (m3/validate {:draft :draft2020-12} full-schema {} value)]
      (if (:valid? result)
        {:valid? true}
        {:valid? false
