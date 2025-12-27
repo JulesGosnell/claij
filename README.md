@@ -38,12 +38,11 @@
 
 | Date | Feature | Description |
 |------|---------|-------------|
+| 2025-12-27 | **🔌 JSON Schema** | Back to JSON Schema for low-friction integration. MCP tools and OpenAPI endpoints already speak JSON Schema—why translate? LLMs have better "muscle memory" for it too. Uses m3 library with draft-2020-12 for nested `$ref` resolution. Simplicity wins. |
 | 2025-12-20 | **🦙 Ollama Integration** | Local LLM inference via Ollama is now a first-class citizen. Zero API costs, data stays on your network, no rate limits. Uses OpenAI-compatible protocol—just configure `{"service" "ollama:local" "model" "mistral:7b"}`. Supports multiple Ollama instances via named services. |
 | 2025-12-19 | **🛁 Bath Driven Development** | Voice UI working on iPhone! Record voice → STT → LLM → TTS → playback, all from Safari on iOS. HTTPS with self-signed certs, WebAudio fixes for iOS. Talk to Claude from the bathtub. |
 | 2025-12-18 | **OpenAPI Hat & Actions** | Direct OpenAPI endpoint invocation with binary support (audio/wav, multipart). Enables declarative voice pipelines—TTS and STT as simple FSM actions. |
 | 2025-12-17 | **Hat System** | Modular capability injection for FSM states. Hats wrap actions with cross-cutting concerns (MCP tools, OpenAPI specs, REPL access) without touching FSM structure. |
-| 2025-12-27 | **JSON Schema Migration** | Migrated back from Malli to JSON Schema for validation. Smaller LLMs understand JSON Schema better (more training data), and it's native to MCP/OpenAPI integrations. Uses m3 library with draft-2020-12 for proper nested `$ref` resolution. |
-| 2025-12-06 | **Malli Migration** | *(Superseded)* Briefly used Malli for Clojure-native schemas. Reverted due to LLM compatibility issues. |
 | 2025-11-14 | **MCP Integration** | Model Context Protocol support lets LLMs call external tools (GitHub, filesystem, databases) through a standardized interface. Multi-server batching for efficiency. |
 
 *Next up: FSM-FSM—an FSM that generates FSMs from workflow descriptions.*
