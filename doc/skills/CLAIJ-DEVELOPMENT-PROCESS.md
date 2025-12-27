@@ -80,13 +80,23 @@ Comprehensive guide for developing CLAIJ features. Covers story-driven workflow,
 
 ### Phase 6: Documentation
 
-1. Update README announcements table with major advances
-2. Update any affected documentation (ARCHITECTURE.md, API docs, etc.)
-3. Update story with final commits
-4. Close story: remove `status:doing`, add `status:done`
-5. Comment closing any unchecked items in story comments
+1. **Review affected docs** - Check for stale references (grep for old patterns)
+2. **Update README** announcements table with major advances
+3. **Update ARCHITECTURE.md** if system design changed
+4. **Update skill docs** if workflows/conventions changed
+5. **Rationalise** - Remove obsolete content, consolidate duplicates
+6. Update story with final commits
+7. Close story: remove `status:doing`, add `status:done`
+8. Comment closing any unchecked items in story comments
 
 **Commit:** `#<issue> docs: <description>`
+
+**Doc Update Checklist:**
+- [ ] Grepped codebase for stale terminology
+- [ ] README announcements current
+- [ ] ARCHITECTURE.md reflects changes
+- [ ] Skill docs updated
+- [ ] No conflicting information across docs
 
 ### Phase 7: Retrospective
 
@@ -125,9 +135,11 @@ At the end of every story, Claude performs a brief retro:
 
 1. **NEVER git push** - Claude commits locally, Jules reviews and pushes
 2. **NEVER git merge** - Claude works on branches, Jules merges
-3. **Use `git mv`** not `mv` for file moves (preserves history)
-4. **Atomic commits** - one logical change per commit
-5. **Reference issue number** in every commit
+3. **NEVER git add -A or git add .** - Always explicitly list files to avoid committing sensitive/unwanted files
+4. **Use `git mv`** not `mv` for file moves (preserves history)
+5. **Pipe git to cat** - Use `git log | cat` or `--no-pager` to avoid pager hang
+6. **Atomic commits** - one logical change per commit
+7. **Reference issue number** in every commit
 
 ### Incremental Change Strategy
 
@@ -275,9 +287,9 @@ Write test first, then code to pass it. Tests define what "working" means.
 ### Schema Conventions
 
 - String keys in FSM definitions (not keywords)
-- Malli schemas for validation
-- `[:or :int :double]` not `:number` (Malli has no `:number`)
-- `:closed` maps to prevent extra fields
+- JSON Schema for validation via m3 library (draft-2020-12)
+- Use `$defs` with `$ref` for schema reuse
+- Nested `$ref` resolution requires draft-2020-12
 
 ### File Layout
 
@@ -368,9 +380,9 @@ clojure -M:test integration       # Integration tests
 
 ```bash
 git status
-git add -A
+git add <specific-files>                    # NEVER use -A or .
 git commit -m '#<issue> [Phase N]: <description>'
-git log --oneline -10
+git log --oneline -10 | cat                 # Always pipe to cat
 git diff
 ```
 

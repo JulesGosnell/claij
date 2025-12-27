@@ -105,9 +105,15 @@ The system evolves while maintaining its own invariants. Each new version of m3 
 
 ## The Architecture in CLAIJ
 
-### Two Representations
+> **Note (December 2025):** CLAIJ has migrated from Malli to JSON Schema for validation.
+> The philosophical principles below remain valid—JSON Schema also supports reflexive
+> self-description via meta-schemas. The practical choice was driven by LLM compatibility:
+> smaller models have better "muscle memory" for JSON Schema format.
+> See `docs/design/schema-subsumption.md` for current architecture.
 
-Malli's native vector syntax cannot fully describe itself due to technical limitations (seqex cannot be recursive). We solve this with two representations:
+### Two Representations (Historical: Malli)
+
+Malli's native vector syntax cannot fully describe itself due to technical limitations (seqex cannot be recursive). We solved this with two representations:
 
 | Form | Purpose | Example |
 |------|---------|---------|

@@ -26,7 +26,7 @@ Story #53: Batched MCP Tool Execution
 ├── Phase 1: Reorganize (no behavior change)
 │   ├── Task 1.1: Create mcp/protocol.clj
 │   ├── Task 1.2: Create mcp/cache.clj
-│   ├── Task 1.3: Create mcp/schema.clj
+│   ├── Task 1.3: Create mcp/schema.clj (JSON Schema generation)
 │   └── Task 1.4: Delete old files, update imports
 │
 ├── Phase 2: Add ID correlation to bridge
@@ -213,17 +213,47 @@ correlation. Supports out-of-order responses per MCP spec.
 
 ---
 
-### Phase 5: Push and CI
+### Phase 5: Documentation Update
 
 **Actor**: Claude
 
-**Steps**:
-1. Push all commits to remote
-   ```bash
-   git push origin <branch>
-   ```
+**Before requesting push, update all affected documentation:**
 
-2. Monitor CI status
+1. **Grep for stale references** - Check for outdated terminology, patterns, or examples
+2. **Update README.md** - Add announcement if feature is user-visible
+3. **Update ARCHITECTURE.md** - If system design changed
+4. **Update skill docs** - If workflows or conventions changed
+5. **Rationalise** - Remove obsolete content, consolidate duplicates
+
+**Commit:** `#<issue> docs: Update documentation for <feature>`
+
+**Doc Update Checklist:**
+- [ ] Grepped for stale terminology
+- [ ] No conflicting information across docs
+- [ ] Examples reflect current patterns
+- [ ] Skill docs current
+
+---
+
+### Phase 6: Request Push
+
+**Actor**: Claude requests, Jules executes
+
+**Claude NEVER pushes directly.** Jules reviews commits and pushes.
+
+**Steps**:
+1. Summarize changes: commits made, tests passing
+2. Request Jules to push: "Ready for push - N commits on branch X"
+3. Jules pushes and monitors CI
+
+---
+
+### Phase 7: CI Monitoring
+
+**Actor**: Jules (Claude assists with diagnosis)
+
+**Steps**:
+1. Jules monitors CI status
    ```clojure
    ;; Check workflow runs
    (list-workflow-runs {:owner "JulesGosnell" 
@@ -231,13 +261,13 @@ correlation. Supports out-of-order responses per MCP spec.
                         :branch "<branch>"})
    ```
 
-3. If CI fails:
-   - Fetch logs for failed jobs
-   - Diagnose issue
-   - Fix and recommit with: `#<issue> [fix]: <description>`
-   - Re-push
+2. If CI fails:
+   - Claude fetches logs for failed jobs
+   - Claude diagnoses issue
+   - Claude fixes and recommits with: `#<issue> [fix]: <description>`
+   - Return to Phase 6 (Request Push)
 
-4. Wait for CI to pass
+3. Wait for CI to pass
 
 **Outputs**:
 - All commits pushed
@@ -245,7 +275,7 @@ correlation. Supports out-of-order responses per MCP spec.
 
 ---
 
-### Phase 6: DEV Environment Validation
+### Phase 8: DEV Environment Validation
 
 **Actor**: Claude (with human for interactive testing)
 
@@ -275,7 +305,7 @@ correlation. Supports out-of-order responses per MCP spec.
 
 ---
 
-### Phase 7: Story Completion
+### Phase 9: Story Completion
 
 **Actor**: Claude
 
@@ -401,6 +431,10 @@ All phases implemented:
 ## FSM Specification (Meta-FSM Input)
 
 This section is structured for parsing by the meta-FSM to generate `github-dev-fsm`.
+
+> **Note:** Schema examples below use EDN/Malli-like pseudo-syntax for readability.
+> Actual implementation uses JSON Schema. See `docs/design/schema-subsumption.md`
+> for the schema architecture.
 
 ### State Diagram
 
@@ -909,7 +943,7 @@ This skill is one component of a larger autonomous development system:
 
 **Outputs**:
 - Runnable FSM definition (Clojure data structure)
-- Malli schemas for transitions
+- JSON Schemas for transitions
 - Prompt templates for LLM states
 
 **Human Involvement**: Low - mostly automated, human reviews output

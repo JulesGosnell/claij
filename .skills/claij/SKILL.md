@@ -61,30 +61,38 @@ Context accumulates state (caches, counters, etc)
 
 **Problem:** FSM schema appears once, xition schemas appear many times (each traversal).
 
-**Solution:** Define types in FSM-level `"schemas"`, reference via `[:ref :key]` in xitions.
+**Solution:** Define types in FSM-level `"schemas"` with `$defs`, reference via `$ref` in xitions.
+
+```json
+// FSM definition
+{
+  "id": "code-review",
+  "schemas": {
+    "$defs": {
+      "comment": {"type": "object", "properties": {"line": {"type": "integer"}, "text": {"type": "string"}}},
+      "approval": {"type": "object", "properties": {
+        "approved": {"type": "boolean"},
+        "comments": {"type": "array", "items": {"$ref": "#/$defs/comment"}}
+      }}
+    }
+  },
+  "xitions": [{"id": ["reviewing", "done"], "schema": {"$ref": "#/$defs/approval"}}]
+}
+```
 
 ```clojure
-;; FSM definition
-{"id" "code-review"
- "schemas" {:review/comment [:map [:line :int] [:text :string]]
-            :review/approval [:map [:approved :boolean]
-                              [:comments [:vector [:ref :review/comment]]]]}
- "xitions" [{"id" ["reviewing" "done"]
-             "schema" [:ref :review/approval]}]}  ;; Small ref, not full schema
-
-;; At runtime, build composite registry
-(mr/composite-registry (m/default-schemas) (get fsm "schemas"))
-
-;; Validate with registry
-(m/validate xition-schema event {:registry runtime-registry})
+;; At runtime, xition schemas inherit FSM's $defs
+(schema/validate xition-schema fsm-defs event)
 ```
 
 **Xition schema types:**
-1. **Inline Malli** - Full schema (avoid for large schemas)
-2. **Ref** - `[:ref :type-key]` resolved against FSM registry (preferred)
+1. **Inline JSON Schema** - Full schema (avoid for large schemas)
+2. **$ref** - `{"$ref": "#/$defs/type-key"}` resolved against FSM's `$defs` (preferred)
 3. **String** - Lookup in `context[:id->schema]` for dynamic generation
 
-**Token savings:** Refs ~22 chars vs inline ~115+ chars (5x smaller per traversal).
+**Token savings:** Refs ~30 chars vs inline ~150+ chars (5x smaller per traversal).
+
+**Note:** Requires draft-2020-12 for nested $ref resolution (draft-07 loses context).
 
 ## MCP Schema Generation (Issue 6 - In Progress)
 
