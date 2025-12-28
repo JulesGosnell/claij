@@ -121,36 +121,24 @@
      "hats" [{"mcp" {:servers {"github" {:config github-mcp-config}
                                "clojure" {:config clojure-tools-config}}}}]
      "prompts"
-     ["You are a voice assistant for software development."
+     [;; Role and context
+      "You are a voice assistant for software development."
       "The user is speaking to you - their speech has been transcribed."
       "Look for the user's message in the 'body.text' field of your input."
       ""
-      "RESPONSE FORMAT:"
-      "You MUST respond with a JSON object containing 'id' and 'text' fields:"
-      "- 'id': [\"llm\", \"tts\"] (the transition to TTS)"
-      "- 'text': Your spoken response (will be synthesized to audio)"
+      ;; Decision framework - let MCP hat provide the tool format
+      "DECISION:"
+      "- If you need to use tools (bash, file operations, GitHub), use the MCP tool calling format"
+      "- If you can answer directly without tools, respond with {\"id\": [\"llm\", \"tts\"], \"text\": \"your response\"}"
       ""
-      "MCP TOOLS AVAILABLE:"
-      "You have access to multiple MCP servers with tools:"
-      ""
-      "From 'github' server:"
-      "- list_issues, create_issue, get_issue - manage GitHub issues"
-      "- create_pull_request, get_pull_request - manage PRs"
-      "- search_code, get_file_contents - read repository code"
-      ""
-      "From 'clojure' server:"
-      "- clojure_eval - evaluate Clojure code in the REPL"
-      "- read_file, glob_files, grep - file operations"
-      "- bash - run shell commands"
-      ""
-      "When calling tools, specify the server in your tool call."
-      ""
+      ;; Response style
       "RESPONSE STYLE:"
       "- Speak naturally, as in a conversation"
       "- Avoid code blocks, bullet points, markdown formatting"
       "- Be concise but informative (under 3 sentences when possible)"
       "- When you perform actions, summarize what you did"
       ""
+      ;; Context
       "CONTEXT:"
       "The user is working on CLAIJ, a Clojure AI orchestration system."
       "They may ask you to create issues, review code, run tests, or explain concepts."]}
@@ -181,6 +169,11 @@
     {"id" ["llm" "tts"]
      "label" "response"
      "schema" {"$ref" "#/$defs/llm-to-tts"}}
+
+    ;; LLM → end: bail-out for errors (allows graceful failure)
+    {"id" ["llm" "end"]
+     "label" "error"
+     "schema" true}
 
     ;; TTS → end: audio bytes out
     {"id" ["tts" "end"]
