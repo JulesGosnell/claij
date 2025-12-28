@@ -250,17 +250,15 @@
 
 (defn tool-cache->request-schema
   "Generate request schema for a single tool.
-   
-   Note: We intentionally allow any arguments object to avoid strict validation
-   that would block tool calls with minor parameter issues. The MCP server itself
-   will validate parameters and return appropriate errors."
+   The inputSchema IS the documentation - it tells the LLM what parameters are valid."
   [tool-cache]
-  (let [tool-name (get tool-cache "name")]
+  (let [tool-name (get tool-cache "name")
+        input-schema (get tool-cache "inputSchema" {})]
     {"type" "object"
      "additionalProperties" false
      "required" ["name" "arguments"]
      "properties" {"name" {"const" tool-name}
-                   "arguments" {"type" "object"}}}))
+                   "arguments" input-schema}}))
 
 (defn tool-cache->response-schema [_] tool-response-schema)
 
