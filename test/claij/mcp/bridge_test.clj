@@ -253,3 +253,41 @@
         (let [parsed (json/read-str msg)]
           (is (= "chan-test" (get parsed "id")))
           (is (= "test/method" (get parsed "method"))))))))
+
+(deftest drain-notifications-test
+  (testing "drain-notifications collects messages from output channel"
+    (let [bridge (mock-bridge)]
+      ;; Put some messages on the output channel
+      (>!! (:output-chan bridge) {"jsonrpc" "2.0" "method" "notification/1"})
+      (>!! (:output-chan bridge) {"jsonrpc" "2.0" "method" "notification/2"})
+
+      (let [notifications (bridge/drain-notifications bridge)]
+        (is (= 2 (count notifications)))
+        (is (= "notification/1" (get (first notifications) "method")))
+        (is (= "notification/2" (get (second notifications) "method"))))))
+
+  (testing "drain-notifications returns empty vector when no messages"
+    (let [bridge (mock-bridge)]
+      (is (= [] (bridge/drain-notifications bridge))))))
+
+(deftest default-mcp-config-test
+  (testing "default-mcp-config has expected structure"
+    (is (map? bridge/default-mcp-config))
+    (is (= "bash" (get bridge/default-mcp-config "command")))
+    (is (vector? (get bridge/default-mcp-config "args")))
+    (is (= "stdio" (get bridge/default-mcp-config "transport")))))
+
+(deftest send-and-await-test
+  (testing "send-and-await sends requests and returns responses vector"
+    (let [bridge (mock-bridge)
+          requests [{"id" "saa-1" "method" "test/call"}
+                    {"id" "saa-2" "method" "test/call"}]]
+
+      ;; send-and-await returns a vector of responses in same order as requests
+      ;; Since no responses are delivered, all should timeout
+      (let [results (bridge/send-and-await bridge requests 100)]
+        (is (vector? results))
+        (is (= 2 (count results)))
+        ;; Both should timeout since we didn't deliver responses
+        (is (= "timeout" (get-in (first results) ["error" "message"])))
+        (is (= "timeout" (get-in (second results) ["error" "message"])))))))

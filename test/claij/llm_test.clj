@@ -86,3 +86,20 @@
       (let [error-called (deref error-promise 5000 :timeout)]
         (is (not= error-called :timeout) "Error handler should be called within timeout")
         (is (= @attempt-count 3) "Should try initial + 2 retries")))))
+
+(deftest strip-md-json-test
+  (testing "strips markdown code fences"
+    (is (= "{\"key\": \"value\"}"
+           (llm/strip-md-json "```json\n{\"key\": \"value\"}\n```")))
+    (is (= "{\"key\": \"value\"}"
+           (llm/strip-md-json "```\n{\"key\": \"value\"}\n```")))
+    (is (= "(+ 1 2)"
+           (llm/strip-md-json "```clojure\n(+ 1 2)\n```")))
+    (is (= "{:a 1}"
+           (llm/strip-md-json "```edn\n{:a 1}\n```"))))
+
+  (testing "handles content without fences"
+    (is (= "{\"key\": \"value\"}"
+           (llm/strip-md-json "{\"key\": \"value\"}")))
+    (is (= "plain text"
+           (llm/strip-md-json "plain text")))))

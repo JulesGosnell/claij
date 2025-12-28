@@ -88,3 +88,103 @@
           schema (openapi/tools->response-schema tools)]
       (is (map? schema))
       (is (= "object" (get schema "type"))))))
+
+(deftest test-resolve-ref
+  (testing "resolve-ref resolves $ref paths"
+    (let [spec {"components" {"schemas" {"User" {"type" "object"
+                                                 "properties" {"name" {"type" "string"}}}}}}]
+      (is (= {"type" "object" "properties" {"name" {"type" "string"}}}
+             (openapi/resolve-ref spec "#/components/schemas/User")))))
+
+  (testing "resolve-ref returns nil for nil ref"
+    (is (nil? (openapi/resolve-ref {} nil))))
+
+  (testing "resolve-ref returns nil for missing path"
+    (is (nil? (openapi/resolve-ref {} "#/components/schemas/Missing")))))
+
+(deftest test-get-request-schema
+  (testing "get-request-schema extracts request body schema"
+    (let [spec {}
+          operation {"requestBody" {"content" {"application/json"
+                                               {"schema" {"type" "object"}}}}}]
+      (is (= {"type" "object"} (openapi/get-request-schema spec operation)))))
+
+  (testing "get-request-schema returns nil when no request body"
+    (is (nil? (openapi/get-request-schema {} {})))))
+
+(deftest test-get-response-schema
+  (testing "get-response-schema extracts 200 response schema"
+    (let [spec {}
+          operation {"responses" {"200" {"content" {"application/json"
+                                                    {"schema" {"type" "object"}}}}}}]
+      (is (= {"type" "object"} (openapi/get-response-schema spec operation)))))
+
+  (testing "get-response-schema extracts 201 response schema"
+    (let [spec {}
+          operation {"responses" {"201" {"content" {"application/json"
+                                                    {"schema" {"type" "string"}}}}}}]
+      (is (= {"type" "string"} (openapi/get-response-schema spec operation)))))
+
+  (testing "get-response-schema returns nil when no responses"
+    (is (nil? (openapi/get-response-schema {} {})))))
+
+(deftest test-tool->call-schema
+  (testing "tool->call-schema creates valid schema"
+    (let [tool {:operation-id "createItem"
+                :path-params ["id"]
+                :query-params ["filter"]
+                :request-schema {"type" "object"}}
+          schema (openapi/tool->call-schema tool)]
+      (is (= "object" (get schema "type")))
+      (is (= ["operation"] (get schema "required")))
+      (is (= "createItem" (get-in schema ["properties" "operation" "const"])))))
+
+  (testing "tool->call-schema handles empty params"
+    (let [tool {:operation-id "listItems"
+                :path-params []
+                :query-params []}
+          schema (openapi/tool->call-schema tool)]
+      (is (= "listItems" (get-in schema ["properties" "operation" "const"]))))))
+
+(deftest test-format-tool-for-prompt
+  (testing "format-tool-for-prompt creates readable output"
+    (let [tool {:operation-id "getUser"
+                :method :get
+                :path "/users/{id}"
+                :summary "Get a user by ID"}
+          output (openapi/format-tool-for-prompt tool)]
+      (is (clojure.string/includes? output "getUser"))
+      (is (clojure.string/includes? output "GET"))
+      (is (clojure.string/includes? output "/users/{id}"))
+      (is (clojure.string/includes? output "Get a user by ID"))))
+
+  (testing "format-tool-for-prompt handles missing summary"
+    (let [tool {:operation-id "deleteUser"
+                :method :delete
+                :path "/users/{id}"}
+          output (openapi/format-tool-for-prompt tool)]
+      (is (clojure.string/includes? output "deleteUser"))
+      (is (clojure.string/includes? output "DELETE")))))
+
+(deftest test-generate-tools-prompt
+  (testing "generate-tools-prompt creates full prompt"
+    (let [tools [{:operation-id "listItems"
+                  :method :get
+                  :path "/items"
+                  :summary "List all items"}]
+          spec {}
+          prompt (openapi/generate-tools-prompt "worker" "service" tools spec)]
+      (is (clojure.string/includes? prompt "OpenAPI Operations"))
+      (is (clojure.string/includes? prompt "listItems"))
+      (is (clojure.string/includes? prompt "worker"))
+      (is (clojure.string/includes? prompt "service"))))
+
+  (testing "generate-tools-prompt handles empty tools"
+    (let [prompt (openapi/generate-tools-prompt "worker" "service" [] {})]
+      (is (= "No OpenAPI tools available." prompt)))))
+
+(deftest test-register-openapi-hat
+  (testing "register-openapi-hat adds to registry"
+    (let [registry {}
+          result (openapi/register-openapi-hat registry)]
+      (is (contains? result "openapi")))))
