@@ -153,24 +153,28 @@
 ;;==============================================================================
 
 (defn call-ollama
-  "Call Ollama API with native tools parameter."
-  [model messages tools]
-  (let [openai-tools (when (seq tools)
-                       (mapv (fn [t] {:type "function" :function t}) tools))
-        body (cond-> {:model model
-                      :messages messages
-                      :stream false}
-               openai-tools (assoc :tools openai-tools))
-        response (http/post "http://localhost:11434/api/chat"
-                            {:headers {"Content-Type" "application/json"}
-                             :body (json/generate-string body)
-                             :as :json
-                             :throw-exceptions false
-                             :socket-timeout 120000
-                             :connection-timeout 10000})]
-    (if (= 200 (:status response))
-      {:ok true :body (:body response)}
-      {:ok false :status (:status response) :error (:body response)})))
+  "Call Ollama API with native tools parameter.
+   Defaults to prognathodon host (GPU server)."
+  ([model messages tools]
+   (call-ollama model messages tools "prognathodon"))
+  ([model messages tools host]
+   (let [openai-tools (when (seq tools)
+                        (mapv (fn [t] {:type "function" :function t}) tools))
+         body (cond-> {:model model
+                       :messages messages
+                       :stream false}
+                openai-tools (assoc :tools openai-tools))
+         url (str "http://" host ":11434/api/chat")
+         response (http/post url
+                             {:headers {"Content-Type" "application/json"}
+                              :body (json/generate-string body)
+                              :as :json
+                              :throw-exceptions false
+                              :socket-timeout 120000
+                              :connection-timeout 10000})]
+     (if (= 200 (:status response))
+       {:ok true :body (:body response)}
+       {:ok false :status (:status response) :error (:body response)}))))
 
 (defn extract-tool-use-ollama
   "Extract tool_calls from Ollama response."
@@ -305,9 +309,9 @@
       (is (seq successful) "At least one free model should support tool calling"))))
 
 (deftest ^:integration test-4-ollama-local
-  (testing "Ollama direct → local model"
-    ;; Test with models likely installed locally
-    (let [models ["qwen2.5:7b" "mistral:7b" "llama3.1:8b"]
+  (testing "Ollama → local model with native tool calling"
+    ;; Test with models known to support tool calling
+    (let [models ["qwen3:8b" "mistral:7b" "granite4:3b"]
           results (for [model models]
                     (try
                       (let [result (run-tool-calling-test
@@ -322,9 +326,12 @@
                          :tool-called false
                          :model model
                          :error (.getMessage e)})))
-          successful (filter :success results)]
+          successful (filter :tool-called results)]
       (log/info "Ollama results:" (pr-str (mapv #(select-keys % [:model :tool-called :success :error]) results)))
-      (is (seq successful) "At least one Ollama model should support tool calling"))))
+      (is (seq successful) "At least one Ollama model should support tool calling")
+      ;; qwen3:8b should work perfectly
+      (is (some #(and (= "qwen3:8b" (:model %)) (:success %)) results)
+          "qwen3:8b should succeed with native tool calling"))))
 
 ;;==============================================================================
 ;; Manual Testing
