@@ -9,7 +9,8 @@
                                           dot->svg wrap-auth llm-handler claij-api-key
                                           api-base api-url state routes app voice-handler
                                           start]]
-   [claij.fsm :as fsm])
+   [claij.fsm :as fsm]
+   [claij.util :as util])
   (:import
    [java.net URL]))
 
@@ -57,10 +58,10 @@
 
   (testing "fsms registry"
     (testing "contains expected FSM keys"
-      (is (contains? fsms "code-review-fsm")))
+      (is (contains? (fsms) "code-review-fsm")))
 
     (testing "all values are valid FSM maps"
-      (doseq [[k v] fsms]
+      (doseq [[k v] (fsms)]
         (is (map? v) (str "FSM " k " should be a map"))
         (is (string? (get v "id")) (str "FSM " k " should have string id")))))
 
@@ -262,9 +263,9 @@
         (is (contains? (second voice-route) :post) "Should support POST")))
 
     (testing "fsms registry includes bdd fsm"
-      (is (contains? fsms "bdd") "Should have bdd FSM registered")
-      (is (map? (get fsms "bdd")) "BDD FSM should be a map")
-      (is (= "bdd" (get-in fsms ["bdd" "id"])) "BDD FSM should have correct id"))))
+      (is (contains? (fsms) "bdd") "Should have bdd FSM registered")
+      (is (map? (get (fsms) "bdd")) "BDD FSM should be a map")
+      (is (= "bdd" (get-in (fsms) ["bdd" "id"])) "BDD FSM should have correct id"))))
 
 (deftest certificate-endpoints-test
   (testing "install-cert endpoint"
@@ -358,5 +359,133 @@
   (testing "app handles unknown routes"
     (let [response (app {:request-method :get :uri "/nonexistent-path-xyz"})]
       (is (= 404 (:status response))))))
+
+(deftest openapi-handler-test
+  (testing "openapi-handler"
+    (testing "returns 200 with JSON content-type"
+      (let [response (claij.server/openapi-handler {})]
+        (is (= 200 (:status response)))
+        (is (= "application/json" (get-in response [:headers "Content-Type"])))))
+
+    (testing "returns valid JSON body"
+      (let [response (claij.server/openapi-handler {})
+            body (:body response)]
+        (is (string? body))
+        ;; Should be parseable JSON
+        (is (map? (util/json->clj body)))))
+
+    (testing "contains OpenAPI version"
+      (let [response (claij.server/openapi-handler {})
+            spec (util/json->clj (:body response))]
+        (is (= "3.1.0" (:openapi spec)))))))
+
+(deftest fsms-html-handler-test
+  (testing "fsms-html-handler"
+    (testing "returns 200 with HTML content-type"
+      (let [response (claij.server/fsms-html-handler {})]
+        (is (= 200 (:status response)))
+        (is (= "text/html" (get-in response [:headers "Content-Type"])))))
+
+    (testing "contains FSM catalogue title"
+      (let [response (claij.server/fsms-html-handler {})]
+        (is (re-find #"FSM Catalogue" (:body response)))))
+
+    (testing "lists registered FSMs"
+      (let [response (claij.server/fsms-html-handler {})]
+        (is (re-find #"code-review-fsm" (:body response)))
+        (is (re-find #"bdd" (:body response)))))
+
+    (testing "contains links to FSM pages"
+      (let [response (claij.server/fsms-html-handler {})]
+        (is (re-find #"/fsm/code-review-fsm" (:body response)))
+        (is (re-find #"graph\.svg" (:body response)))))))
+
+(deftest fsm-html-handler-test
+  (testing "fsm-html-handler"
+    (testing "returns 200 with HTML for valid FSM"
+      (let [response (claij.server/fsm-html-handler {:path-params {:fsm-id "code-review-fsm"}})]
+        (is (= 200 (:status response)))
+        (is (= "text/html" (get-in response [:headers "Content-Type"])))))
+
+    (testing "contains FSM title"
+      (let [response (claij.server/fsm-html-handler {:path-params {:fsm-id "code-review-fsm"}})]
+        (is (re-find #"code-review-fsm" (:body response)))))
+
+    (testing "contains navigation links"
+      (let [response (claij.server/fsm-html-handler {:path-params {:fsm-id "code-review-fsm"}})]
+        (is (re-find #"Back to Catalogue" (:body response)))
+        (is (re-find #"graph\.svg" (:body response)))))
+
+    (testing "contains graph section"
+      (let [response (claij.server/fsm-html-handler {:path-params {:fsm-id "code-review-fsm"}})]
+        (is (re-find #"Graph" (:body response)))))
+
+    (testing "contains states section"
+      (let [response (claij.server/fsm-html-handler {:path-params {:fsm-id "code-review-fsm"}})]
+        (is (re-find #"States" (:body response)))))
+
+    (testing "contains transitions section"
+      (let [response (claij.server/fsm-html-handler {:path-params {:fsm-id "code-review-fsm"}})]
+        (is (re-find #"Transitions" (:body response)))))
+
+    (testing "returns 404 for unknown FSM"
+      (let [response (claij.server/fsm-html-handler {:path-params {:fsm-id "nonexistent"}})]
+        (is (= 404 (:status response)))
+        (is (re-find #"FSM Not Found" (:body response)))))))
+
+(deftest fsm-run-handler-test
+  (testing "fsm-run-handler"
+    (testing "returns 404 for unknown FSM"
+      (let [response (claij.server/fsm-run-handler {:path-params {:fsm-id "nonexistent"}
+                                                    :body-params {}})]
+        (is (= 404 (:status response)))
+        (is (re-find #"not found" (get-in response [:body :error])))))
+
+    (testing "returns 400 for invalid input"
+      ;; code-review-fsm requires specific input schema
+      (let [response (claij.server/fsm-run-handler {:path-params {:fsm-id "code-review-fsm"}
+                                                    :body-params {"invalid" "input"}})]
+        (is (= 400 (:status response)))
+        (is (= "Input validation failed" (get-in response [:body :error])))))
+
+    (testing "returns 504 on timeout"
+      (with-redefs [claij.fsm/run-sync (fn [_ _ _ _] :timeout)]
+        ;; Need valid input to get past validation
+        (with-redefs [claij.schema/validate (fn [_ _ _] {:valid? true})]
+          (let [response (claij.server/fsm-run-handler {:path-params {:fsm-id "code-review-fsm"}
+                                                        :body-params {}})]
+            (is (= 504 (:status response)))
+            (is (= "FSM execution timed out" (get-in response [:body :error])))))))
+
+    (testing "returns 200 with final event on success"
+      (with-redefs [claij.schema/validate (fn [_ _ _] {:valid? true})
+                    claij.fsm/run-sync (fn [_ _ _ _]
+                                         [{} [{:from "a" :to "b" :event {"result" "success"}}]])]
+        (let [response (claij.server/fsm-run-handler {:path-params {:fsm-id "code-review-fsm"}
+                                                      :body-params {}})]
+          (is (= 200 (:status response)))
+          (is (= {"result" "success"} (:body response))))))
+
+    (testing "returns 500 on exception"
+      (with-redefs [claij.schema/validate (fn [_ _ _] (throw (Exception. "test error")))]
+        (let [response (claij.server/fsm-run-handler {:path-params {:fsm-id "code-review-fsm"}
+                                                      :body-params {}})]
+          (is (= 500 (:status response)))
+          (is (= "test error" (get-in response [:body :error]))))))))
+
+(deftest fsm-graph-svg-handler-test
+  (testing "fsm-graph-svg-handler"
+    (testing "returns SVG without hats param"
+      (let [response (claij.server/fsm-graph-svg-handler {:path-params {:fsm-id "code-review-fsm"}
+                                                          :query-params {}})]
+        (is (= 200 (:status response)))
+        (is (= "image/svg+xml" (get-in response [:headers "content-type"])))
+        (is (re-find #"<svg" (:body response)))))
+
+    (testing "returns SVG with hats param"
+      (let [response (claij.server/fsm-graph-svg-handler {:path-params {:fsm-id "code-review-fsm"}
+                                                          :query-params {"hats" "true"}})]
+        (is (= 200 (:status response)))
+        (is (re-find #"<svg" (:body response)))))))
 
 
