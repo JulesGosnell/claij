@@ -1,8 +1,34 @@
 (ns claij.fsm.registry-test
   "Tests for FSM registry and OpenAPI spec generation."
   (:require
-   [clojure.test :refer [deftest is testing]]
+   [clojure.java.io :as io]
+   [clojure.test :refer [deftest is testing use-fixtures]]
+   [cheshire.core :as json]
+   [m3.validate :as m3]
    [claij.fsm.registry :as registry]))
+
+;; =============================================================================
+;; OpenAPI Schema Loading
+;; =============================================================================
+
+(def openapi-3-1-schema-url "https://spec.openapis.org/oas/3.1/schema/2022-02-27")
+
+(defn load-openapi-schema
+  "Load the OpenAPI 3.1 schema from resources."
+  []
+  (let [schema-file (io/file "resources/schemas/openapi-3.1.json")]
+    (when (.exists schema-file)
+      (json/parse-string (slurp schema-file)))))
+
+(def openapi-schema (load-openapi-schema))
+
+(defn validate-openapi
+  "Validate a document against the OpenAPI 3.1 schema using m3.
+   Returns {:valid? true} or {:valid? false :errors [...]}"
+  [doc]
+  (if openapi-schema
+    (m3/validate {:draft :draft2020-12} openapi-schema {} doc)
+    {:valid? true :skipped "OpenAPI schema not available"}))
 
 ;; =============================================================================
 ;; Test FSM Definitions
@@ -48,11 +74,19 @@
 ;; =============================================================================
 
 (deftest generate-openapi-spec-empty-registry
-  (testing "Empty registry produces valid OpenAPI structure"
+  (testing "Empty registry produces valid OpenAPI 3.1 structure"
     (let [spec (registry/generate-openapi-spec {})]
-      (is (= "3.0.3" (get spec "openapi")))
+      (is (= "3.1.0" (get spec "openapi")))
       (is (map? (get spec "info")))
-      (is (= {} (get spec "paths"))))))
+      (is (= "https://json-schema.org/draft/2020-12/schema"
+             (get spec "jsonSchemaDialect")))
+      (is (= {} (get spec "paths")))
+
+      ;; Validate against OpenAPI 3.1 schema
+      (let [result (validate-openapi spec)]
+        (is (:valid? result)
+            (str "Empty spec should validate against OpenAPI 3.1 schema: "
+                 (pr-str (:errors result))))))))
 
 (deftest generate-openapi-spec-single-fsm
   (testing "Single FSM produces correct path"
@@ -81,7 +115,12 @@
 
         ;; Error responses present
         (is (get-in endpoint ["responses" "400"]))
-        (is (get-in endpoint ["responses" "500"]))))))
+        (is (get-in endpoint ["responses" "500"])))
+
+      ;; Validate against OpenAPI 3.1 schema
+      (let [result (validate-openapi spec)]
+        (is (:valid? result)
+            (str "Single FSM spec should validate: " (pr-str (:errors result))))))))
 
 (deftest generate-openapi-spec-multiple-fsms
   (testing "Multiple FSMs produce multiple paths"
@@ -98,7 +137,12 @@
 
       (is (= 2 (count paths)))
       (is (contains? paths "/fsm/minimal/run"))
-      (is (contains? paths "/fsm/with-refs/run")))))
+      (is (contains? paths "/fsm/with-refs/run"))
+
+      ;; Validate against OpenAPI 3.1 schema
+      (let [result (validate-openapi spec)]
+        (is (:valid? result)
+            (str "Multiple FSM spec should validate: " (pr-str (:errors result))))))))
 
 (deftest generate-openapi-spec-defs-resolution
   (testing "$defs are properly included in schemas"
@@ -174,6 +218,19 @@
                 #{"fsm-a" "fsm-b"} ; same keys after update
                 #{"fsm-a"}] ; fsm-b removed
                @builds))))))
+
+;; =============================================================================
+;; OpenAPI Schema Validation Test
+;; =============================================================================
+
+(deftest openapi-schema-available
+  (testing "OpenAPI 3.1 schema is available for validation"
+    (is (some? openapi-schema) "OpenAPI schema should be loaded from resources")
+    (when openapi-schema
+      (is (= "https://spec.openapis.org/oas/3.1/schema/2022-02-27"
+             (get openapi-schema "$id")))
+      (is (= "https://json-schema.org/draft/2020-12/schema"
+             (get openapi-schema "$schema"))))))
 
 ;; =============================================================================
 ;; Run tests

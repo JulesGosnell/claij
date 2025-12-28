@@ -130,16 +130,17 @@
                                    "details" {"type" "object"}}}}}}}}}}))
 
 (defn generate-openapi-spec
-  "Pure function: Generate OpenAPI 3.0 spec from an FSM registry map.
+  "Pure function: Generate OpenAPI 3.1 spec from an FSM registry map.
    
    The registry is a map of {fsm-id -> entry} where entry contains:
    - :definition - The FSM definition map
    - :input-schema - JSON Schema for FSM input (may be a $ref)
    - :output-schema - JSON Schema for FSM output (may be a $ref)
    
-   Returns a complete OpenAPI 3.0.3 spec with:
+   Returns a complete OpenAPI 3.1.0 spec with:
    - /fsm/{id}/run POST endpoint for each FSM
    - Request/response schemas with $defs resolved inline
+   - jsonSchemaDialect set to JSON Schema 2020-12 (fully supported)
    
    This is the core pure function. The atom watch in this namespace
    calls this on every registry change (add/update/delete) for a
@@ -147,10 +148,11 @@
   [registry]
   (let [paths (into {} (for [[fsm-id entry] registry]
                          (fsm-entry->openapi-path fsm-id entry)))]
-    {"openapi" "3.0.3"
+    {"openapi" "3.1.0"
      "info" {"title" "CLAIJ FSM API"
              "description" "Dynamic FSM endpoints - auto-generated from registered FSMs"
              "version" "0.2.0"}
+     "jsonSchemaDialect" "https://json-schema.org/draft/2020-12/schema"
      "paths" paths}))
 
 ;; =============================================================================
