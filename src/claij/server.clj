@@ -33,6 +33,7 @@
    [claij.graph :as graph]
    [claij.hat :as hat]
    [claij.fsm :as fsm]
+   [claij.fsm.registry :as registry]
    [claij.fsm.code-review-fsm :refer [code-review-fsm]]
    [claij.fsm.bdd-fsm :as bdd]
    [claij.stt.whisper.multipart :refer [extract-bytes validate-audio]])
@@ -96,9 +97,19 @@
 ;;------------------------------------------------------------------------------
 ;; FSM Registry
 
-(def fsms
-  {"code-review-fsm" code-review-fsm
-   "bdd" bdd/bdd-fsm})
+;; Initialize FSM registry with built-in FSMs
+;; The registry maintains FSMs and auto-generates OpenAPI specs
+(defonce _init-registry
+  (do
+    (registry/register-fsm! "code-review-fsm" code-review-fsm)
+    (registry/register-fsm! "bdd" bdd/bdd-fsm)
+    :initialized))
+
+;; Backwards-compatible accessor (returns map of id -> definition)
+(defn fsms []
+  (into {}
+        (for [[id {:keys [definition]}] @registry/fsm-registry]
+          [id definition])))
 
 ;;------------------------------------------------------------------------------
 ;; Handlers
@@ -116,18 +127,19 @@
 
 (defn list-fsms-handler [_]
   {:status 200
-   :body (vec (keys fsms))})
+   :body (vec (keys (fsms)))})
 
 (defn fsms-html-handler
   "Return HTML page listing all FSMs"
   [_]
-  {:status 200
-   :headers {"Content-Type" "text/html"}
-   :body (html5
-          [:head
-           [:meta {:charset "UTF-8"}]
-           [:title "CLAIJ FSM Catalogue"]
-           [:style "body { font-family: system-ui; max-width: 900px; margin: 2em auto; padding: 1em; }
+  (let [all-fsms (fsms)]
+    {:status 200
+     :headers {"Content-Type" "text/html"}
+     :body (html5
+            [:head
+             [:meta {:charset "UTF-8"}]
+             [:title "CLAIJ FSM Catalogue"]
+             [:style "body { font-family: system-ui; max-width: 900px; margin: 2em auto; padding: 1em; }
                     table { border-collapse: collapse; width: 100%; }
                     th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
                     th { background: #f9f9f9; }
@@ -137,31 +149,31 @@
                     .subtitle { color: #666; margin-bottom: 1.5em; }
                     .count { color: #666; font-size: 0.9em; }
                     .links { white-space: nowrap; }"]]
-          [:body
-           [:h1 "FSM Catalogue"]
-           [:p.subtitle (str (count fsms) " finite state machines")]
-           [:table
-            [:thead [:tr [:th "ID"] [:th "States"] [:th "Transitions"] [:th "Schemas"] [:th "Links"]]]
-            [:tbody
-             (for [id (sort (keys fsms))
-                   :let [fsm (get fsms id)
-                         states (get fsm "states")
-                         xitions (get fsm "xitions")
-                         schemas (get fsm "schemas")]]
-               [:tr
-                [:td [:a {:href (str "/fsm/" id)} id]]
-                [:td.count (count states)]
-                [:td.count (count xitions)]
-                [:td.count (count schemas)]
-                [:td.links
-                 [:a {:href (str "/fsm/" id "/graph.svg")} "SVG"]
-                 " | "
-                 [:a {:href (str "/fsm/" id "/document")} "JSON"]]])]]])})
+            [:body
+             [:h1 "FSM Catalogue"]
+             [:p.subtitle (str (count all-fsms) " finite state machines")]
+             [:table
+              [:thead [:tr [:th "ID"] [:th "States"] [:th "Transitions"] [:th "Schemas"] [:th "Links"]]]
+              [:tbody
+               (for [id (sort (keys all-fsms))
+                     :let [fsm (get all-fsms id)
+                           states (get fsm "states")
+                           xitions (get fsm "xitions")
+                           schemas (get fsm "schemas")]]
+                 [:tr
+                  [:td [:a {:href (str "/fsm/" id)} id]]
+                  [:td.count (count states)]
+                  [:td.count (count xitions)]
+                  [:td.count (count schemas)]
+                  [:td.links
+                   [:a {:href (str "/fsm/" id "/graph.svg")} "SVG"]
+                   " | "
+                   [:a {:href (str "/fsm/" id "/document")} "JSON"]]])]]])}))
 
 (defn fsm-html-handler
   "Return HTML page showing single FSM definition - sectioned view"
   [{{:keys [fsm-id]} :path-params}]
-  (if-let [fsm (get fsms fsm-id)]
+  (if-let [fsm (get (fsms) fsm-id)]
     {:status 200
      :headers {"Content-Type" "text/html"}
      :body (html5
@@ -298,7 +310,7 @@
              [:a {:href "/fsms"} "\u2190 Back to Catalogue"]])}))
 
 (defn fsm-document-handler [{{:keys [fsm-id]} :path-params}]
-  (if-let [fsm (get fsms fsm-id)]
+  (if-let [fsm (get (fsms) fsm-id)]
     {:status 200
      :body fsm}
     {:status 404
@@ -306,7 +318,7 @@
 
 (defn fsm-graph-svg-handler [{{:keys [fsm-id]} :path-params
                               {:strs [hats]} :query-params}]
-  (if-let [fsm (get fsms fsm-id)]
+  (if-let [fsm (get (fsms) fsm-id)]
     (let [dot-str (if hats
                     ;; Expand hats for visualization (no MCP connection needed)
                     (graph/fsm->dot-with-hats fsm)
@@ -320,7 +332,7 @@
 
 (defn fsm-graph-dot-handler [{{:keys [fsm-id]} :path-params
                               {:strs [hats]} :query-params}]
-  (if-let [fsm (get fsms fsm-id)]
+  (if-let [fsm (get (fsms) fsm-id)]
     (let [dot-str (if hats
                     (let [ctx (case fsm-id
                                 "bdd" (bdd/make-bdd-context {})
