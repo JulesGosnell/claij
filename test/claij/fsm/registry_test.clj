@@ -78,8 +78,6 @@
     (let [spec (registry/generate-openapi-spec {})]
       (is (= "3.1.0" (get spec "openapi")))
       (is (map? (get spec "info")))
-      (is (= "https://json-schema.org/draft/2020-12/schema"
-             (get spec "jsonSchemaDialect")))
       (is (= {} (get spec "paths")))
 
       ;; Validate against OpenAPI 3.1 schema

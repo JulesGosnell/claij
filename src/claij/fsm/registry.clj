@@ -140,7 +140,6 @@
    Returns a complete OpenAPI 3.1.0 spec with:
    - /fsm/{id}/run POST endpoint for each FSM
    - Request/response schemas with $defs resolved inline
-   - jsonSchemaDialect set to JSON Schema 2020-12 (fully supported)
    
    This is the core pure function. The atom watch in this namespace
    calls this on every registry change (add/update/delete) for a
@@ -152,7 +151,6 @@
      "info" {"title" "CLAIJ FSM API"
              "description" "Dynamic FSM endpoints - auto-generated from registered FSMs"
              "version" "0.2.0"}
-     "jsonSchemaDialect" "https://json-schema.org/draft/2020-12/schema"
      "paths" paths}))
 
 ;; =============================================================================
