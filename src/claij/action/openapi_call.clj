@@ -372,12 +372,16 @@
             ;; Execute the HTTP call
             result (execute-operation-binary exec-config tool params content-types)
 
-            _ (log/info "OpenAPI call result:"
-                        {:operation operation
-                         :status (get result "status")
-                         :has-body (some? (get result "body"))
-                         :body-type (type (get result "body"))
-                         :has-error (contains? result "error")})]
+            _ (let [body (get result "body")
+                    ;; Log text content for non-binary responses (e.g., STT transcription)
+                    text-content (when (map? body) (get body "text"))]
+                (log/info "OpenAPI call result:"
+                          (cond-> {:operation operation
+                                   :status (get result "status")
+                                   :has-body (some? body)
+                                   :body-type (type body)
+                                   :has-error (contains? result "error")}
+                            text-content (assoc :text text-content))))]
 
         ;; Call handler with result - id derived from output schema
         (handler context
