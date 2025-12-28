@@ -669,8 +669,14 @@ a{color:#00ff88;font-size:1.2em}ol{line-height:2}</style></head>
        (ring/routes
         ;; Redirect root to voice UI
         (ring/create-resource-handler {:path "/"})
+        ;; Original Swagger UI for Malli-based routes
         (swagger-ui/create-swagger-ui-handler
          {:path "/swagger"
+          :config {:validatorUrl nil}})
+        ;; FSM Swagger UI for dynamic OpenAPI spec
+        (swagger-ui/create-swagger-ui-handler
+         {:path "/fsm-swagger"
+          :url "/api/fsm/openapi.json"
           :config {:validatorUrl nil}})
         ;; Redirect / to /voice.html
         (fn [request]
