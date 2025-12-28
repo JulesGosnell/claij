@@ -492,18 +492,7 @@
 ;; Routes
 
 (def routes
-  [["/swagger.json"
-    {:get {:no-doc true
-           :swagger {:info {:title "claij API"
-                            :description "Clojure AI Integration Junction"
-                            :version "0.1.2"}
-                     :securityDefinitions {:bearer {:type "apiKey"
-                                                    :name "Authorization"
-                                                    :in "header"
-                                                    :description "Bearer token (format: 'Bearer <token>')"}}}
-           :handler (swagger/create-swagger-handler)}}]
-
-   ;; Public endpoints
+  [;; Public endpoints
    ["/health"
     {:get {:summary "Health check"
            :responses {200 {:body string?}}
@@ -651,10 +640,6 @@ a{color:#00ff88;font-size:1.2em}ol{line-height:2}</style></head>
        (ring/routes
         ;; Redirect root to voice UI
         (ring/create-resource-handler {:path "/"})
-        ;; Original Swagger UI for Malli-based routes
-        (swagger-ui/create-swagger-ui-handler
-         {:path "/swagger"
-          :config {:validatorUrl nil}})
         ;; FSM Swagger UI for dynamic OpenAPI spec
         (swagger-ui/create-swagger-ui-handler
          {:path "/fsm-swagger"
