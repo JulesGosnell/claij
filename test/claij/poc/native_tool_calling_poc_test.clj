@@ -140,13 +140,27 @@
           tool-calls)))
 
 (defn build-tool-result-openrouter
-  "Build messages with tool result for OpenRouter/OpenAI format."
+  "Build messages with tool result for OpenRouter/OpenAI format.
+   NOTE: arguments must be a JSON string, not an object."
   [original-messages assistant-message tool-call-id result]
-  (conj (vec original-messages)
-        assistant-message
-        {:role "tool"
-         :tool_call_id tool-call-id
-         :content result}))
+  ;; Fix assistant message: ensure arguments exists and is JSON string
+  (let [fixed-assistant
+        (update-in assistant-message [:tool_calls]
+                   (fn [calls]
+                     (mapv (fn [call]
+                             (update call :function
+                                     (fn [f]
+                                       (let [args (or (:arguments f) {})]
+                                         (assoc f :arguments
+                                                (if (string? args)
+                                                  args
+                                                  (json/generate-string args)))))))
+                           calls)))]
+    (conj (vec original-messages)
+          fixed-assistant
+          {:role "tool"
+           :tool_call_id tool-call-id
+           :content result})))
 
 ;;==============================================================================
 ;; Ollama API (OpenAI-compatible)
