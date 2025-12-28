@@ -87,7 +87,7 @@
                  (pr-str (:errors result))))))))
 
 (deftest generate-openapi-spec-single-fsm
-  (testing "Single FSM produces correct path"
+  (testing "Single FSM produces correct path with fully expanded schemas"
     (let [entry {:definition minimal-fsm
                  :input-schema {"$ref" "#/$defs/input"}
                  :output-schema {"$ref" "#/$defs/output"}}
@@ -102,14 +102,17 @@
         (is (= "run-minimal" (get endpoint "operationId")))
         (is (= ["FSM Execution"] (get endpoint "tags")))
 
-        ;; Request body has schema with $defs
+        ;; Request body has fully expanded schema (no $defs)
         (let [request-schema (get-in endpoint ["requestBody" "content" "application/json" "schema"])]
-          (is (contains? request-schema "$defs") "Request schema should include $defs")
-          (is (= "object" (get request-schema "type"))))
+          (is (nil? (get request-schema "$defs")) "Request schema should NOT include $defs")
+          (is (= "object" (get request-schema "type")))
+          (is (= ["message"] (get request-schema "required"))))
 
-        ;; Response has schema with $defs
+        ;; Response has fully expanded schema (no $defs)
         (let [response-schema (get-in endpoint ["responses" "200" "content" "application/json" "schema"])]
-          (is (contains? response-schema "$defs") "Response schema should include $defs"))
+          (is (nil? (get response-schema "$defs")) "Response schema should NOT include $defs")
+          (is (= "object" (get response-schema "type")))
+          (is (= ["result"] (get response-schema "required"))))
 
         ;; Error responses present
         (is (get-in endpoint ["responses" "400"]))
@@ -143,7 +146,7 @@
             (str "Multiple FSM spec should validate: " (pr-str (:errors result))))))))
 
 (deftest generate-openapi-spec-defs-resolution
-  (testing "$defs are properly included in schemas"
+  (testing "$refs are fully expanded inline (no $defs in output)"
     (let [entry {:definition fsm-with-refs
                  :input-schema {"$ref" "#/$defs/user"}
                  :output-schema {"$ref" "#/$defs/response"}}
@@ -151,16 +154,30 @@
           spec (registry/generate-openapi-spec registry)
           request-schema (get-in spec ["paths" "/fsm/with-refs/run" "post"
                                        "requestBody" "content" "application/json" "schema"])
-          defs (get request-schema "$defs")]
+          response-schema (get-in spec ["paths" "/fsm/with-refs/run" "post"
+                                        "responses" "200" "content" "application/json" "schema"])]
 
-      ;; All FSM schemas should be in $defs
-      (is (contains? defs "user"))
-      (is (contains? defs "role"))
-      (is (contains? defs "response"))
+      ;; No $defs should be present (Swagger UI can't resolve them)
+      (is (nil? (get request-schema "$defs"))
+          "Request schema should not contain $defs")
+      (is (nil? (get response-schema "$defs"))
+          "Response schema should not contain $defs")
 
-      ;; The resolved schema should have the type from the referenced schema
+      ;; Request schema should be fully expanded user schema
       (is (= "object" (get request-schema "type")))
-      (is (= ["name"] (get request-schema "required"))))))
+      (is (= ["name"] (get request-schema "required")))
+      ;; The role property should be fully expanded (not a $ref)
+      (is (= ["admin" "user" "guest"]
+             (get-in request-schema ["properties" "role" "enum"]))
+          "Nested $ref should be fully expanded")
+
+      ;; Response schema should have nested user fully expanded
+      (is (= "object" (get response-schema "type")))
+      (is (= "object" (get-in response-schema ["properties" "user" "type"]))
+          "Nested user should be expanded")
+      (is (= ["admin" "user" "guest"]
+             (get-in response-schema ["properties" "user" "properties" "role" "enum"]))
+          "Deeply nested $ref should be fully expanded"))))
 
 (deftest generate-openapi-spec-handles-inline-schemas
   (testing "Inline schemas (no $ref) are handled"

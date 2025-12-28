@@ -10,7 +10,8 @@
      (unregister-fsm! \"my-fsm\")"
   (:require
    [clojure.tools.logging :as log]
-   [claij.fsm :as fsm]))
+   [claij.fsm :as fsm]
+   [claij.schema :as schema]))
 
 ;; =============================================================================
 ;; FSM Registry
@@ -74,30 +75,29 @@
 ;; OpenAPI Spec Generation
 ;; =============================================================================
 
-(defn- build-schema-with-defs
-  "Build a complete JSON Schema with $defs from FSM schemas.
-   Resolves the top-level $ref and includes all referenced definitions."
+(defn- expand-schema-for-openapi
+  "Fully expand a schema for OpenAPI, inlining all $ref references.
+   Swagger UI doesn't properly support JSON Schema $defs, so we expand everything."
   [schema-ref fsm-schemas]
   (if-let [ref-path (get schema-ref "$ref")]
-    ;; It's a $ref - build schema with $defs
-    (let [;; Extract schema name from #/$defs/name
-          schema-name (when (string? ref-path)
+    ;; It's a $ref - resolve and expand recursively
+    (let [schema-name (when (string? ref-path)
                         (second (re-matches #"#/\$defs/(.+)" ref-path)))]
       (if (and schema-name (contains? fsm-schemas schema-name))
-        ;; Build complete schema with $defs
-        (merge (get fsm-schemas schema-name)
-               {"$defs" fsm-schemas})
+        (schema/expand-refs (get fsm-schemas schema-name) fsm-schemas)
         ;; Fallback - return as-is
         schema-ref))
-    ;; Not a $ref - return as-is
-    (or schema-ref {"type" "object"})))
+    ;; Not a $ref - expand any nested refs
+    (if schema-ref
+      (schema/expand-refs schema-ref fsm-schemas)
+      {"type" "object"})))
 
 (defn- fsm-entry->openapi-path
   "Generate OpenAPI path entry for an FSM's /run endpoint."
   [fsm-id {:keys [definition input-schema output-schema]}]
   (let [fsm-schemas (get definition "schemas")
-        request-schema (build-schema-with-defs input-schema fsm-schemas)
-        response-schema (build-schema-with-defs output-schema fsm-schemas)]
+        request-schema (expand-schema-for-openapi input-schema fsm-schemas)
+        response-schema (expand-schema-for-openapi output-schema fsm-schemas)]
     {(str "/fsm/" fsm-id "/run")
      {"post"
       {"summary" (str "Run " fsm-id " FSM")
