@@ -120,10 +120,12 @@
 (defn- build-success-response
   "Build successful transcription response."
   [result]
-  {:status 200
-   :headers {"Content-Type" "application/json"}
-   :body (json/write-str {:text (some-> (:text result) str/trim)
-                          :language (:language result)})})
+  (let [trimmed-text (some-> (:text result) str/trim)]
+    (log/info "Transcription result:" (pr-str trimmed-text))
+    {:status 200
+     :headers {"Content-Type" "application/json"}
+     :body (json/write-str {:text trimmed-text
+                            :language (:language result)})}))
 
 (defn- build-error-response
   "Build error response from exception."
