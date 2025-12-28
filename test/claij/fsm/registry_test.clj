@@ -219,6 +219,67 @@
                 #{"fsm-a"}] ; fsm-b removed
                @builds))))))
 
+(deftest registry-api-test
+  (testing "Registry API functions"
+    ;; Save current state
+    (let [original-registry @registry/fsm-registry]
+      (try
+        ;; Clear for isolated testing
+        (registry/clear-registry!)
+        (is (empty? @registry/fsm-registry) "Registry should be empty after clear")
+
+        (testing "register-fsm! returns entry"
+          (let [entry (registry/register-fsm! "test-fsm" minimal-fsm)]
+            (is (map? entry))
+            (is (contains? entry :definition))
+            (is (contains? entry :input-schema))
+            (is (contains? entry :output-schema))))
+
+        (testing "get-fsm returns definition"
+          (is (= minimal-fsm (registry/get-fsm "test-fsm")))
+          (is (nil? (registry/get-fsm "nonexistent"))))
+
+        (testing "get-fsm-entry returns full entry"
+          (let [entry (registry/get-fsm-entry "test-fsm")]
+            (is (map? entry))
+            (is (= minimal-fsm (:definition entry)))))
+
+        (testing "list-fsm-ids returns registered ids"
+          (is (= ["test-fsm"] (vec (registry/list-fsm-ids)))))
+
+        (testing "list-fsms returns metadata map"
+          (let [fsms (registry/list-fsms)]
+            (is (map? fsms))
+            (is (contains? fsms "test-fsm"))
+            (is (contains? (get fsms "test-fsm") :states))
+            (is (contains? (get fsms "test-fsm") :transitions))
+            (is (contains? (get fsms "test-fsm") :schemas))))
+
+        (testing "register-all! registers multiple FSMs"
+          (registry/register-all! {"fsm-a" minimal-fsm
+                                   "fsm-b" fsm-with-refs})
+          (is (= 3 (count @registry/fsm-registry)))
+          (is (some? (registry/get-fsm "fsm-a")))
+          (is (some? (registry/get-fsm "fsm-b"))))
+
+        (testing "unregister-fsm! removes and returns entry"
+          (let [removed (registry/unregister-fsm! "fsm-a")]
+            (is (map? removed))
+            (is (nil? (registry/get-fsm "fsm-a")))
+            (is (= 2 (count @registry/fsm-registry)))))
+
+        (testing "unregister-fsm! returns nil for nonexistent"
+          (is (nil? (registry/unregister-fsm! "nonexistent"))))
+
+        (testing "get-openapi-spec returns current spec"
+          (let [spec (registry/get-openapi-spec)]
+            (is (map? spec))
+            (is (= "3.1.0" (get spec "openapi")))))
+
+        (finally
+          ;; Restore original state
+          (reset! registry/fsm-registry original-registry))))))
+
 ;; =============================================================================
 ;; OpenAPI Schema Validation Test
 ;; =============================================================================

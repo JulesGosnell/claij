@@ -354,7 +354,12 @@
   (testing "app root redirect"
     (let [response (app {:request-method :get :uri "/"})]
       (is (= 302 (:status response)) "Root should redirect")
-      (is (= "/voice.html" (get-in response [:headers "Location"])))))
+      (is (= "/fsms" (get-in response [:headers "Location"])))))
+
+  (testing "app /bdd redirect"
+    (let [response (app {:request-method :get :uri "/bdd"})]
+      (is (= 302 (:status response)) "/bdd should redirect")
+      (is (= "/bdd.html" (get-in response [:headers "Location"])))))
 
   (testing "app handles unknown routes"
     (let [response (app {:request-method :get :uri "/nonexistent-path-xyz"})]

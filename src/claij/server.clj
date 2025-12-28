@@ -630,17 +630,18 @@ a{color:#00ff88;font-size:1.2em}ol{line-height:2}</style></head>
                              muuntaja/format-response-middleware
                              muuntaja/format-request-middleware]}})
        (ring/routes
-        ;; Redirect root to voice UI
+        ;; Static resources from public/
         (ring/create-resource-handler {:path "/"})
         ;; FSM Swagger UI for dynamic OpenAPI spec
         (swagger-ui/create-swagger-ui-handler
          {:path "/fsm-swagger"
           :url "/api/fsm/openapi.json"
           :config {:validatorUrl nil}})
-        ;; Redirect / to /voice.html
+        ;; Redirects
         (fn [request]
-          (if (= "/" (:uri request))
-            (resp/redirect "/voice.html")
+          (case (:uri request)
+            "/" (resp/redirect "/fsms")
+            "/bdd" (resp/redirect "/bdd.html")
             nil))
         (ring/create-default-handler)))
       (wrap-resource "public")))

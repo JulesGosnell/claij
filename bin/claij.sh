@@ -14,13 +14,18 @@
 #   CLAIJ_API_KEY       - Optional API key for authenticated endpoints
 #
 # Endpoints:
-#   GET  /health          - Health check
-#   GET  /swagger-ui      - API documentation
-#   POST /voice           - Voice assistant (audio in → audio out)
-#   GET  /fsms/list       - List available FSMs
-#   GET  /fsm/:id/document - Get FSM definition
+#   GET  /                 - FSM catalogue (redirects to /fsms)
+#   GET  /health           - Health check
+#   GET  /fsms             - FSM catalogue UI
+#   GET  /fsm-swagger      - OpenAPI UI for FSM endpoints
+#   GET  /bdd              - BDD Voice Assistant UI
+#   POST /voice            - Voice endpoint (audio in → audio out)
+#   GET  /fsms/list        - List available FSMs (JSON)
+#   GET  /fsm/:id          - FSM detail page
+#   GET  /fsm/:id/document - Get FSM definition (JSON)
 #   GET  /fsm/:id/graph.svg - Visualize FSM
-#   GET  /claij.crt       - Download SSL certificate (for iOS)
+#   POST /fsm/:id/run      - Execute FSM with input
+#   GET  /install-cert     - SSL certificate install instructions
 #
 
 set -e
@@ -83,11 +88,12 @@ if [ "$USE_SSL" = true ]; then
     echo "   HTTPS: https://localhost:$SSL_PORT"
 fi
 echo ""
-echo "📚 Swagger UI: http://localhost:$PORT/swagger-ui"
-echo "🎤 Voice UI:   http://localhost:$PORT/"
+echo "📋 FSM Catalogue:  http://localhost:$PORT/fsms"
+echo "📚 OpenAPI UI:     http://localhost:$PORT/fsm-swagger"
+echo "🎤 BDD Voice UI:   http://localhost:$PORT/bdd"
 echo ""
 if [ "$USE_SSL" = true ]; then
-    echo "📱 iOS setup: http://localhost:$PORT/claij.crt"
+    echo "📱 iOS setup: http://localhost:$PORT/install-cert"
     echo ""
 fi
 
