@@ -249,15 +249,18 @@
     (resolve-mcp-response-schema context tool-name)))
 
 (defn tool-cache->request-schema
-  "Generate request schema for a single tool."
+  "Generate request schema for a single tool.
+   
+   Note: We intentionally allow any arguments object to avoid strict validation
+   that would block tool calls with minor parameter issues. The MCP server itself
+   will validate parameters and return appropriate errors."
   [tool-cache]
-  (let [tool-name (get tool-cache "name")
-        input-schema (get tool-cache "inputSchema" {})]
+  (let [tool-name (get tool-cache "name")]
     {"type" "object"
      "additionalProperties" false
      "required" ["name" "arguments"]
      "properties" {"name" {"const" tool-name}
-                   "arguments" input-schema}}))
+                   "arguments" {"type" "object"}}}))
 
 (defn tool-cache->response-schema [_] tool-response-schema)
 

@@ -199,7 +199,7 @@
    - :tts-url - TTS service URL (default: prognathodon:8001)"
   [{:keys [service model stt-url tts-url]
     :or {service "ollama:local"
-         model "mistral:7b"
+         model "qwen2.5-coder:14b"
          stt-url default-stt-url
          tts-url default-tts-url}}]
   {:id->action bdd-actions
