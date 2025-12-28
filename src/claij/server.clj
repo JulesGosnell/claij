@@ -36,6 +36,8 @@
    [claij.fsm.registry :as registry]
    [claij.fsm.code-review-fsm :refer [code-review-fsm]]
    [claij.fsm.bdd-fsm :as bdd]
+   [claij.schema :as schema]
+   [claij.actions :as actions]
    [claij.stt.whisper.multipart :refer [extract-bytes validate-audio]])
   (:import
    [java.net URL])
@@ -316,6 +318,62 @@
     {:status 404
      :body {:error (str "FSM not found: " fsm-id)}}))
 
+(defn openapi-handler
+  "Serve the dynamically generated OpenAPI spec for all registered FSMs."
+  [_]
+  {:status 200
+   :headers {"Content-Type" "application/json"}
+   :body (clj->json (registry/get-openapi-spec))})
+
+(defn fsm-run-handler
+  "Run a registered FSM with the provided input.
+   
+   POST /fsm/:fsm-id/run
+   Body: JSON matching the FSM's input schema
+   Response: JSON with FSM output or error"
+  [{{:keys [fsm-id]} :path-params :keys [body-params]}]
+  (try
+    ;; Look up FSM from registry
+    (if-let [{:keys [definition input-schema]} (registry/get-fsm-entry fsm-id)]
+      (let [;; Validate input against FSM's input schema
+            defs (get definition "schemas" {})
+            validation (schema/validate input-schema body-params defs)]
+
+        (if-not (:valid? validation)
+          ;; Input validation failed
+          {:status 400
+           :body {:error "Input validation failed"
+                  :details (:errors validation)}}
+
+          ;; Run the FSM
+          (let [;; Create execution context with default actions
+                context (actions/make-context
+                         {:llm/service "anthropic"
+                          :llm/model "claude-sonnet-4-20250514"})
+
+                ;; Run FSM synchronously with 2 minute timeout
+                result (fsm/run-sync definition context body-params 120000)]
+
+            (if (= result :timeout)
+              {:status 504
+               :body {:error "FSM execution timed out"}}
+
+              ;; Extract the final event from the trail
+              (let [[_final-context trail] result
+                    final-event (fsm/last-event trail)]
+                {:status 200
+                 :body final-event})))))
+
+      ;; FSM not found
+      {:status 404
+       :body {:error (str "FSM not found: " fsm-id)}})
+
+    (catch Exception e
+      (log/error e "FSM run error" {:fsm-id fsm-id})
+      {:status 500
+       :body {:error (.getMessage e)
+              :type (str (type e))}})))
+
 (defn fsm-graph-svg-handler [{{:keys [fsm-id]} :path-params
                               {:strs [hats]} :query-params}]
   (if-let [fsm (get (fsms) fsm-id)]
@@ -518,6 +576,13 @@ a{color:#00ff88;font-size:1.2em}ol{line-height:2}</style></head>
             :responses {200 {:body [:vector :string]}}
             :handler list-fsms-handler}}]]
 
+   ;; Dynamic FSM API - OpenAPI spec (at /api/fsm/openapi.json to avoid conflict)
+   ["/api/fsm/openapi.json"
+    {:get {:summary "OpenAPI 3.1 spec for registered FSMs"
+           :description "Dynamically generated OpenAPI spec reflecting all registered FSMs and their schemas."
+           :produces ["application/json"]
+           :handler openapi-handler}}]
+
    ["/fsm/:fsm-id"
     [""
      {:get {:no-doc true
@@ -530,6 +595,22 @@ a{color:#00ff88;font-size:1.2em}ol{line-height:2}</style></head>
             :responses {200 {:body :map}
                         404 {:body :map}}
             :handler fsm-document-handler}}]
+    ["/run"
+     {:post {:summary "Run FSM with input"
+             :description "Execute a registered FSM with the provided input. Input is validated against the FSM's entry schema."
+             :parameters {:path {:fsm-id :string}
+                          :body :map}
+             :responses {200 {:body :map
+                              :description "FSM output (final event)"}
+                         400 {:body :map
+                              :description "Input validation failed"}
+                         404 {:body :map
+                              :description "FSM not found"}
+                         500 {:body :map
+                              :description "FSM execution error"}
+                         504 {:body :map
+                              :description "FSM timeout"}}
+             :handler fsm-run-handler}}]
     ["/graph.svg"
      {:get {:summary "Get FSM as SVG visualization"
             :parameters {:path {:fsm-id :string}}
