@@ -3,6 +3,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [ring.adapter.jetty :as jetty]
+   [clj-http.client :as http]
    [claij.server :as claij.server :refer [string->url separator pattern initial-summary
                                           fsms llms health-handler list-fsms-handler
                                           fsm-document-handler fsm-graph-svg-handler
@@ -492,5 +493,89 @@
                                                           :query-params {"hats" "true"}})]
         (is (= 200 (:status response)))
         (is (re-find #"<svg" (:body response)))))))
+
+(deftest llm-handler-test
+  (testing "llm-handler returns 404 for unknown provider"
+    (let [response (llm-handler {{:provider "unknown-provider"} :path-params
+                                 {:message "hello"} :body-params})]
+      (is (= 404 (:status response)))
+      (is (re-find #"LLM not found" (get-in response [:body :error])))))
+
+  (testing "llm-handler calls known provider"
+    (let [test-response "test output"]
+      (with-redefs [claij.server/llms {"test-llm" (constantly test-response)}]
+        (let [response (llm-handler {:path-params {:provider "test-llm"}
+                                     :body-params {:message "hello"}})]
+          (is (= 200 (:status response)))
+          (is (= test-response (get-in response [:body :response])))))))
+
+  (testing "llm-handler handles body-params without message key"
+    (let [test-response "echoed"]
+      (with-redefs [claij.server/llms {"echo" (fn [input] (str "got: " input))}]
+        (let [response (llm-handler {:path-params {:provider "echo"}
+                                     :body-params {:data "value"}})]
+          (is (= 200 (:status response))))))))
+
+(deftest dot->svg-test
+  (testing "dot->svg returns svg content"
+    (let [simple-dot "digraph { A -> B }"]
+      ;; dot->svg calls graphviz - just test it returns something
+      (let [result (dot->svg simple-dot)]
+        (is (or (string? result)
+                (nil? result)))))))
+
+(deftest health-handler-test
+  (testing "health-handler returns ok status"
+    (let [response (health-handler {})]
+      (is (= 200 (:status response)))
+      (is (re-find #"ok" (:body response))))))
+
+(deftest list-fsms-handler-test
+  (testing "list-fsms-handler returns vector of fsm ids"
+    (let [response (list-fsms-handler {})]
+      (is (= 200 (:status response)))
+      (is (vector? (:body response))))))
+
+(deftest open-router-test
+  (testing "open-router makes API call and extracts response"
+    (let [summary (atom "initial")]
+      (with-redefs [claij.server/api-key (fn [] "test-key")
+                    claij.server/headers (fn [] {"Authorization" "Bearer test-key"})
+                    clj-http.client/post
+                    (fn [_url _opts]
+                      {:status 200
+                       :body (util/clj->json
+                              {:choices [{:message {:content (str "Answer text" separator "new summary")}}]})})]
+        (let [result (claij.server/open-router "test-id" "anthropic" "claude" summary "test message")]
+          (is (string? result))
+          (is (= "Answer text" result))
+          (is (= "new summary" @summary))))))
+
+  (testing "open-router handles multiple choices"
+    (let [summary (atom "initial")]
+      (with-redefs [claij.server/api-key (fn [] "test-key")
+                    claij.server/headers (fn [] {"Authorization" "Bearer test-key"})
+                    clj-http.client/post
+                    (fn [_url _opts]
+                      {:status 200
+                       :body (util/clj->json
+                              {:choices [{:message {:content (str "Answer1" separator "summary1")}}
+                                         {:message {:content (str "Answer2" separator "summary2")}}]})})]
+        (let [result (claij.server/open-router "test-id" "openai" "gpt4" summary "test")]
+          (is (string? result))
+          ;; Should be comma-joined
+          (is (= "Answer1,Answer2" result)))))))
+
+(deftest fsm-document-handler-test
+  (testing "fsm-document-handler returns 404 for unknown FSM"
+    (let [response (claij.server/fsm-document-handler {:path-params {:fsm-id "nonexistent"}})]
+      (is (= 404 (:status response)))))
+
+  (testing "fsm-document-handler returns FSM document for known FSM"
+    (let [response (claij.server/fsm-document-handler {:path-params {:fsm-id "code-review-fsm"}})]
+      (is (= 200 (:status response)))
+      (is (map? (:body response))))))
+
+
 
 

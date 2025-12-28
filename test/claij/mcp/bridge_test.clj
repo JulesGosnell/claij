@@ -291,3 +291,112 @@
         ;; Both should timeout since we didn't deliver responses
         (is (= "timeout" (get-in (first results) ["error" "message"])))
         (is (= "timeout" (get-in (second results) ["error" "message"])))))))
+
+(deftest stop-bridge-test
+  (testing "stop-bridge handles nil gracefully"
+    (is (nil? (bridge/stop-bridge nil))))
+
+  (testing "stop-bridge calls stop function"
+    (let [stopped? (atom false)
+          fake-bridge {:stop (fn [] (reset! stopped? true))}]
+      (bridge/stop-bridge fake-bridge)
+      (is @stopped?)))
+
+  (testing "stop-bridge handles bridge without stop fn"
+    (is (nil? (bridge/stop-bridge {:pending (atom {})})))))
+
+(deftest create-correlated-bridge-test
+  (testing "create-correlated-bridge returns bridge map with expected keys"
+    (let [responses (atom [])
+          fake-stop (fn [] nil)]
+      ;; Mock start-mcp-bridge to avoid subprocess
+      (with-redefs [bridge/start-mcp-bridge (fn [_config _in _out] fake-stop)]
+        (let [bridge (bridge/create-correlated-bridge {"command" "echo" "transport" "stdio"})]
+          (is (map? bridge))
+          (is (contains? bridge :pending))
+          (is (contains? bridge :input-chan))
+          (is (contains? bridge :output-chan))
+          (is (contains? bridge :stop))
+          (is (fn? (:stop bridge)))
+          (is (instance? clojure.lang.Atom (:pending bridge)))
+          ;; Clean up
+          ((:stop bridge))))))
+
+  (testing "create-correlated-bridge stop function cleans up"
+    (let [underlying-stopped? (atom false)]
+      (with-redefs [bridge/start-mcp-bridge (fn [_config _in _out]
+                                              (fn [] (reset! underlying-stopped? true)))]
+        (let [bridge (bridge/create-correlated-bridge {"command" "echo" "transport" "stdio"})]
+          ((:stop bridge))
+          (is @underlying-stopped?))))))
+
+(deftest init-bridge-error-handling-test
+  (testing "init-bridge throws on initialization error"
+    (with-redefs [bridge/create-correlated-bridge
+                  (fn [_config]
+                    {:pending (atom {})
+                     :input-chan (chan 10)
+                     :output-chan (chan 10)
+                     :stop (fn [] nil)})
+                  bridge/send-request
+                  (fn [_bridge _request]
+                    (let [p (promise)]
+                      (deliver p {"error" {"message" "init failed"}})
+                      p))]
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (bridge/init-bridge {"command" "test" "transport" "stdio"} {:timeout-ms 100}))))))
+
+(deftest init-bridge-success-test
+  (testing "init-bridge returns bridge and cache on success"
+    (let [init-response {"result" {"capabilities" {"tools" true}}}
+          tools-response {"result" {"tools" [{"name" "test-tool"}]}}
+          request-count (atom 0)]
+      (with-redefs [bridge/create-correlated-bridge
+                    (fn [_config]
+                      {:pending (atom {})
+                       :input-chan (chan 10)
+                       :output-chan (chan 10)
+                       :stop (fn [] nil)})
+                    bridge/send-request
+                    (fn [_bridge request]
+                      (swap! request-count inc)
+                      (let [p (promise)]
+                        (cond
+                          (= "initialize" (get request "method"))
+                          (deliver p init-response)
+                          (= "tools/list" (get request "method"))
+                          (deliver p tools-response))
+                        p))
+                    bridge/drain-notifications (fn [_] [])]
+        (let [result (bridge/init-bridge {"command" "test" "transport" "stdio"} {:timeout-ms 100})]
+          (is (map? result))
+          (is (contains? result :bridge))
+          (is (contains? result :cache))
+          (is (= [{"name" "test-tool"}] (get-in result [:cache "tools"]))))))))
+
+(deftest init-bridge-no-capabilities-test
+  (testing "init-bridge handles server with no capabilities"
+    (let [init-response {"result" {"capabilities" {}}}]
+      (with-redefs [bridge/create-correlated-bridge
+                    (fn [_config]
+                      {:pending (atom {})
+                       :input-chan (chan 10)
+                       :output-chan (chan 10)
+                       :stop (fn [] nil)})
+                    bridge/send-request
+                    (fn [_bridge _request]
+                      (let [p (promise)]
+                        (deliver p init-response)
+                        p))
+                    bridge/drain-notifications (fn [_] [])]
+        (let [result (bridge/init-bridge {"command" "test" "transport" "stdio"} {:timeout-ms 100})]
+          (is (map? result))
+          (is (= {} (:cache result))))))))
+
+(deftest init-bridge-default-config-test
+  (testing "init-bridge uses default config when called with no args"
+    ;; Just test that default-mcp-config is used
+    (is (= "bash" (get bridge/default-mcp-config "command")))
+    (is (= "stdio" (get bridge/default-mcp-config "transport")))))
+
+

@@ -244,3 +244,125 @@
                   "language" "en"}
           result (#'openapi-call/build-multipart-body params)]
       (is (= 2 (count result))))))
+
+(deftest test-extract-id-from-schema
+  (testing "extracts id from schema with const"
+    (let [schema {"properties" {"id" {"const" ["a" "b"]}}}]
+      (is (= ["a" "b"] (#'openapi-call/extract-id-from-schema schema)))))
+
+  (testing "extracts id from oneOf schema"
+    (let [schema {"oneOf" [{"properties" {"id" {"const" ["x" "y"]}}}]}]
+      (is (= ["x" "y"] (#'openapi-call/extract-id-from-schema schema)))))
+
+  (testing "extracts id from anyOf schema"
+    (let [schema {"anyOf" [{"properties" {"id" {"const" ["p" "q"]}}}]}]
+      (is (= ["p" "q"] (#'openapi-call/extract-id-from-schema schema)))))
+
+  (testing "throws when multiple alternatives"
+    (let [schema {"oneOf" [{"properties" {"id" {"const" ["a" "b"]}}}
+                           {"properties" {"id" {"const" ["c" "d"]}}}]}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"exactly one output xition"
+                            (#'openapi-call/extract-id-from-schema schema)))))
+
+  (testing "throws when missing id property"
+    (let [schema {"properties" {"status" {"type" "integer"}}}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"missing 'id' property"
+                            (#'openapi-call/extract-id-from-schema schema)))))
+
+  (testing "throws when id has no const"
+    (let [schema {"properties" {"id" {"type" "array"}}}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"const.*constraint"
+                            (#'openapi-call/extract-id-from-schema schema))))))
+
+(deftest test-execute-operation-binary-methods
+  (testing "PUT method is supported"
+    (with-redefs [clj-http.client/put (fn [_url _opts]
+                                        {:status 200 :body {:updated true}})]
+      (let [result (#'openapi-call/execute-operation-binary
+                    {:base-url "http://test.local"}
+                    {:method :put :path "/item" :path-params [] :query-params []}
+                    {}
+                    {})]
+        (is (= 200 (get result "status"))))))
+
+  (testing "DELETE method is supported"
+    (with-redefs [clj-http.client/delete (fn [_url _opts]
+                                           {:status 204 :body nil})]
+      (let [result (#'openapi-call/execute-operation-binary
+                    {:base-url "http://test.local"}
+                    {:method :delete :path "/item/1" :path-params [] :query-params []}
+                    {}
+                    {})]
+        (is (= 204 (get result "status"))))))
+
+  (testing "PATCH method is supported"
+    (with-redefs [clj-http.client/patch (fn [_url _opts]
+                                          {:status 200 :body {:patched true}})]
+      (let [result (#'openapi-call/execute-operation-binary
+                    {:base-url "http://test.local"}
+                    {:method :patch :path "/item/1" :path-params [] :query-params []}
+                    {}
+                    {})]
+        (is (= 200 (get result "status"))))))
+
+  (testing "unsupported method returns error"
+    (let [result (#'openapi-call/execute-operation-binary
+                  {:base-url "http://test.local"}
+                  {:method :options :path "/" :path-params [] :query-params []}
+                  {}
+                  {})]
+      (is (contains? result "error"))
+      (is (re-find #"Unsupported method" (get result "error")))))
+
+  (testing "error handling returns error map"
+    (with-redefs [clj-http.client/get (fn [_url _opts]
+                                        (throw (Exception. "Connection refused")))]
+      (let [result (#'openapi-call/execute-operation-binary
+                    {:base-url "http://nonexistent.test"}
+                    {:method :get :path "/" :path-params [] :query-params []}
+                    {}
+                    {})]
+        (is (= "Connection refused" (get result "error"))))))
+
+  (testing "binary response returns byte array"
+    (let [audio-bytes (byte-array [1 2 3 4])]
+      (with-redefs [clj-http.client/get (fn [_url _opts]
+                                          {:status 200 :body audio-bytes
+                                           :headers {"Content-Type" "audio/wav"}})]
+        (let [result (#'openapi-call/execute-operation-binary
+                      {:base-url "http://test.local"}
+                      {:method :get :path "/" :path-params [] :query-params []}
+                      {}
+                      {:response-content-type "audio/wav"})]
+          (is (= 200 (get result "status")))
+          (is (= audio-bytes (get result "body")))))))
+
+  (testing "auth bearer token is included"
+    (let [captured-opts (atom nil)]
+      (with-redefs [clj-http.client/get (fn [_url opts]
+                                          (reset! captured-opts opts)
+                                          {:status 200 :body {}})]
+        (#'openapi-call/execute-operation-binary
+         {:base-url "http://test.local" :auth {:type :bearer :token "my-token"}}
+         {:method :get :path "/" :path-params [] :query-params []}
+         {}
+         {})
+        (is (= "Bearer my-token" (get-in @captured-opts [:headers "Authorization"]))))))
+
+  (testing "auth api-key is included"
+    (let [captured-opts (atom nil)]
+      (with-redefs [clj-http.client/get (fn [_url opts]
+                                          (reset! captured-opts opts)
+                                          {:status 200 :body {}})]
+        (#'openapi-call/execute-operation-binary
+         {:base-url "http://test.local" :auth {:type :api-key :header "X-Api-Key" :value "secret"}}
+         {:method :get :path "/" :path-params [] :query-params []}
+         {}
+         {})
+        (is (= "secret" (get-in @captured-opts [:headers "X-Api-Key"])))))))
+
+
+
