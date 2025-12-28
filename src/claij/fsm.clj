@@ -277,8 +277,20 @@
              (log/info (str "   [>>] Handler entered for ox-id: " ox-id ", valid-ids: " (keys id->x-and-c)))
              (try
                (let [[{ox-schema-raw "schema" :as ox} c] (id->x-and-c ox-id)]
-                 (if (nil? ox)
+                 (cond
+                   ;; FATAL ERROR from LLM layer - bail out immediately, don't retry
+                   (= ox-id "error")
+                   (do
+                     (log/error "   [!!] LLM layer returned fatal error - bailing out immediately")
+                     (log/error (str "   Error details: " (pr-str (get output-event "error"))))
+                     (bail-out! {:reason "llm-fatal-error"
+                                 :type :llm-error
+                                 :error (get output-event "error")
+                                 :final-output output-event}
+                                current-trail))
+
                    ;; NO MATCHING TRANSITION - Retry with error feedback
+                   (nil? ox)
                    (do
                      (log/error "no output xition:" (prn-str ox-id))
                      (retrier
@@ -313,7 +325,9 @@
                                     :valid-ids (keys id->x-and-c)
                                     :final-output output-event}
                                    current-trail))))
+
                    ;; MATCHING TRANSITION FOUND - validate schema
+                   :else
                    (let [ox-schema (resolve-schema new-context ox ox-schema-raw)
                          ;; Use pre-built registry from context (built in start-fsm)
                          registry (get new-context :schema/defs)

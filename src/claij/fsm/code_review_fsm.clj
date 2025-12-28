@@ -118,7 +118,19 @@
                "code" {"$ref" "#/$defs/code"
                        "description" "The final reviewed code"}
                "notes" {"$ref" "#/$defs/notes"
-                        "description" "Summary of the review process and findings"}}}})
+                        "description" "Summary of the review process and findings"}}}
+
+   ;; Abort event: reviewer → end (emergency bail-out)
+   "reviewer_abort" {"type" "object"
+                     "description" "Emergency abort from reviewer state when errors occur"
+                     "additionalProperties" true
+                     "required" ["id"]
+                     "properties"
+                     {"id" {"const" ["reviewer" "end"]}
+                      "error" {"type" "object"
+                               "description" "Error information"}
+                      "bail_out" {"type" "boolean"
+                                  "description" "Flag indicating this is a bail-out"}}}})
 
 (def-fsm
   code-review-fsm
@@ -187,6 +199,9 @@
     {"id" ["reviewer" "chairman"]
      "prompts" []
      "schema" {"$ref" "#/$defs/response"}}
+    {"id" ["reviewer" "end"]
+     "prompts" []
+     "schema" {"$ref" "#/$defs/reviewer_abort"}}
     {"id" ["chairman" "end"]
      "prompts" []
      "schema" {"$ref" "#/$defs/summary"}}]})
