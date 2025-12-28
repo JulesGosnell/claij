@@ -201,12 +201,12 @@
    
    Options:
    - :service - LLM service (default: ollama:local)
-   - :model - LLM model (default: deepseek-coder-v2:16b-32k)
+   - :model - LLM model (default: granite4:3b)
    - :stt-url - STT service URL (default: prognathodon:8000)
    - :tts-url - TTS service URL (default: prognathodon:8001)"
   [{:keys [service model stt-url tts-url]
     :or {service "ollama:local"
-         model "deepseek-coder-v2:16b-32k"
+         model "granite4:3b"
          stt-url default-stt-url
          tts-url default-tts-url}}]
   {:id->action bdd-actions
