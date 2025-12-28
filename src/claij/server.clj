@@ -388,21 +388,8 @@
     {:status 404
      :body {:error (str "FSM not found: " fsm-id)}}))
 
-(defn fsm-graph-dot-handler [{{:keys [fsm-id]} :path-params
-                              {:strs [hats]} :query-params}]
-  (if-let [fsm (get (fsms) fsm-id)]
-    (let [dot-str (if hats
-                    (let [ctx (case fsm-id
-                                "bdd" (bdd/make-bdd-context {})
-                                {:hats {:registry (hat/make-hat-registry)}})
-                          registry (get-in ctx [:hats :registry])]
-                      (graph/fsm->dot-with-hats fsm registry ctx))
-                    (graph/fsm->dot fsm))]
-      {:status 200
-       :headers {"content-type" "text/vnd.graphviz"}
-       :body dot-str})
-    {:status 404
-     :body {:error (str "FSM not found: " fsm-id)}}))
+;; fsm-graph-dot-handler removed - DOT source rarely needed directly
+;; SVG endpoint kept since fsm-html-handler embeds it via <object>
 
 (defn llm-handler [{{:keys [provider]} :path-params :keys [body-params]}]
   (if-let [llm-fn (get llms provider)]
@@ -615,12 +602,7 @@ a{color:#00ff88;font-size:1.2em}ol{line-height:2}</style></head>
      {:get {:summary "Get FSM as SVG visualization"
             :parameters {:path {:fsm-id :string}}
             :produces ["image/svg+xml"]
-            :handler fsm-graph-svg-handler}}]
-    ["/graph.dot"
-     {:get {:summary "Get FSM as DOT source"
-            :parameters {:path {:fsm-id :string}}
-            :produces ["text/vnd.graphviz"]
-            :handler fsm-graph-dot-handler}}]]
+            :handler fsm-graph-svg-handler}}]]
 
    ;; Voice endpoint (BDD FSM)
    ["/voice"
