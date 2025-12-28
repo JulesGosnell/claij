@@ -141,7 +141,8 @@
 
 (defn build-tool-result-openrouter
   "Build messages with tool result for OpenRouter/OpenAI format.
-   NOTE: arguments must be a JSON string, not an object."
+   NOTE: arguments must be a JSON string, not an object.
+   See: https://openrouter.ai/docs/guides/guides/mcp-servers"
   [original-messages assistant-message tool-call-id result]
   ;; Fix assistant message: ensure arguments exists and is JSON string
   (let [fixed-assistant
@@ -155,11 +156,14 @@
                                                 (if (string? args)
                                                   args
                                                   (json/generate-string args)))))))
-                           calls)))]
+                           calls)))
+        ;; Get tool name for the result message
+        tool-name (get-in assistant-message [:tool_calls 0 :function :name])]
     (conj (vec original-messages)
           fixed-assistant
           {:role "tool"
            :tool_call_id tool-call-id
+           :name tool-name ;; OpenRouter docs include this
            :content result})))
 
 ;;==============================================================================
