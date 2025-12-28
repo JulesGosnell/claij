@@ -103,3 +103,85 @@
            (llm/strip-md-json "{\"key\": \"value\"}")))
     (is (= "plain text"
            (llm/strip-md-json "plain text")))))
+
+(deftest call-nil-content-test
+  (testing "nil content from LLM triggers error handler"
+    (let [error-promise (promise)
+          mock-post (fn [_url _opts success-callback _error-callback]
+                      ;; Return response with nil content (missing choices)
+                      (success-callback {:body (json/write-str {"choices" []})}))]
+      (with-redefs [clj-http.client/post mock-post]
+        (llm/call
+         "test-service" "model"
+         [{"role" "user" "content" "test"}]
+         (fn [_] (is false "Handler should not be called"))
+         {:registry test-registry
+          :error (fn [e] (deliver error-promise e))}))
+
+      (let [error (deref error-promise 2000 :timeout)]
+        (is (not= error :timeout) "Error handler should be called")
+        (is (= "nil-content" (:error error)))))))
+
+(deftest call-non-map-json-test
+  (testing "non-map JSON response triggers retry"
+    (let [attempts (atom 0)
+          result-promise (promise)
+          mock-post (fn [_url _opts success-callback _error-callback]
+                      (swap! attempts inc)
+                      (if (= @attempts 1)
+                        ;; First attempt: return array (not a map)
+                        (success-callback {:body (json/write-str
+                                                  {"choices" [{"message" {"content" "[1, 2, 3]"}}]})})
+                        ;; Second attempt: return valid map
+                        (success-callback {:body (json/write-str
+                                                  {"choices" [{"message" {"content" "{\"id\": \"ok\"}"}}]})})))]
+      (with-redefs [clj-http.client/post mock-post]
+        (llm/call
+         "test-service" "model"
+         [{"role" "user" "content" "test"}]
+         (fn [result] (deliver result-promise result))
+         {:registry test-registry
+          :max-retries 3}))
+
+      (let [result (deref result-promise 5000 :timeout)]
+        (is (not= result :timeout) "Should complete")
+        (is (= 2 @attempts) "Should retry once")
+        (is (= "ok" (get result "id")))))))
+
+(deftest call-http-error-test
+  (testing "HTTP error calls error handler"
+    (let [error-promise (promise)
+          mock-post (fn [_url _opts _success-callback error-callback]
+                      ;; Simulate HTTP error with body containing error details
+                      (error-callback (ex-info "Connection refused"
+                                               {:body (json/write-str {"error" "service_unavailable"})})))]
+      (with-redefs [clj-http.client/post mock-post]
+        (llm/call
+         "test-service" "model"
+         [{"role" "user" "content" "test"}]
+         (fn [_] (is false "Handler should not be called"))
+         {:registry test-registry
+          :error (fn [e] (deliver error-promise e))}))
+
+      (let [error (deref error-promise 2000 :timeout)]
+        (is (not= error :timeout) "Error handler should be called")
+        (is (= "service_unavailable" (:error error)))))))
+
+(deftest call-http-error-no-body-test
+  (testing "HTTP error without body still calls error handler"
+    (let [error-promise (promise)
+          mock-post (fn [_url _opts _success-callback error-callback]
+                      ;; Simulate HTTP error without body
+                      (error-callback (Exception. "Network timeout")))]
+      (with-redefs [clj-http.client/post mock-post]
+        (llm/call
+         "test-service" "model"
+         [{"role" "user" "content" "test"}]
+         (fn [_] (is false "Handler should not be called"))
+         {:registry test-registry
+          :error (fn [e] (deliver error-promise e))}))
+
+      (let [error (deref error-promise 2000 :timeout)]
+        (is (not= error :timeout) "Error handler should be called")
+        (is (= "request-failed" (:error error)))
+        (is (= "Network timeout" (:message error)))))))
