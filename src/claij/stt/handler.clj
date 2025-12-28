@@ -17,6 +17,7 @@
    Public API:
    - create-app: Create Ring handler for a specific backend"
   (:require [clojure.data.json :as json]
+            [clojure.string :as str]
             [clojure.tools.logging :as log]
             [claij.stt.core :refer [transcribe health-check backend-info]]
             [claij.stt.whisper.audio :refer [wav-bytes->audio-array]]
@@ -121,7 +122,7 @@
   [result]
   {:status 200
    :headers {"Content-Type" "application/json"}
-   :body (json/write-str {:text (:text result)
+   :body (json/write-str {:text (some-> (:text result) str/trim)
                           :language (:language result)})})
 
 (defn- build-error-response
