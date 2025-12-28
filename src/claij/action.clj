@@ -9,6 +9,15 @@
   (:require
    [claij.schema :as schema]))
 
+(defn stringify-keys
+  "Recursively convert keyword keys to strings for JSON Schema validation.
+   Public because it's used in def-action macro which expands in other namespaces."
+  [m]
+  (cond
+    (map? m) (into {} (map (fn [[k v]] [(if (keyword? k) (name k) k) (stringify-keys v)]) m))
+    (sequential? m) (mapv stringify-keys m)
+    :else m))
+
 ;;------------------------------------------------------------------------------
 ;; def-action Macro
 ;;------------------------------------------------------------------------------
@@ -61,18 +70,20 @@
               :action/output-schema output-schema
               :doc doc})
        (fn [config# fsm# ix# state#]
-         ;; Validate config at factory call time (start-fsm)
-         (let [result# (schema/validate ~config-schema config#)]
+         ;; Normalize config: keyword keys -> string keys for consistency
+         (let [config# (stringify-keys config#)
+               ;; Validate config at factory call time (start-fsm)
+               result# (schema/validate ~config-schema config#)]
            (when-not (:valid? result#)
              (throw (ex-info (str "Action config validation failed: " ~action-name)
                              {:type :config-validation
                               :action ~action-name
                               :schema ~config-schema
                               :value config#
-                              :errors (:errors result#)}))))
-         ;; Return runtime function with config-time params closed over
-         (let [~params [config# fsm# ix# state#]]
-           ~@body)))))
+                              :errors (:errors result#)})))
+           ;; Return runtime function with config-time params closed over
+           (let [~params [config# fsm# ix# state#]]
+             ~@body))))))
 
 ;;------------------------------------------------------------------------------
 ;; Action Metadata Helpers
