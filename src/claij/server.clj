@@ -13,10 +13,7 @@
 
    ;; Reitit
    [reitit.ring :as ring]
-   [reitit.swagger :as swagger]
    [reitit.swagger-ui :as swagger-ui]
-   [reitit.ring.coercion :as coercion]
-   [reitit.coercion.malli :as malli-coercion]
    [reitit.ring.middleware.muuntaja :as muuntaja]
    [reitit.ring.middleware.parameters :as parameters]
    [muuntaja.core :as m]
@@ -627,16 +624,11 @@ a{color:#00ff88;font-size:1.2em}ol{line-height:2}</style></head>
   (-> (ring/ring-handler
        (ring/router
         routes
-        {:data {:coercion malli-coercion/coercion
-                :muuntaja m/instance
-                :middleware [swagger/swagger-feature
-                             parameters/parameters-middleware
+        {:data {:muuntaja m/instance
+                :middleware [parameters/parameters-middleware
                              muuntaja/format-negotiate-middleware
                              muuntaja/format-response-middleware
-                             muuntaja/format-request-middleware
-                             coercion/coerce-exceptions-middleware
-                             coercion/coerce-request-middleware
-                             coercion/coerce-response-middleware]}})
+                             muuntaja/format-request-middleware]}})
        (ring/routes
         ;; Redirect root to voice UI
         (ring/create-resource-handler {:path "/"})

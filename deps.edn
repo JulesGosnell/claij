@@ -2,11 +2,8 @@
  ;; Note: examples in src/claij/examples/ are already on classpath via src/
  :deps {org.clojure/clojure {:mvn/version "1.12.3"}
 
-        ;; M3 validation (legacy - being replaced by Malli)
+        ;; M3 - JSON Schema validation
         org.clojars.jules_gosnell/m3 {:mvn/version "0.1.0-SNAPSHOT"}
-
-        ;; Malli - schema validation (replacing m3)
-        metosin/malli {:mvn/version "0.18.0"}
 
         ;; Database
         com.github.seancorfield/next.jdbc {:mvn/version "1.3.939"}
@@ -14,8 +11,10 @@
         com.zaxxer/HikariCP {:mvn/version "6.2.1"}
 
         ;; Web server & routing
-        ring/ring {:mvn/version "1.14.1"} ; 1.15.0-beta1 is available but using stable
-        metosin/reitit {:mvn/version "0.9.1"}
+        ring/ring {:mvn/version "1.14.1"}
+        metosin/reitit {:mvn/version "0.9.1"
+                        :exclusions [metosin/reitit-malli
+                                     metosin/reitit-spec]}
         metosin/reitit-ring {:mvn/version "0.9.1"}
 
         ;; HTTP client for Claude API

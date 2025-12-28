@@ -5,10 +5,10 @@
    [ring.adapter.jetty :as jetty]
    [claij.server :as claij.server :refer [string->url separator pattern initial-summary
                                           fsms llms health-handler list-fsms-handler
-                                          fsm-document-handler fsm-graph-dot-handler
-                                          fsm-graph-svg-handler dot->svg wrap-auth
-                                          llm-handler claij-api-key api-base api-url
-                                          state routes app voice-handler start]]
+                                          fsm-document-handler fsm-graph-svg-handler
+                                          dot->svg wrap-auth llm-handler claij-api-key
+                                          api-base api-url state routes app voice-handler
+                                          start]]
    [claij.fsm :as fsm])
   (:import
    [java.net URL]))
@@ -113,17 +113,6 @@
       (let [response (fsm-document-handler {:path-params {:fsm-id "nonexistent"}})]
         (is (= 404 (:status response)))
         (is (contains? (:body response) :error)))))
-
-  (testing "fsm-graph-dot-handler"
-    (testing "returns 200 with DOT source for valid id"
-      (let [response (fsm-graph-dot-handler {:path-params {:fsm-id "code-review-fsm"}})]
-        (is (= 200 (:status response)))
-        (is (string? (:body response)))
-        (is (re-find #"digraph" (:body response)))))
-
-    (testing "returns 404 for unknown FSM id"
-      (let [response (fsm-graph-dot-handler {:path-params {:fsm-id "nonexistent"}})]
-        (is (= 404 (:status response))))))
 
   (testing "fsm-graph-svg-handler"
     (testing "returns 200 with SVG for valid id"
