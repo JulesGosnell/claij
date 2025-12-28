@@ -121,27 +121,18 @@
      "hats" [{"mcp" {:servers {"github" {:config github-mcp-config}
                                "clojure" {:config clojure-tools-config}}}}]
      "prompts"
-     [;; Role and context
-      "You are a voice assistant for software development."
+     ["You are a voice assistant for software development."
       "The user is speaking to you - their speech has been transcribed."
       "Look for the user's message in the 'body.text' field of your input."
       ""
-      ;; Decision framework - let MCP hat provide the tool format
-      "DECISION:"
-      "- If you need to use tools (bash, file operations, GitHub), use the MCP tool calling format"
-      "- If you can answer directly without tools, respond with {\"id\": [\"llm\", \"tts\"], \"text\": \"your response\"}"
-      ""
-      ;; Response style
       "RESPONSE STYLE:"
       "- Speak naturally, as in a conversation"
       "- Avoid code blocks, bullet points, markdown formatting"
       "- Be concise but informative (under 3 sentences when possible)"
       "- When you perform actions, summarize what you did"
       ""
-      ;; Context
       "CONTEXT:"
-      "The user is working on CLAIJ, a Clojure AI orchestration system."
-      "They may ask you to create issues, review code, run tests, or explain concepts."]}
+      "The user is working on CLAIJ, a Clojure AI orchestration system."]}
 
     ;; TTS: text → audio
     {"id" "tts"
@@ -198,8 +189,8 @@
    - :stt-url - STT service URL (default: prognathodon:8000)
    - :tts-url - TTS service URL (default: prognathodon:8001)"
   [{:keys [service model stt-url tts-url]
-    :or {service "ollama:local"
-         model "qwen2.5-coder:14b"
+    :or {service "anthropic"
+         model "claude-sonnet-4-20250514"
          stt-url default-stt-url
          tts-url default-tts-url}}]
   {:id->action bdd-actions
