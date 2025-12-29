@@ -191,8 +191,8 @@
 (defn call-google-direct
   "Call Google Gemini API directly with native tools."
   [model messages tools]
-  (let [api-key (or (get-env "GOOGLE_API_KEY") (get-env "GEMINI_API_KEY"))
-        _ (assert api-key "GOOGLE_API_KEY or GEMINI_API_KEY not set")
+  (let [api-key (get-env "GOOGLE_API_KEY")
+        _ (assert api-key "GOOGLE_API_KEY not set")
         url (str "https://generativelanguage.googleapis.com/v1beta/models/" model ":generateContent")
         ;; Google uses function_declarations format
         google-tools (when (seq tools)
