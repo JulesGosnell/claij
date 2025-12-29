@@ -45,7 +45,7 @@
   
    Args:
      service  - Service name (e.g., 'anthropic', 'ollama:local', 'openrouter')
-     model    - Model name native to service (e.g., 'claude-sonnet-4-20250514', 'mistral:7b')
+     model    - Model name native to service (e.g., 'claude-sonnet-4-5', 'mistral:7b')
      prompts  - Vector of message maps with 'role' and 'content' keys
      handler  - Function to call with successful parsed JSON response
    

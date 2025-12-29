@@ -11,7 +11,8 @@
                       make-prompts lift chain run-sync fsm-schemas
                       ;; Story #62: state→action schema bridge
                       state-action state-action-input-schema state-action-output-schema]]
-   [claij.llm :refer [call]]))
+   [claij.llm :refer [call]]
+   [claij.model :as model]))
 
 ;;------------------------------------------------------------------------------
 ;; Test Helpers (using claij.schema/JSON Schema)
@@ -114,7 +115,7 @@
       (is (map? config) (str "Config for " service-model " should be a map"))))
 
   (testing "anthropic config includes system prompts for EDN parsing"
-    (let [anthropic-config (get llm-configs ["anthropic" "claude-sonnet-4-20250514"])]
+    (let [anthropic-config (get llm-configs ["anthropic" (model/direct-model :anthropic)])]
       (is (some? anthropic-config) "Should have anthropic config")
       (is (vector? (:prompts anthropic-config)) "Should have prompts vector")
       (is (pos? (count (:prompts anthropic-config))) "Should have at least one prompt")))
@@ -421,7 +422,7 @@
           ix {"prompts" []}
           state {"prompts" []}
           trail []
-          prompts (make-prompts fsm ix state trail "anthropic" "claude-sonnet-4.5")]
+          prompts (make-prompts fsm ix state trail "anthropic" (model/direct-model :anthropic))]
 
       (testing "returns prompts with LLM config applied"
         (is (seq prompts))
@@ -1045,7 +1046,7 @@
   (let [actions {"llm" #'claij.fsm/llm-action "end" #'actions/end-action}
         context {:id->action actions
                  :llm/service "anthropic"
-                 :llm/model "claude-sonnet-4-20250514"}
+                 :llm/model (model/direct-model :anthropic)}
         input {"question" "Is 2 + 2 = 4?"}
         result (run-sync minimal-fsm context input 60000)]
     (if (= result :timeout)
@@ -1409,18 +1410,18 @@
 (deftest llm-configs-test
   (testing "llm-configs has expected entries"
     (is (map? llm-configs))
-    (is (contains? llm-configs ["anthropic" "claude-sonnet-4-20250514"]))
-    (is (contains? llm-configs ["google" "gemini-2.0-flash"]))
-    (is (contains? llm-configs ["xai" "grok-4"])))
+    (is (contains? llm-configs ["anthropic" (model/direct-model :anthropic)]))
+    (is (contains? llm-configs ["google" (model/direct-model :google)]))
+    (is (contains? llm-configs ["xai" (model/direct-model :xai)])))
 
   (testing "anthropic config has prompts"
-    (let [config (get llm-configs ["anthropic" "claude-sonnet-4-20250514"])]
+    (let [config (get llm-configs ["anthropic" (model/direct-model :anthropic)])]
       (is (vector? (:prompts config)))
       (is (every? #(contains? % :role) (:prompts config)))
       (is (every? #(contains? % :content) (:prompts config)))))
 
   (testing "other configs can be empty"
-    (let [google-config (get llm-configs ["google" "gemini-2.0-flash"])]
+    (let [google-config (get llm-configs ["google" (model/direct-model :google)])]
       (is (map? google-config)))))
 
 (deftest chain-validation-extended-test
@@ -1536,7 +1537,7 @@
           ix (first (filter #(= (get % "id") ["start" "processor"]) (get fsm "xitions")))
           state (first (filter #(= (get % "id") "processor") (get fsm "states")))
           ;; Config has explicit service/model
-          action-f2 (llm-action {"service" "openrouter" "model" "gpt-5"} fsm ix state)]
+          action-f2 (llm-action {"service" "openrouter" "model" (model/openrouter-model :openai)} fsm ix state)]
       (with-redefs [call (fn [service model _prompts handler & {:as opts}]
                            (reset! call-args {:service service :model model})
                            (handler {"id" ["processor" "end"] "result" "done"}))]
@@ -1545,7 +1546,7 @@
                    []
                    (fn [_ctx _event] nil))
         (is (= "openrouter" (:service @call-args)))
-        (is (= "gpt-5" (:model @call-args))))))
+        (is (= (model/openrouter-model :openai) (:model @call-args))))))
 
   (testing "llm-action falls back to context service/model"
     (let [call-args (atom nil)
@@ -1556,12 +1557,12 @@
       (with-redefs [call (fn [service model _prompts handler & {:as opts}]
                            (reset! call-args {:service service :model model})
                            (handler {"id" ["processor" "end"] "result" "done"}))]
-        (action-f2 {:llm/service "xai" :llm/model "grok-4"}
+        (action-f2 {:llm/service "xai" :llm/model (model/direct-model :xai)}
                    {"id" ["start" "processor"] "input" "test"}
                    []
                    (fn [_ctx _event] nil))
         (is (= "xai" (:service @call-args)))
-        (is (= "grok-4" (:model @call-args))))))
+        (is (= (model/direct-model :xai) (:model @call-args))))))
 
   (testing "llm-action uses defaults when no config or context"
     (let [call-args (atom nil)
@@ -1577,7 +1578,7 @@
                    []
                    (fn [_ctx _event] nil))
         (is (= "anthropic" (:service @call-args)))
-        (is (= "claude-sonnet-4-20250514" (:model @call-args))))))
+        (is (= (model/direct-model :anthropic) (:model @call-args))))))
 
   (testing "llm-action handles error callback"
     (let [handler-args (atom nil)

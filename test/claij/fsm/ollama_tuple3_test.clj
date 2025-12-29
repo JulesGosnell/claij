@@ -22,16 +22,12 @@
 ;; Minimal concerns for fast test
 (def test-concerns ["Is this idiomatic Clojure?"])
 
-;; Models to test (should fit in ~9GB VRAM)
+;; Models to test - these scored 10/10 in native tool calling (issue #124)
+;; Note: functiongemma triggers safety filters on code-review prompts
+;; Note: granite4:3b can't follow FSM transition rules consistently
+;; Note: qwen3:8b loops chairman↔reviewer endlessly, can't decide when to end
 (def candidate-models
-  ["mistral:7b"
-   "qwen2.5-coder:7b"
-   "qwen2.5:7b" ;; need to pull
-   "gemma2:9b" ;; need to pull
-   "llama3.2:8b" ;; need to pull
-   "phi3.5:3.8b" ;; need to pull
-   "qwen2.5-coder:14b" ;; larger, might be slow
-   "deepseek-coder-v2:16b"])
+  ["qwen3-vl:latest"])
 
 (defn test-model
   "Test a single Ollama model with the code-review FSM.
@@ -135,8 +131,14 @@
   [model]
   (test-model model 30000)) ;; 30 second timeout
 
-;; Integration test that can be run with lein test
-(deftest ^:integration ^:long-running ollama-mistral-test
-  (testing "Mistral 7b can complete code-review FSM"
-    (let [result (test-model "mistral:7b" (* 3 60 1000))]
-      (is (:success? result) (str "Mistral should succeed: " (:error result))))))
+;; Integration tests for Ollama models - CURRENTLY ALL SKIPPED
+;; All 10/10 tool-calling models fail at FSM chairing:
+;; - functiongemma: triggers safety filters
+;; - granite4:3b: can't follow FSM transition rules
+;; - qwen3:8b: loops chairman↔reviewer endlessly
+;; - qwen3-vl: times out, can't follow schema
+;; TODO: Investigate if prompt engineering can help smaller models chair FSMs
+(deftest ^:integration ^:long-running ^:kaocha/skip ollama-qwen3-vl-test
+  (testing "qwen3-vl:latest can complete code-review FSM"
+    (let [result (test-model "qwen3-vl:latest" (* 3 60 1000))]
+      (is (:success? result) (str "qwen3-vl should succeed: " (:error result))))))

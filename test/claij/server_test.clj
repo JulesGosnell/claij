@@ -11,7 +11,8 @@
                                           api-base api-url state routes app voice-handler
                                           start]]
    [claij.fsm :as fsm]
-   [claij.util :as util])
+   [claij.util :as util]
+   [claij.model :as model])
   (:import
    [java.net URL]))
 
@@ -561,7 +562,7 @@
                        :body (util/clj->json
                               {:choices [{:message {:content (str "Answer1" separator "summary1")}}
                                          {:message {:content (str "Answer2" separator "summary2")}}]})})]
-        (let [result (claij.server/open-router "test-id" "openai" "gpt4" summary "test")]
+        (let [result (claij.server/open-router "test-id" "openai" (model/direct-model :openai) summary "test")]
           (is (string? result))
           ;; Should be comma-joined
           (is (= "Answer1,Answer2" result)))))))

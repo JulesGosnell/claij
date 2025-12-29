@@ -8,7 +8,8 @@
                           fsm-action-factory reuse-action]]
    [claij.fsm :refer [start-fsm last-event]]
    [claij.schema :refer [def-fsm]]
-   [claij.store :as store]))
+   [claij.store :as store]
+   [claij.model :as model]))
 
 ;;==============================================================================
 ;; Example Actions for Testing
@@ -108,7 +109,7 @@
 
 (deftest def-action-currying-test
   (testing "Factory returns callable runtime function when config is valid"
-    (let [config {"provider" "anthropic" "model" "claude-opus-4.5"}
+    (let [config {"provider" "anthropic" "model" (model/direct-model :anthropic)}
           f2 (test-llm-action config mock-fsm mock-ix mock-state)
           result (atom nil)]
       (is (fn? f2))
@@ -165,7 +166,7 @@
 
 (deftest def-action-runtime-execution-test
   (testing "Runtime function executes with closed-over config"
-    (let [config {"provider" "google" "model" "gemini-3-pro-preview"}
+    (let [config {"provider" "google" "model" (model/direct-model :google)}
           f2 (test-llm-action config mock-fsm mock-ix mock-state)
           result (atom nil)
           mock-handler (fn [ctx out] (reset! result out))
@@ -174,7 +175,7 @@
           mock-trail []]
       (f2 mock-context mock-event mock-trail mock-handler)
       (is (= "google" (get @result "provider")))
-      (is (= "gemini-3-pro-preview" (get @result "model")))
+      (is (= (model/direct-model :google) (get @result "model")))
       (is (= mock-event (get @result "input")))))
 
   (testing "Config-time params are available in runtime function"
@@ -219,7 +220,7 @@
     (let [registry {"llm" test-llm-action
                     "end" test-end-action}
           llm-factory (get registry "llm")
-          config {"provider" "xai" "model" "grok-4"}
+          config {"provider" "xai" "model" (model/direct-model :xai)}
           f2 (llm-factory config mock-fsm mock-ix mock-state)
           result (atom nil)]
       (is (fn? f2))
@@ -321,10 +322,10 @@
     (testing "creates context with defaults"
       (let [ctx (make-context {:store :mock-store
                                :provider "anthropic"
-                               :model "claude-opus-4.5"})]
+                               :model (model/direct-model :anthropic)})]
         (is (= :mock-store (:store ctx)))
         (is (= "anthropic" (:provider ctx)))
-        (is (= "claude-opus-4.5" (:model ctx)))
+        (is (= (model/direct-model :anthropic) (:model ctx)))
         (is (= default-actions (:id->action ctx)))))
 
     (testing "allows overriding id->action"

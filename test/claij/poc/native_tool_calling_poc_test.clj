@@ -10,7 +10,8 @@
    [clojure.tools.logging :as log]
    [clojure.string :as str]
    [cheshire.core :as json]
-   [clj-http.client :as http]))
+   [clj-http.client :as http]
+   [claij.model :as model]))
 
 ;;==============================================================================
 ;; Environment Loading
@@ -47,16 +48,16 @@
 ;; Stubbed Tool Definition
 ;;==============================================================================
 
-(def secret-tool
-  "A simple tool that 'returns' a secret. The LLM must call this tool
-   to get the secret value. We simulate the response."
-  {:name "get_secret"
-   :description "Returns the secret passphrase. Call this to retrieve the secret."
+(def answer-tool
+  "A simple tool that 'returns' a value. The LLM must call this tool
+   to get the value. We simulate the response."
+  {:name "get_answer"
+   :description "Returns the answer. Call this to retrieve it."
    :input_schema {:type "object"
                   :properties {}
                   :required []}})
 
-(def secret-value "the-eagle-has-landed-42")
+(def answer-value "42")
 
 ;;==============================================================================
 ;; Anthropic API (Direct)
@@ -110,8 +111,15 @@
   (let [api-key (get-env "OPENROUTER_API_KEY")
         _ (assert api-key "OPENROUTER_API_KEY not set")
         ;; OpenRouter uses OpenAI format - wrap tools in function type
+        ;; Also transform :input_schema to :parameters (OpenAI format)
         openai-tools (when (seq tools)
-                       (mapv (fn [t] {:type "function" :function t}) tools))
+                       (mapv (fn [t]
+                               (let [params (or (:parameters t) (:input_schema t))]
+                                 {:type "function"
+                                  :function (-> t
+                                                (dissoc :input_schema)
+                                                (assoc :parameters params))}))
+                             tools))
         body (cond-> {:model model
                       :max_tokens 1024
                       :messages messages}
@@ -125,6 +133,134 @@
     (if (= 200 (:status response))
       {:ok true :body (:body response)}
       {:ok false :status (:status response) :error (:body response)})))
+
+(defn call-openai-direct
+  "Call OpenAI API directly with native tools."
+  [model messages tools]
+  (let [api-key (get-env "OPENAI_API_KEY")
+        _ (assert api-key "OPENAI_API_KEY not set")
+        openai-tools (when (seq tools)
+                       (mapv (fn [t]
+                               (let [params (or (:parameters t) (:input_schema t))]
+                                 {:type "function"
+                                  :function (-> t
+                                                (dissoc :input_schema)
+                                                (assoc :parameters params))}))
+                             tools))
+        body (cond-> {:model model
+                      :max_completion_tokens 1024
+                      :messages messages}
+               openai-tools (assoc :tools openai-tools))
+        response (http/post "https://api.openai.com/v1/chat/completions"
+                            {:headers {"Authorization" (str "Bearer " api-key)
+                                       "Content-Type" "application/json"}
+                             :body (json/generate-string body)
+                             :as :json
+                             :throw-exceptions false})]
+    (if (= 200 (:status response))
+      {:ok true :body (:body response)}
+      {:ok false :status (:status response) :error (:body response)})))
+
+(defn call-xai-direct
+  "Call xAI API directly with native tools."
+  [model messages tools]
+  (let [api-key (get-env "XAI_API_KEY")
+        _ (assert api-key "XAI_API_KEY not set")
+        openai-tools (when (seq tools)
+                       (mapv (fn [t]
+                               (let [params (or (:parameters t) (:input_schema t))]
+                                 {:type "function"
+                                  :function (-> t
+                                                (dissoc :input_schema)
+                                                (assoc :parameters params))}))
+                             tools))
+        body (cond-> {:model model
+                      :max_tokens 1024
+                      :messages messages}
+               openai-tools (assoc :tools openai-tools))
+        response (http/post "https://api.x.ai/v1/chat/completions"
+                            {:headers {"Authorization" (str "Bearer " api-key)
+                                       "Content-Type" "application/json"}
+                             :body (json/generate-string body)
+                             :as :json
+                             :throw-exceptions false})]
+    (if (= 200 (:status response))
+      {:ok true :body (:body response)}
+      {:ok false :status (:status response) :error (:body response)})))
+
+(defn call-google-direct
+  "Call Google Gemini API directly with native tools."
+  [model messages tools]
+  (let [api-key (or (get-env "GOOGLE_API_KEY") (get-env "GEMINI_API_KEY"))
+        _ (assert api-key "GOOGLE_API_KEY or GEMINI_API_KEY not set")
+        url (str "https://generativelanguage.googleapis.com/v1beta/models/" model ":generateContent")
+        ;; Google uses function_declarations format
+        google-tools (when (seq tools)
+                       [{:function_declarations
+                         (mapv (fn [t]
+                                 {:name (:name t)
+                                  :description (:description t)
+                                  :parameters (or (:parameters t) (:input_schema t))})
+                               tools)}])
+        ;; Convert messages to Google format
+        ;; Handle both initial messages and messages with pre-formatted parts
+        contents (mapv (fn [{:keys [role content parts] :as msg}]
+                         (cond
+                           ;; Already has :parts with :functionResponse or :functionCall - pass through
+                           (and parts (some #(or (:functionResponse %) (:functionCall %)) parts))
+                           {:role (if (= role "assistant") "model" role)
+                            :parts parts}
+                           ;; Already has :parts with :text - pass through
+                           (and parts (some :text parts))
+                           {:role (if (= role "assistant") "model" role)
+                            :parts parts}
+                           ;; Regular message with content
+                           content
+                           {:role (if (= role "assistant") "model" role)
+                            :parts [{:text content}]}
+                           ;; Fallback - already formatted message
+                           :else
+                           {:role (if (= role "assistant") "model" role)
+                            :parts (or parts [{:text ""}])}))
+                       messages)
+        body (cond-> {:contents contents}
+               google-tools (assoc :tools google-tools))
+        response (http/post url
+                            {:headers {"x-goog-api-key" api-key
+                                       "Content-Type" "application/json"}
+                             :body (json/generate-string body)
+                             :as :json
+                             :throw-exceptions false})]
+    (if (= 200 (:status response))
+      {:ok true :body (:body response)}
+      {:ok false :status (:status response) :error (:body response)})))
+
+(defn extract-tool-use-google
+  "Extract function calls from Google Gemini response."
+  [response]
+  (let [parts (get-in response [:body :candidates 0 :content :parts])]
+    (->> parts
+         (filter :functionCall)
+         (mapv (fn [part]
+                 (let [fc (:functionCall part)]
+                   {:id (:name fc) ;; Google doesn't use separate IDs
+                    :name (:name fc)
+                    :arguments (:args fc)}))))))
+
+(defn build-tool-result-google
+  "Build Google-format messages with tool result."
+  [original-messages assistant-parts tool-name result]
+  (let [;; Add the assistant's response with function call
+        with-assistant (conj (vec original-messages)
+                             {:role "assistant"
+                              :parts assistant-parts})
+        ;; Add the function response
+        with-result (conj with-assistant
+                          {:role "user"
+                           :parts [{:functionResponse
+                                    {:name tool-name
+                                     :response {:result result}}}]})]
+    with-result))
 
 (defn extract-tool-use-openrouter
   "Extract tool_calls from OpenRouter/OpenAI response."
@@ -216,10 +352,10 @@
   (log/info "Testing" provider "with model" model)
 
   (let [messages [{:role "user"
-                   :content "What is the secret? Use the get_secret tool to find out, then tell me."}]
+                   :content "What is the answer? Use the get_answer tool to retrieve it, then tell me."}]
 
         ;; First call - LLM should decide to use the tool
-        response1 (call-fn model messages [secret-tool])]
+        response1 (call-fn model messages [answer-tool])]
 
     (if-not (:ok response1)
       {:success false
@@ -239,19 +375,22 @@
                      :response (:body response1)}}
 
           (let [tool-use (first tool-uses)
-                _ (is (= "get_secret" (:name tool-use))
-                      (str provider " should call get_secret"))
+                _ (is (= "get_answer" (:name tool-use))
+                      (str provider " should call get_answer"))
 
                 ;; Build messages with tool result
+                ;; Different providers return assistant content at different paths
+                assistant-content (or (get-in response1 [:body :content]) ;; Anthropic
+                                      (get-in response1 [:body :choices 0 :message]) ;; OpenAI/OpenRouter
+                                      (get-in response1 [:body :candidates 0 :content :parts])) ;; Google
                 messages2 (build-result-fn
                            messages
-                           (or (get-in response1 [:body :content])
-                               (get-in response1 [:body :choices 0 :message]))
+                           assistant-content
                            (:id tool-use)
-                           secret-value)
+                           answer-value)
 
                 ;; Second call - LLM processes result
-                response2 (call-fn model messages2 [secret-tool])]
+                response2 (call-fn model messages2 [answer-tool])]
 
             (if-not (:ok response2)
               {:success false
@@ -268,12 +407,17 @@
                                 ;; OpenAI format
                                 (get-in response2 [:body :choices 0 :message :content])
                                 ;; Ollama format
-                                (get-in response2 [:body :message :content]))]
+                                (get-in response2 [:body :message :content])
+                                ;; Google format
+                                (->> (get-in response2 [:body :candidates 0 :content :parts])
+                                     (filter :text)
+                                     first
+                                     :text))]
 
                 (log/info provider "final response:" final-text)
 
                 {:success (boolean (and final-text
-                                        (re-find (re-pattern secret-value) final-text)))
+                                        (re-find (re-pattern answer-value) final-text)))
                  :tool-called true
                  :final-response final-text
                  :details {:provider provider :model model}}))))))))
@@ -289,9 +433,9 @@
                    :extract-fn extract-tool-use-anthropic
                    :build-result-fn build-tool-result-anthropic
                    :provider "anthropic-direct"
-                   :model "claude-sonnet-4-20250514"})]
+                   :model (model/direct-model :anthropic)})]
       (is (:tool-called result) "Claude should call the tool")
-      (is (:success result) "Claude should return the secret in final response")
+      (is (:success result) "Claude should return the answer in final response")
       (when-not (:success result)
         (log/error "Test 1 failed:" (pr-str result))))))
 
@@ -302,9 +446,9 @@
                    :extract-fn extract-tool-use-openrouter
                    :build-result-fn build-tool-result-openrouter
                    :provider "openrouter-claude"
-                   :model "anthropic/claude-sonnet-4"})]
+                   :model (model/openrouter-model :anthropic)})]
       (is (:tool-called result) "Claude via OpenRouter should call the tool")
-      (is (:success result) "Claude via OpenRouter should return the secret")
+      (is (:success result) "Claude via OpenRouter should return the answer")
       (when-not (:success result)
         (log/error "Test 2 failed:" (pr-str result))))))
 
@@ -362,7 +506,7 @@
     :extract-fn extract-tool-use-anthropic
     :build-result-fn build-tool-result-anthropic
     :provider "anthropic-direct"
-    :model "claude-sonnet-4-20250514"})
+    :model (model/direct-model :anthropic)})
 
   ;; Test 2: OpenRouter Claude
   (run-tool-calling-test
@@ -370,7 +514,7 @@
     :extract-fn extract-tool-use-openrouter
     :build-result-fn build-tool-result-openrouter
     :provider "openrouter-claude"
-    :model "anthropic/claude-sonnet-4"})
+    :model (model/openrouter-model :anthropic)})
 
   ;; Test 3: OpenRouter free models
   (run-tool-calling-test
@@ -389,6 +533,6 @@
     :model "qwen2.5:7b"})
 
   ;; Quick test - just the first call
-  (call-anthropic "claude-sonnet-4-20250514"
-                  [{:role "user" :content "What is the secret? Use get_secret."}]
-                  [secret-tool]))
+  (call-anthropic (model/direct-model :anthropic)
+                  [{:role "user" :content "What is the answer? Use get_answer."}]
+                  [answer-tool]))

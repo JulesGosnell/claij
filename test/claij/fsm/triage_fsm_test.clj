@@ -6,6 +6,7 @@
    [clojure.data.json :as json]
    [claij.actions :as actions]
    [claij.llm :as llm]
+   [claij.model :as model]
    [claij.fsm.triage-fsm :refer [start-triage triage-action]]
    [claij.store :as store]
    [claij.fsm.code-review-fsm :refer [code-review-fsm]]
@@ -86,7 +87,7 @@
           f2 (triage-action {} {} {"schema" {"type" "object"
                                              "required" ["fsm-id"]
                                              "properties" {"fsm-id" {"type" "string"}}}} {})
-          context {:store nil :llm/service "openrouter" :llm/model "openai/gpt-4o"}
+          context {:store nil :llm/service "openrouter" :llm/model (model/openrouter-model :openai)}
           event {"document" "Please review my code"}
           mock-fsms [{"id" "code-review" "version" 1 "description" "Reviews code"}
                      {"id" "test-gen" "version" 2 "description" "Generates tests"}]]
@@ -103,7 +104,7 @@
 
       (is (some? @llm-called))
       (is (= "openrouter" (:service @llm-called)))
-      (is (= "openai/gpt-4o" (:model @llm-called)))
+      (is (= (model/openrouter-model :openai) (:model @llm-called)))
 
       (let [prompt-content (get-in @llm-called [:prompts 0 "content"])]
         (is (str/includes? prompt-content "code-review"))
@@ -164,7 +165,7 @@
                                   "notes" "Please review this fibonacci implementation"
                                   "concerns" ["Performance: Consider algorithmic efficiency"
                                               "Functional style: Use pure functions"]
-                                  "llm" {"service" "openrouter" "model" "openai/gpt-4o"}})
+                                  "llm" {"service" "openrouter" "model" (model/openrouter-model :openai)}})
 
                 ;; Reviewer responds
                 (= xid ["chairman" "reviewer"])

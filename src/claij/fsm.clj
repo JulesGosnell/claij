@@ -10,7 +10,8 @@
    [claij.llm :refer [call]]
    [claij.llm.service :as llm-service]
    [claij.hat :as hat]
-   [claij.parallel :as parallel]))
+   [claij.parallel :as parallel]
+   [claij.model :as model]))
 
 ;;------------------------------------------------------------------------------
 ;; Action Dispatch Helpers
@@ -857,22 +858,20 @@
    - Future: could include :temperature, :max-tokens, etc.
    
    Note: 'service' is the registry key (e.g., 'anthropic', 'google', 'ollama:local')."
-  {["anthropic" "claude-sonnet-4-20250514"]
+  {["anthropic" (model/direct-model :anthropic)]
    {:prompts [{:role "system"
                :content "CRITICAL: Your response must be ONLY valid JSON - no explanatory text before or after."}
               {:role "system"
                :content "CRITICAL: Be concise in your response to avoid hitting token limits."}]}
 
    ;; OpenAI models via OpenRouter
-   ["openrouter" "openai/gpt-5.2-chat"] {}
+   ["openrouter" (model/openrouter-model :openai)] {}
 
-   ;; xAI models
-   ["xai" "grok-code-fast-1"] {}
-   ["xai" "grok-4"] {}
+   ;; xAI models (direct and chat resolve to same model currently)
+   ["xai" (model/direct-model :xai)] {}
 
    ;; Google models
-   ["google" "gemini-2.0-flash"] {}
-   ["google" "gemini-3-pro-preview"] {}})
+   ["google" (model/direct-model :google)] {}})
 
 (defn trail->prompts
   "Convert audit trail to LLM conversation prompts.
@@ -1027,7 +1026,7 @@
           {config-service "service" config-model "model"} config
           ;; Precedence: config → event → context → defaults
           service (or config-service event-service (:llm/service context) "anthropic")
-          model (or config-model event-model (:llm/model context) "claude-sonnet-4-20250514")
+          model (or config-model event-model (:llm/model context) (model/direct-model :anthropic))
 
           ;; Get LLM service registry from context or use default
           llm-registry (or (:llm/registry context) llm-service/default-registry)

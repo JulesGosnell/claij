@@ -11,13 +11,14 @@
    multi-turn schema-guided conversations with tool execution.
    
    Current validated services:
-   - anthropic / claude-sonnet-4-20250514
-   - google / gemini-2.0-flash
-   - openrouter / openai/gpt-4o
-   - xai / grok-3-beta"
+   - anthropic / claude-sonnet-4-5
+   - google / gemini-3-flash-preview
+   - openrouter / openai/gpt-5.2
+   - xai / grok-code-fast-1"
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
+   [claij.model :as model]
    [claij.schema :as schema]
    [claij.llm :as llm]))
 
@@ -207,7 +208,7 @@ CRITICAL: Your entire response must be ONLY the JSON data structure.")
                                             TaskInput
                                             input-doc
                                             OutputSchema)
-                                  response (call-llm-sync "anthropic" "claude-sonnet-4-20250514" messages)]
+                                  response (call-llm-sync "anthropic" (model/direct-model :anthropic) messages)]
                               (is (valid? OutputSchema response)
                                   (str "Response should match OutputSchema: " (pr-str response)))
                               (is (= "tool_calls" (get response "id"))
@@ -229,7 +230,7 @@ CRITICAL: Your entire response must be ONLY the JSON data structure.")
                                             TaskInput
                                             input-doc
                                             OutputSchema)
-                                  response (call-llm-sync "google" "gemini-2.0-flash" messages)]
+                                  response (call-llm-sync "google" (model/direct-model :google) messages)]
                               (is (valid? OutputSchema response)
                                   (str "Response should match OutputSchema: " (pr-str response)))
                               (is (= "tool_calls" (get response "id"))
@@ -251,7 +252,7 @@ CRITICAL: Your entire response must be ONLY the JSON data structure.")
                                             TaskInput
                                             input-doc
                                             OutputSchema)
-                                  response (call-llm-sync "openrouter" "openai/gpt-4o" messages)]
+                                  response (call-llm-sync "openrouter" (model/openrouter-model :openai) messages)]
                               (is (valid? OutputSchema response)
                                   (str "Response should match OutputSchema: " (pr-str response)))
                               (is (= "tool_calls" (get response "id"))
@@ -273,7 +274,7 @@ CRITICAL: Your entire response must be ONLY the JSON data structure.")
                                             TaskInput
                                             input-doc
                                             OutputSchema)
-                                  response (call-llm-sync "xai" "grok-3-beta" messages)]
+                                  response (call-llm-sync "xai" (model/direct-model :xai) messages)]
                               (is (valid? OutputSchema response)
                                   (str "Response should match OutputSchema: " (pr-str response)))
                               (is (= "tool_calls" (get response "id"))
@@ -299,7 +300,7 @@ CRITICAL: Your entire response must be ONLY the JSON data structure.")
                                               TaskInput
                                               input-doc-1
                                               OutputSchema)
-                                  response-1 (call-llm-sync "anthropic" "claude-sonnet-4-20250514" messages-1)
+                                  response-1 (call-llm-sync "anthropic" (model/direct-model :anthropic) messages-1)
                                   _ (is (= "tool_calls" (get response-1 "id")) "Turn 1 should be tool_calls")
                                   tool-results (mapv execute-tool (get response-1 "calls"))
                                   trail [{"role" "user" "content" (pr-str [TaskInput input-doc-1 OutputSchema])}
@@ -314,7 +315,7 @@ CRITICAL: Your entire response must be ONLY the JSON data structure.")
                                               ToolResultsInput
                                               input-doc-2
                                               OutputSchema)
-                                  response-2 (call-llm-sync "anthropic" "claude-sonnet-4-20250514" messages-2)]
+                                  response-2 (call-llm-sync "anthropic" (model/direct-model :anthropic) messages-2)]
                               (is (valid? OutputSchema response-2)
                                   (str "Response 2 should match OutputSchema: " (pr-str response-2)))
                               (is (= "answer" (get response-2 "id"))

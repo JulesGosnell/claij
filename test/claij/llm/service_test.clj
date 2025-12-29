@@ -4,7 +4,8 @@
    [clojure.test :refer [deftest is testing]]
    [cheshire.core :as json]
    [clj-http.client :as http]
-   [claij.llm.service :as svc]))
+   [claij.llm.service :as svc]
+   [claij.model :as model]))
 
 ;;------------------------------------------------------------------------------
 ;; Test Data
@@ -89,24 +90,24 @@
       (let [req (svc/make-request "openai-compat"
                                   "https://openrouter.ai/api/v1/chat/completions"
                                   {:type :bearer :env "OPENROUTER_API_KEY"}
-                                  "anthropic/claude-sonnet-4"
+                                  (model/openrouter-model :anthropic)
                                   simple-messages nil)
             body (json/parse-string (:body req) true)]
         (is (= "https://openrouter.ai/api/v1/chat/completions" (:url req)))
         (is (= "Bearer or-key-123" (get-in req [:headers "Authorization"])))
-        (is (= "anthropic/claude-sonnet-4" (:model body))))))
+        (is (= (model/openrouter-model :anthropic) (:model body))))))
 
   (testing "xAI request"
     (with-redefs [svc/get-env (constantly "xai-key")]
       (let [req (svc/make-request "openai-compat"
                                   "https://api.x.ai/v1/chat/completions"
                                   {:type :bearer :env "XAI_API_KEY"}
-                                  "grok-3-beta"
+                                  (model/direct-model :xai)
                                   simple-messages nil)
             body (json/parse-string (:body req) true)]
         (is (= "https://api.x.ai/v1/chat/completions" (:url req)))
         (is (= "Bearer xai-key" (get-in req [:headers "Authorization"])))
-        (is (= "grok-3-beta" (:model body)))))))
+        (is (= (model/direct-model :xai) (:model body)))))))
 
 ;;------------------------------------------------------------------------------
 ;; Anthropic Strategy Tests
@@ -118,13 +119,13 @@
       (let [req (svc/make-request "anthropic"
                                   "https://api.anthropic.com/v1/messages"
                                   {:type :x-api-key :env "ANTHROPIC_API_KEY"}
-                                  "claude-sonnet-4-20250514"
+                                  (model/direct-model :anthropic)
                                   simple-messages nil)
             body (json/parse-string (:body req) true)]
         (is (= "https://api.anthropic.com/v1/messages" (:url req)))
         (is (= "anthro-key" (get-in req [:headers "x-api-key"])))
         (is (= "2023-06-01" (get-in req [:headers "anthropic-version"])))
-        (is (= "claude-sonnet-4-20250514" (:model body)))
+        (is (= (model/direct-model :anthropic) (:model body)))
         (is (= 4096 (:max_tokens body)))
         (is (nil? (:system body)))
         (is (= simple-messages-kw (:messages body))))))
@@ -134,7 +135,7 @@
       (let [req (svc/make-request "anthropic"
                                   "https://api.anthropic.com/v1/messages"
                                   {:type :x-api-key :env "ANTHROPIC_API_KEY"}
-                                  "claude-sonnet-4-20250514"
+                                  (model/direct-model :anthropic)
                                   messages-with-system nil)
             body (json/parse-string (:body req) true)]
         (is (= "You are a helpful assistant." (:system body)))
@@ -150,10 +151,11 @@
       (let [req (svc/make-request "google"
                                   "https://generativelanguage.googleapis.com/v1beta/models"
                                   {:type :x-goog-api-key :env "GOOGLE_API_KEY"}
-                                  "gemini-2.0-flash"
+                                  (model/direct-model :google)
                                   simple-messages nil)
             body (json/parse-string (:body req) true)]
-        (is (= "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+        (is (= (str "https://generativelanguage.googleapis.com/v1beta/models/"
+                    (model/direct-model :google) ":generateContent")
                (:url req)))
         (is (= "goog-key" (get-in req [:headers "x-goog-api-key"])))
         (is (= [{:role "user" :parts [{:text "Hello, how are you?"}]}]
@@ -165,7 +167,7 @@
       (let [req (svc/make-request "google"
                                   "https://generativelanguage.googleapis.com/v1beta/models"
                                   {:type :x-goog-api-key :env "GOOGLE_API_KEY"}
-                                  "gemini-2.0-flash"
+                                  (model/direct-model :google)
                                   messages-with-system nil)
             body (json/parse-string (:body req) true)]
         (is (= {:parts [{:text "You are a helpful assistant."}]}
@@ -178,7 +180,7 @@
       (let [req (svc/make-request "google"
                                   "https://generativelanguage.googleapis.com/v1beta/models"
                                   {:type :x-goog-api-key :env "GOOGLE_API_KEY"}
-                                  "gemini-2.0-flash"
+                                  (model/direct-model :google)
                                   multi-turn-messages nil)
             body (json/parse-string (:body req) true)]
         (is (= [{:role "user" :parts [{:text "What is a lazy sequence?"}]}
@@ -248,8 +250,8 @@
   (testing "Synchronous call with mocked HTTP"
     (with-redefs [svc/get-env (constantly "test-key")
                   http/post (fn [url opts]
-                                         (is (= "http://prognathodon:11434/v1/chat/completions" url))
-                                         {:body {:choices [{:message {:content "Mocked response"}}]}})]
+                              (is (= "http://prognathodon:11434/v1/chat/completions" url))
+                              {:body {:choices [{:message {:content "Mocked response"}}]}})]
       (let [response (svc/call-llm-sync test-registry
                                         "ollama:local"
                                         "mistral:7b"
@@ -259,20 +261,20 @@
   (testing "Anthropic strategy parsing"
     (with-redefs [svc/get-env (constantly "test-key")
                   http/post (fn [_url _opts]
-                                         {:body {:content [{:type "text" :text "Anthropic response"}]}})]
+                              {:body {:content [{:type "text" :text "Anthropic response"}]}})]
       (let [response (svc/call-llm-sync test-registry
                                         "anthropic"
-                                        "claude-sonnet-4-20250514"
+                                        (model/direct-model :anthropic)
                                         simple-messages)]
         (is (= "Anthropic response" response)))))
 
   (testing "Google strategy parsing"
     (with-redefs [svc/get-env (constantly "test-key")
                   http/post (fn [_url _opts]
-                                         {:body {:candidates [{:content {:parts [{:text "Google response"}]}}]}})]
+                              {:body {:candidates [{:content {:parts [{:text "Google response"}]}}]}})]
       (let [response (svc/call-llm-sync test-registry
                                         "google"
-                                        "gemini-2.0-flash"
+                                        (model/direct-model :google)
                                         simple-messages)]
         (is (= "Google response" response))))))
 
@@ -281,7 +283,7 @@
     (let [result (promise)]
       (with-redefs [svc/get-env (constantly "test-key")
                     http/post (fn [_url opts success-fn _error-fn]
-                                           (success-fn {:body "{\"choices\":[{\"message\":{\"content\":\"Async response\"}}]}"}))]
+                                (success-fn {:body "{\"choices\":[{\"message\":{\"content\":\"Async response\"}}]}"}))]
         (svc/call-llm-async test-registry
                             "ollama:local"
                             "mistral:7b"
@@ -294,7 +296,7 @@
           test-exception (Exception. "Connection refused")]
       (with-redefs [svc/get-env (constantly "test-key")
                     http/post (fn [_url _opts _success-fn error-fn]
-                                           (error-fn test-exception))]
+                                (error-fn test-exception))]
         (svc/call-llm-async test-registry
                             "ollama:local"
                             "mistral:7b"

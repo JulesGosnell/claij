@@ -25,7 +25,8 @@
   (require '[claij.hat :as hat] :reload)
   (require '[claij.hat.mcp :as mcp-hat] :reload)
   (require '[claij.mcp.schema] :reload)
-  (require '[claij.actions :refer [end-action]]))
+  (require '[claij.actions :refer [end-action]])
+  (require '[claij.model :as model]))
 
 ;;------------------------------------------------------------------------------
 ;; Action vars (preserve metadata for curried action detection)
@@ -71,7 +72,7 @@ When you have the final answer, respond with id=[\"ask\", \"end\"] and include y
   {:id->action {"llm" llm-action
                 "end" (var claij.actions/end-action)}
    :llm/provider "x-ai"
-   :llm/model "grok-code-fast-1"
+   :llm/model (model/direct-model :xai)
    :hats {:registry (-> (claij.hat/make-hat-registry)
                         (claij.hat/register-hat "mcp" claij.hat.mcp/mcp-hat-maker))}})
 
@@ -99,7 +100,7 @@ When you have the final answer, respond with id=[\"ask\", \"end\"] and include y
   {:id->action {"llm" llm-action
                 "end" (var claij.actions/end-action)}
    :llm/provider "x-ai"
-   :llm/model "grok-code-fast-1"
+   :llm/model (model/direct-model :xai)
    :hats {:registry (-> (claij.hat/make-hat-registry)
                         (claij.hat/register-hat "mcp" claij.hat.mcp/mcp-hat-maker))}})
 
@@ -137,7 +138,7 @@ When you have the final answer, respond with id=[\"ask\", \"end\"]."]}
   {:id->action {"llm" llm-action
                 "end" (var claij.actions/end-action)}
    :llm/provider "x-ai"
-   :llm/model "grok-code-fast-1"
+   :llm/model (model/direct-model :xai)
    :hats {:registry (-> (claij.hat/make-hat-registry)
                         (claij.hat/register-hat "mcp" claij.hat.mcp/mcp-hat-maker))}})
 

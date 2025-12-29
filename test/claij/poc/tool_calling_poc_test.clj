@@ -27,14 +27,15 @@
    - Cloud provider tests require respective API keys
    
    Current validated services:
-   - anthropic / claude-sonnet-4-20250514
-   - google / gemini-2.0-flash
-   - openrouter / openai/gpt-4o
-   - xai / grok-3-beta
+   - anthropic / claude-sonnet-4-5
+   - google / gemini-3-flash-preview
+   - openrouter / openai/gpt-5.2
+   - xai / grok-code-fast-1
    - ollama:local / mistral:7b, qwen2.5-coder:14b"
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
+   [claij.model :as model]
    [claij.schema :as schema]
    [claij.llm :as llm]))
 
@@ -156,25 +157,25 @@ Respond ONLY with a JSON object containing your tool calls. No prose. Example fo
 (deftest ^:integration test-claude-tool-calling
   (testing "Claude emits valid tool calls from MCP schema"
     (when-service-available anthropic-available? "Anthropic/Claude" "ANTHROPIC_API_KEY"
-                            (let [response (call-llm-sync "anthropic" "claude-sonnet-4-20250514")]
+                            (let [response (call-llm-sync "anthropic" (model/direct-model :anthropic))]
                               (validate-tool-calls response)))))
 
 (deftest ^:integration test-gemini-tool-calling
   (testing "Gemini emits valid tool calls from MCP schema"
     (when-service-available google-available? "Google/Gemini" "GOOGLE_API_KEY"
-                            (let [response (call-llm-sync "google" "gemini-2.0-flash")]
+                            (let [response (call-llm-sync "google" (model/direct-model :google))]
                               (validate-tool-calls response)))))
 
 (deftest ^:integration test-openai-tool-calling
   (testing "OpenAI (via OpenRouter) emits valid tool calls from MCP schema"
     (when-service-available openrouter-available? "OpenRouter/OpenAI" "OPENROUTER_API_KEY"
-                            (let [response (call-llm-sync "openrouter" "openai/gpt-4o")]
+                            (let [response (call-llm-sync "openrouter" (model/openrouter-model :openai))]
                               (validate-tool-calls response)))))
 
 (deftest ^:integration test-grok-tool-calling
   (testing "Grok emits valid tool calls from MCP schema (no native tool API!)"
     (when-service-available xai-available? "xAI/Grok" "XAI_API_KEY"
-                            (let [response (call-llm-sync "xai" "grok-3-beta")]
+                            (let [response (call-llm-sync "xai" (model/direct-model :xai))]
                               (validate-tool-calls response)))))
 
 (deftest ^:integration test-all-providers-consistent
@@ -183,10 +184,10 @@ Respond ONLY with a JSON object containing your tool calls. No prose. Example fo
      #(and (anthropic-available?) (google-available?)
            (openrouter-available?) (xai-available?))
      "All cloud providers" "ANTHROPIC_API_KEY, GOOGLE_API_KEY, OPENROUTER_API_KEY, XAI_API_KEY"
-     (let [claude (call-llm-sync "anthropic" "claude-sonnet-4-20250514")
-           gemini (call-llm-sync "google" "gemini-2.0-flash")
-           openai (call-llm-sync "openrouter" "openai/gpt-4o")
-           grok (call-llm-sync "xai" "grok-3-beta")]
+     (let [claude (call-llm-sync "anthropic" (model/direct-model :anthropic))
+           gemini (call-llm-sync "google" (model/direct-model :google))
+           openai (call-llm-sync "openrouter" (model/openrouter-model :openai))
+           grok (call-llm-sync "xai" (model/direct-model :xai))]
 
        ;; All should have same structure
        (is (= (count (get claude "tool_calls"))

@@ -6,7 +6,8 @@
                               make-bdd-context start-bdd run-bdd
                               default-stt-url default-tts-url
                               github-mcp-config clojure-tools-config]]
-   [claij.schema :as schema]))
+   [claij.schema :as schema]
+   [claij.model :as model]))
 
 ;;; ============================================================
 ;;; Test Helpers
@@ -140,14 +141,14 @@
       (is (contains? ctx :llm/service))
       (is (contains? ctx :llm/model))
       (is (contains? ctx :hats))
-      (is (= "ollama:local" (:llm/service ctx)))
-      (is (= "deepseek-coder-v2:16b-32k" (:llm/model ctx)))))
+      (is (= "anthropic" (:llm/service ctx)))
+      (is (= (model/direct-model :anthropic) (:llm/model ctx)))))
 
   (testing "Creates context with custom values"
     (let [ctx (make-bdd-context {:service "anthropic"
-                                 :model "claude-sonnet-4-20250514"})]
+                                 :model (model/direct-model :anthropic)})]
       (is (= "anthropic" (:llm/service ctx)))
-      (is (= "claude-sonnet-4-20250514" (:llm/model ctx)))))
+      (is (= (model/direct-model :anthropic) (:llm/model ctx)))))
 
   (testing "Context includes hat registry"
     (let [ctx (make-bdd-context {})]

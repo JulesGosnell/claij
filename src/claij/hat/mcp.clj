@@ -304,7 +304,8 @@
           "xitions" [{"id" [state-id service-id]
                       "schema" request-schema-id}
                      {"id" [service-id state-id]
-                      "schema" response-schema-id}]}]))))
+                      "schema" response-schema-id}]
+          "prompts" [(format-tools-prompt state-id service-id all-tools-by-server)]}]))))
 
 ;;==============================================================================
 ;; MCP Service Action

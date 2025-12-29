@@ -6,6 +6,7 @@
    [claij.action :refer [def-action]]
    [claij.fsm :refer [start-fsm]]
    [claij.llm :refer [call]]
+   [claij.model :as model]
    [claij.store :as store]))
 
 ;;------------------------------------------------------------------------------
@@ -184,7 +185,7 @@
    Context should contain:
    - :store        - Database connection  
    - :llm/service  - LLM service (e.g. 'anthropic', 'ollama:local')
-   - :llm/model    - LLM model (e.g. 'claude-sonnet-4-20250514')
+   - :llm/model    - LLM model via (model/direct-model :anthropic)
    - :llm/registry - (Optional) Service registry
    - :id->action   - (Optional) Override default actions
    
@@ -199,7 +200,7 @@
   (let [context (actions/make-context
                  {:store nil ;; TODO: real store connection
                   :llm/service "openrouter"
-                  :llm/model "openai/gpt-4o"})
+                  :llm/model (model/openrouter-model :openai)})
         {:keys [submit await stop]} (start-triage context)]
 
     (submit "Please review my fibonacci code")

@@ -35,7 +35,8 @@
    [claij.fsm.bdd-fsm :as bdd]
    [claij.schema :as schema]
    [claij.actions :as actions]
-   [claij.stt.whisper.multipart :refer [extract-bytes validate-audio]])
+   [claij.stt.whisper.multipart :refer [extract-bytes validate-audio]]
+   [claij.model :as model])
   (:import
    [java.net URL])
   (:gen-class))
@@ -88,10 +89,10 @@
 (def state (atom initial-summary))
 
 (def llms
-  {"grok" (partial open-router "grok" "x-ai" "grok-code-fast-1" state)
-   "gpt" (partial open-router "gpt" "openai" "gpt-5.2-chat" state)
-   "claude" (partial open-router "claude" "anthropic" "claude-sonnet-4.5" state)
-   "gemini" (partial open-router "gemini" "google" "gemini-3-pro-preview" state)})
+  {"grok" (partial open-router "grok" "x-ai" (model/openrouter-model :xai) state)
+   "gpt" (partial open-router "gpt" "openai" (model/openrouter-model :openai) state)
+   "claude" (partial open-router "claude" "anthropic" (model/openrouter-model :anthropic) state)
+   "gemini" (partial open-router "gemini" "google" (model/openrouter-model :google) state)})
 
 ;;------------------------------------------------------------------------------
 ;; FSM Registry
@@ -346,7 +347,7 @@
           (let [;; Create execution context with default actions
                 context (actions/make-context
                          {:llm/service "anthropic"
-                          :llm/model "claude-sonnet-4-20250514"})
+                          :llm/model (model/direct-model :anthropic)})
 
                 ;; Run FSM synchronously with 2 minute timeout
                 result (fsm/run-sync definition context body-params 120000)]

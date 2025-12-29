@@ -16,7 +16,8 @@
    [claij.action.openapi-call :refer [openapi-call-actions]]
    [claij.mcp.bridge :as bridge]
    [claij.hat :as hat]
-   [claij.hat.mcp :as mcp-hat]))
+   [claij.hat.mcp :as mcp-hat]
+   [claij.model :as model]))
 
 ;;; ============================================================
 ;;; Configuration
@@ -190,7 +191,7 @@
    - :tts-url - TTS service URL (default: prognathodon:8001)"
   [{:keys [service model stt-url tts-url]
     :or {service "anthropic"
-         model "claude-sonnet-4-20250514"
+         model (model/direct-model :anthropic)
          stt-url default-stt-url
          tts-url default-tts-url}}]
   {:id->action bdd-actions

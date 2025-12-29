@@ -6,6 +6,7 @@
    [claij.action :refer [def-action]]
    [claij.fsm :as fsm :refer [start-fsm build-fsm-registry]]
    [claij.actions :as actions]
+   [claij.model :as model]
    [claij.fsm.code-review-fsm :refer [code-review-fsm
                                       example-code-review-concerns]]))
 
@@ -45,6 +46,12 @@
     (:valid? (schema/validate schema data registry))))
 
 ;;==============================================================================
+;; Test Constants
+;;==============================================================================
+
+(def test-llm-model (model/openrouter-model :openai))
+
+;;==============================================================================
 ;; Tests
 ;;==============================================================================
 
@@ -53,7 +60,7 @@
     (testing "entry validates"
       (let [entry {"id" ["start" "chairman"]
                    "document" "test code"
-                   "llms" [{"service" "openrouter" "model" "openai/gpt-4o"}]
+                   "llms" [{"service" "openrouter" "model" test-llm-model}]
                    "concerns" ["Simplicity"]}]
         (is (schema-valid? "entry" entry))))
 
@@ -62,7 +69,7 @@
                      "code" {"language" {"name" "clojure"} "text" "(+ 1 2)"}
                      "notes" "Please review"
                      "concerns" ["Simplicity"]
-                     "llm" {"service" "openrouter" "model" "openai/gpt-4o"}}]
+                     "llm" {"service" "openrouter" "model" test-llm-model}}]
         (is (schema-valid? "request" request))))
 
     (testing "response validates"
@@ -113,7 +120,7 @@
           "Please review this fibonacci code: (defn fib [n] (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))"
 
           llms
-          [{"service" "openrouter" "model" "openai/gpt-4o"}]
+          [{"service" "openrouter" "model" test-llm-model}]
 
           ;; Sample concerns for this review
           concerns
@@ -135,7 +142,7 @@
            "notes" "Here's a recursive fibonacci. Please review for improvements."
            "concerns" ["Performance: Avoid reflection, consider algorithmic efficiency"
                        "Functional style: Use pure functions and immutable data"]
-           "llm" {"service" "openrouter" "model" "openai/gpt-4o"}}
+           "llm" {"service" "openrouter" "model" test-llm-model}}
 
           response1-data
           {"id" ["reviewer" "chairman"]
@@ -151,7 +158,7 @@
                    "text" "(def fib\n  (memoize\n    (fn [n]\n      (if (<= n 1)\n        n\n        (+ (fib (- n 1)) (fib (- n 2)))))))"}
            "notes" "Incorporated memoization. Please review again."
            "concerns" ["Simplicity: Can this be simpler?"]
-           "llm" {"service" "openrouter" "model" "openai/gpt-4o"}}
+           "llm" {"service" "openrouter" "model" test-llm-model}}
 
           response2-data
           {"id" ["reviewer" "chairman"]
@@ -199,13 +206,15 @@
         (finally
           (stop))))))
 
-(deftest ^:long-running code-review-fsm-integration-test
+;; SKIPPED: Uses direct Anthropic API which requires ANTHROPIC_API_KEY
+;; See code-review-anthropic-chairman-test for working test via OpenRouter
+(deftest ^:long-running ^:kaocha/skip code-review-fsm-integration-test
   (testing "code-review FSM with real LLM - simple fibonacci"
     (let [;; Simple fibonacci code to review
           code "(defn fib [n] (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))"
 
           ;; Use just one LLM for faster test
-          llms [{"service" "anthropic" "model" "claude-sonnet-4-20250514"}]
+          llms [{"service" "anthropic" "model" (model/direct-model :anthropic)}]
 
           ;; Minimal concerns for focused review
           concerns ["Performance: Consider algorithmic efficiency"
@@ -217,7 +226,7 @@
           ;; Context with default LLM for chairman (reviewers get llm from event)
           context {:id->action code-review-actions
                    :llm/service "anthropic"
-                   :llm/model "claude-sonnet-4-20250514"}
+                   :llm/model (model/direct-model :anthropic)}
 
           entry-msg {"id" ["start" "chairman"]
                      "document" (str "Please review this Clojure code: " code)
@@ -262,3 +271,66 @@
 
           (log/info "Code review completed successfully")
           (log/info "Final notes:" (get final-event "notes")))))))
+
+;; Helper for testing different providers as chairman
+(defn run-code-review-with-provider
+  "Run code-review FSM with specified provider as chairman.
+   Returns {:success? bool :error msg :final-event event :trail trail}"
+  [provider-key service-name]
+  (let [code "(defn add [a b] (+ a b))"
+        model (model/openrouter-model provider-key)
+        llms [{"service" service-name "model" model}]
+        concerns ["Is this idiomatic Clojure?"]
+        code-review-actions {"llm" #'fsm/llm-action "end" #'actions/end-action}
+        context {:id->action code-review-actions
+                 :llm/service service-name
+                 :llm/model model}
+        entry-msg {"id" ["start" "chairman"]
+                   "document" (str "Review this Clojure code: " code)
+                   "llms" llms
+                   "concerns" concerns}
+        result (fsm/run-sync code-review-fsm context entry-msg (* 3 60 1000))]
+    (cond
+      (= result :timeout)
+      {:success? false :error :timeout}
+
+      :else
+      (let [[_ctx trail] result
+            final-event (fsm/last-event trail)
+            bail-out? (get final-event "bail_out")
+            valid? (and (= ["chairman" "end"] (get final-event "id"))
+                        (not bail-out?))]
+        {:success? valid?
+         :error (cond bail-out? :bail-out
+                      (not valid?) :unexpected-state
+                      :else nil)
+         :final-event final-event
+         :trail trail}))))
+
+(deftest ^:long-running code-review-openai-chairman-test
+  (testing "OpenAI GPT can chair code-review FSM"
+    (let [result (run-code-review-with-provider :openai "openrouter")]
+      (is (:success? result) (str "OpenAI should succeed: " (:error result)))
+      (when (:success? result)
+        (log/info "OpenAI chairman completed successfully")))))
+
+(deftest ^:long-running code-review-xai-chairman-test
+  (testing "xAI Grok can chair code-review FSM"
+    (let [result (run-code-review-with-provider :xai "openrouter")]
+      (is (:success? result) (str "xAI should succeed: " (:error result)))
+      (when (:success? result)
+        (log/info "xAI chairman completed successfully")))))
+
+(deftest ^:long-running code-review-google-chairman-test
+  (testing "Google Gemini can chair code-review FSM"
+    (let [result (run-code-review-with-provider :google "openrouter")]
+      (is (:success? result) (str "Google should succeed: " (:error result)))
+      (when (:success? result)
+        (log/info "Google chairman completed successfully")))))
+
+(deftest ^:long-running code-review-anthropic-chairman-test
+  (testing "Anthropic Claude can chair code-review FSM"
+    (let [result (run-code-review-with-provider :anthropic "openrouter")]
+      (is (:success? result) (str "Anthropic should succeed: " (:error result)))
+      (when (:success? result)
+        (log/info "Anthropic chairman completed successfully")))))

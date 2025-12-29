@@ -339,7 +339,7 @@
    Required keys:
    - :store        - Database connection
    - :llm/service  - LLM service (e.g. 'anthropic', 'ollama:local')
-   - :llm/model    - LLM model (e.g. 'claude-sonnet-4-20250514')
+   - :llm/model    - LLM model via (model/direct-model :anthropic)
    
    Optional keys:
    - :llm/registry - Service registry (defaults to claij.llm.service/default-registry)
