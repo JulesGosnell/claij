@@ -4,13 +4,18 @@
    Design:
    - Service registry maps service names to {:strategy, :url, :auth}
    - make-request dispatches on strategy, returns clj-http request map
-   - parse-response dispatches on strategy, extracts content string
+   - parse-response dispatches on strategy, extracts content and tool_calls
    
    Strategies:
    - openai-compat: Uses OpenAI's /v1/chat/completions protocol
                     (adopted by Ollama, OpenRouter, xAI, Together, etc.)
    - anthropic: Anthropic's native /v1/messages API
    - google: Google's native Gemini API
+   
+   Native Tool Calling:
+   - Tools passed via :tools option to make-request
+   - parse-response returns {:content ... :tool_calls ...}
+   - Callers must handle either content OR tool_calls (XOR)
    
    Usage:
      (def registry {\"ollama:local\" {:strategy \"openai-compat\"
@@ -63,7 +68,11 @@
      auth     - Auth config map or nil
      model    - Model name (native to service)
      messages - Vector of message maps [{\"role\" \"user\" \"content\" \"...\"}]
-     options  - Strategy-specific options (e.g., {:num_ctx 32768} for Ollama)
+     options  - Strategy-specific options including:
+                :tools - Vector of tool definitions (OpenAI format)
+                         [{:type \"function\" :function {:name ... :description ... :parameters ...}}]
+                :num_ctx - Context window size (Ollama)
+                :max_tokens - Max response tokens
    
    Returns:
      {:url     string
@@ -73,19 +82,35 @@
 
 (defmethod make-request "openai-compat"
   [_strategy url auth model messages options]
-  {:url url
-   :headers (merge {"Content-Type" "application/json"}
-                   (resolve-auth auth))
-   :body (json/generate-string (merge {:model model
-                                       :messages messages}
-                                      options))})
+  (let [{:keys [tools]} options
+        ;; Remove :tools from options - it's handled separately in OpenAI format
+        other-options (dissoc options :tools)]
+    {:url url
+     :headers (merge {"Content-Type" "application/json"}
+                     (resolve-auth auth))
+     :body (json/generate-string
+            (cond-> (merge {:model model
+                            :messages messages}
+                           other-options)
+              (seq tools) (assoc :tools tools)))}))
 
 (defmethod make-request "anthropic"
-  [_strategy url auth model messages _options]
-  (let [system-msgs (filter #(= "system" (get % "role")) messages)
+  [_strategy url auth model messages options]
+  (let [{:keys [tools]} options
+        system-msgs (filter #(= "system" (get % "role")) messages)
         system-text (when (seq system-msgs)
                       (str/join "\n\n" (map #(get % "content") system-msgs)))
-        non-system (vec (remove #(= "system" (get % "role")) messages))]
+        non-system (vec (remove #(= "system" (get % "role")) messages))
+        ;; Convert OpenAI tool format to Anthropic format
+        ;; OpenAI: {:type "function" :function {:name ... :description ... :parameters ...}}
+        ;; Anthropic: {:name ... :description ... :input_schema ...}
+        anthropic-tools (when (seq tools)
+                          (mapv (fn [{:keys [function]}]
+                                  {:name (:name function)
+                                   :description (:description function)
+                                   :input_schema (or (:parameters function)
+                                                     {:type "object" :properties {}})})
+                                tools))]
     {:url url
      :headers (merge {"Content-Type" "application/json"
                       "anthropic-version" "2023-06-01"}
@@ -94,11 +119,13 @@
             (cond-> {:model model
                      :max_tokens 4096
                      :messages non-system}
-              system-text (assoc :system system-text)))}))
+              system-text (assoc :system system-text)
+              anthropic-tools (assoc :tools anthropic-tools)))}))
 
 (defmethod make-request "google"
-  [_strategy url auth model messages _options]
-  (let [full-url (str url "/" model ":generateContent")
+  [_strategy url auth model messages options]
+  (let [{:keys [tools]} options
+        full-url (str url "/" model ":generateContent")
         system-msgs (filter #(= "system" (get % "role")) messages)
         system-text (when (seq system-msgs)
                       (str/join "\n\n" (map #(get % "content") system-msgs)))
@@ -106,40 +133,98 @@
         contents (mapv (fn [{:strs [role content]}]
                          {:role (if (= role "assistant") "model" role)
                           :parts [{:text content}]})
-                       non-system)]
+                       non-system)
+        ;; Convert OpenAI tool format to Google format
+        ;; OpenAI: {:type "function" :function {:name ... :description ... :parameters ...}}
+        ;; Google: {:function_declarations [{:name ... :description ... :parameters ...}]}
+        google-tools (when (seq tools)
+                       [{:function_declarations
+                         (mapv (fn [{:keys [function]}]
+                                 {:name (:name function)
+                                  :description (:description function)
+                                  :parameters (or (:parameters function)
+                                                  {:type "object" :properties {}})})
+                               tools)}])]
     {:url full-url
      :headers (merge {"Content-Type" "application/json"}
                      (resolve-auth auth))
      :body (json/generate-string
             (cond-> {:contents contents}
-              system-text (assoc :systemInstruction {:parts [{:text system-text}]})))}))
+              system-text (assoc :systemInstruction {:parts [{:text system-text}]})
+              google-tools (assoc :tools google-tools)))}))
 
 ;;------------------------------------------------------------------------------
 ;; Response Parsing - Dispatch on Strategy
 ;;------------------------------------------------------------------------------
 
 (defmulti parse-response
-  "Extract content string from provider response.
+  "Extract content and tool_calls from provider response.
    
    Args:
      strategy - \"openai-compat\", \"anthropic\", or \"google\"
      response - Parsed JSON response body
    
    Returns:
-     Content string"
+     {:content    string or nil - text content from assistant
+      :tool_calls vector or nil - tool calls in normalized format
+                  [{:id ... :name ... :arguments ...}]}
+   
+   Note: Per XOR constraint, only one of content/tool_calls should be present."
   (fn [strategy _response] strategy))
 
 (defmethod parse-response "openai-compat"
   [_strategy response]
-  (get-in response [:choices 0 :message :content]))
+  (let [message (get-in response [:choices 0 :message])
+        content (:content message)
+        tool-calls (:tool_calls message)
+        ;; Normalize tool_calls to consistent format
+        normalized-tools (when (seq tool-calls)
+                           (mapv (fn [{:keys [id function]}]
+                                   {:id id
+                                    :name (:name function)
+                                    :arguments (if (string? (:arguments function))
+                                                 (json/parse-string (:arguments function) true)
+                                                 (:arguments function))})
+                                 tool-calls))]
+    {:content content
+     :tool_calls normalized-tools}))
 
 (defmethod parse-response "anthropic"
   [_strategy response]
-  (get-in response [:content 0 :text]))
+  (let [content-blocks (get response :content)
+        ;; Extract text blocks
+        text-blocks (filter #(= "text" (:type %)) content-blocks)
+        text-content (when (seq text-blocks)
+                       (str/join " " (map :text text-blocks)))
+        ;; Extract tool_use blocks and normalize
+        tool-uses (filter #(= "tool_use" (:type %)) content-blocks)
+        normalized-tools (when (seq tool-uses)
+                           (mapv (fn [{:keys [id name input]}]
+                                   {:id id
+                                    :name name
+                                    :arguments input})
+                                 tool-uses))]
+    {:content (when-not (str/blank? text-content) text-content)
+     :tool_calls normalized-tools}))
 
 (defmethod parse-response "google"
   [_strategy response]
-  (get-in response [:candidates 0 :content :parts 0 :text]))
+  (let [parts (get-in response [:candidates 0 :content :parts])
+        ;; Extract text parts
+        text-parts (filter :text parts)
+        text-content (when (seq text-parts)
+                       (str/join " " (map :text text-parts)))
+        ;; Extract functionCall parts and normalize
+        function-calls (filter :functionCall parts)
+        normalized-tools (when (seq function-calls)
+                           (mapv (fn [part]
+                                   (let [fc (:functionCall part)]
+                                     {:id (:name fc) ;; Google doesn't use separate IDs
+                                      :name (:name fc)
+                                      :arguments (:args fc)}))
+                                 function-calls))]
+    {:content (when-not (str/blank? text-content) text-content)
+     :tool_calls normalized-tools}))
 
 ;;------------------------------------------------------------------------------
 ;; Service Registry
@@ -167,16 +252,21 @@
   "Build request from service registry lookup.
    
    Args:
-     registry - Service registry
-     service  - Service name (e.g., \"ollama:local\", \"anthropic\")
-     model    - Model name (native to service)
-     messages - Vector of message maps
+     registry      - Service registry
+     service       - Service name (e.g., \"ollama:local\", \"anthropic\")
+     model         - Model name (native to service)
+     messages      - Vector of message maps
+     extra-options - Optional additional options (e.g., {:tools [...]})
+                     Merged with registry options, extra-options take precedence.
    
    Returns:
      clj-http request map"
-  [registry service model messages]
-  (let [{:keys [strategy url auth options]} (lookup-service registry service)]
-    (make-request strategy url auth model messages options)))
+  ([registry service model messages]
+   (build-request-from-registry registry service model messages nil))
+  ([registry service model messages extra-options]
+   (let [{:keys [strategy url auth options]} (lookup-service registry service)
+         merged-options (merge options extra-options)]
+     (make-request strategy url auth model messages merged-options))))
 
 ;;------------------------------------------------------------------------------
 ;; HTTP Execution
@@ -190,18 +280,22 @@
      service  - Service name
      model    - Model name (native to service)
      messages - Vector of message maps
+     options  - Optional extra options (e.g., {:tools [...]})
    
    Returns:
-     Content string from response"
-  [registry service model messages]
-  (let [{:keys [strategy]} (lookup-service registry service)
-        req (build-request-from-registry registry service model messages)]
-    (log/info (str "LLM Call: " service "/" model))
-    (let [response (http/post (:url req)
-                              {:headers (:headers req)
-                               :body (:body req)
-                               :as :json})]
-      (parse-response strategy (:body response)))))
+     {:content    string or nil - text response
+      :tool_calls vector or nil - normalized tool calls}"
+  ([registry service model messages]
+   (call-llm-sync registry service model messages nil))
+  ([registry service model messages options]
+   (let [{:keys [strategy]} (lookup-service registry service)
+         req (build-request-from-registry registry service model messages options)]
+     (log/info (str "LLM Call: " service "/" model))
+     (let [response (http/post (:url req)
+                               {:headers (:headers req)
+                                :body (:body req)
+                                :as :json})]
+       (parse-response strategy (:body response))))))
 
 (defn call-llm-async
   "Make an asynchronous HTTP call to an LLM service.
@@ -211,14 +305,17 @@
      service  - Service name
      model    - Model name (native to service)
      messages - Vector of message maps
-     handler  - Success callback (fn [content-string])
-     error-fn - Error callback (fn [error-info]) - optional
+     handler  - Success callback (fn [{:keys [content tool_calls]}])
+     opts     - Options map:
+                :error - Error callback (fn [error-info])
+                :tools - Vector of tool definitions
    
    Returns:
      nil (result delivered via callbacks)"
-  [registry service model messages handler & [{:keys [error]}]]
+  [registry service model messages handler & [{:keys [error tools]}]]
   (let [{:keys [strategy]} (lookup-service registry service)
-        req (build-request-from-registry registry service model messages)]
+        extra-options (when tools {:tools tools})
+        req (build-request-from-registry registry service model messages extra-options)]
     (log/info (str "LLM Call (async): " service "/" model))
     (http/post
      (:url req)
@@ -228,8 +325,8 @@
      (fn [response]
        (try
          (let [parsed (json/parse-string (:body response) true)
-               content (parse-response strategy parsed)]
-           (handler content))
+               result (parse-response strategy parsed)]
+           (handler result))
          (catch Exception e
            (log/error e "Error parsing LLM response")
            (when error (error {:error "parse-error" :exception e})))))

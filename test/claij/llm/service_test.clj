@@ -193,17 +193,51 @@
 ;;------------------------------------------------------------------------------
 
 (deftest test-parse-response
-  (testing "OpenAI-compat response"
-    (let [response {:choices [{:message {:content "Hello there!"}}]}]
-      (is (= "Hello there!" (svc/parse-response "openai-compat" response)))))
+  (testing "OpenAI-compat response - content only"
+    (let [response {:choices [{:message {:content "Hello there!"}}]}
+          result (svc/parse-response "openai-compat" response)]
+      (is (= "Hello there!" (:content result)))
+      (is (nil? (:tool_calls result)))))
 
-  (testing "Anthropic response"
-    (let [response {:content [{:type "text" :text "Greetings!"}]}]
-      (is (= "Greetings!" (svc/parse-response "anthropic" response)))))
+  (testing "OpenAI-compat response - with tool_calls"
+    (let [response {:choices [{:message {:content ""
+                                         :tool_calls [{:id "call_123"
+                                                       :function {:name "get_weather"
+                                                                  :arguments "{\"city\":\"London\"}"}}]}}]}
+          result (svc/parse-response "openai-compat" response)]
+      (is (= "" (:content result)))
+      (is (= [{:id "call_123" :name "get_weather" :arguments {:city "London"}}]
+             (:tool_calls result)))))
 
-  (testing "Google response"
-    (let [response {:candidates [{:content {:parts [{:text "Hi!"}]}}]}]
-      (is (= "Hi!" (svc/parse-response "google" response))))))
+  (testing "Anthropic response - content only"
+    (let [response {:content [{:type "text" :text "Greetings!"}]}
+          result (svc/parse-response "anthropic" response)]
+      (is (= "Greetings!" (:content result)))
+      (is (nil? (:tool_calls result)))))
+
+  (testing "Anthropic response - with tool_use"
+    (let [response {:content [{:type "tool_use"
+                               :id "toolu_123"
+                               :name "get_weather"
+                               :input {:city "Paris"}}]}
+          result (svc/parse-response "anthropic" response)]
+      (is (nil? (:content result)))
+      (is (= [{:id "toolu_123" :name "get_weather" :arguments {:city "Paris"}}]
+             (:tool_calls result)))))
+
+  (testing "Google response - content only"
+    (let [response {:candidates [{:content {:parts [{:text "Hi!"}]}}]}
+          result (svc/parse-response "google" response)]
+      (is (= "Hi!" (:content result)))
+      (is (nil? (:tool_calls result)))))
+
+  (testing "Google response - with functionCall"
+    (let [response {:candidates [{:content {:parts [{:functionCall {:name "get_weather"
+                                                                    :args {:city "Berlin"}}}]}}]}
+          result (svc/parse-response "google" response)]
+      (is (nil? (:content result)))
+      (is (= [{:id "get_weather" :name "get_weather" :arguments {:city "Berlin"}}]
+             (:tool_calls result))))))
 
 ;;------------------------------------------------------------------------------
 ;; Registry Tests
@@ -256,7 +290,8 @@
                                         "ollama:local"
                                         "mistral:7b"
                                         simple-messages)]
-        (is (= "Mocked response" response)))))
+        (is (= "Mocked response" (:content response)))
+        (is (nil? (:tool_calls response))))))
 
   (testing "Anthropic strategy parsing"
     (with-redefs [svc/get-env (constantly "test-key")
@@ -266,7 +301,7 @@
                                         "anthropic"
                                         (model/direct-model :anthropic)
                                         simple-messages)]
-        (is (= "Anthropic response" response)))))
+        (is (= "Anthropic response" (:content response))))))
 
   (testing "Google strategy parsing"
     (with-redefs [svc/get-env (constantly "test-key")
@@ -276,7 +311,32 @@
                                         "google"
                                         (model/direct-model :google)
                                         simple-messages)]
-        (is (= "Google response" response))))))
+        (is (= "Google response" (:content response))))))
+
+  (testing "With tools option"
+    (with-redefs [svc/get-env (constantly "test-key")
+                  http/post (fn [_url opts]
+                              (let [body (json/parse-string (:body opts) true)]
+                                ;; Verify tools were included in request
+                                (is (= [{:type "function"
+                                         :function {:name "test_tool"
+                                                    :description "A test tool"
+                                                    :parameters {:type "object" :properties {}}}}]
+                                       (:tools body))))
+                              {:body {:choices [{:message {:content ""
+                                                           :tool_calls [{:id "call_1"
+                                                                         :function {:name "test_tool"
+                                                                                    :arguments "{}"}}]}}]}})]
+      (let [response (svc/call-llm-sync test-registry
+                                        "ollama:local"
+                                        "mistral:7b"
+                                        simple-messages
+                                        {:tools [{:type "function"
+                                                  :function {:name "test_tool"
+                                                             :description "A test tool"
+                                                             :parameters {:type "object" :properties {}}}}]})]
+        (is (= [{:id "call_1" :name "test_tool" :arguments {}}]
+               (:tool_calls response)))))))
 
 (deftest test-call-llm-async
   (testing "Async call with mocked HTTP - success"
@@ -288,8 +348,8 @@
                             "ollama:local"
                             "mistral:7b"
                             simple-messages
-                            (fn [content] (deliver result content))))
-      (is (= "Async response" (deref result 1000 :timeout)))))
+                            (fn [response] (deliver result response))))
+      (is (= "Async response" (:content (deref result 1000 :timeout))))))
 
   (testing "Async call with mocked HTTP - error callback"
     (let [result (promise)
@@ -314,7 +374,8 @@
                     "ollama:local"
                     "mistral:7b"
                     [{"role" "user"
-                      "content" "Reply with exactly one word: hello"}])]
-      (is (string? response))
-      (is (pos? (count response)))
-      (println "Ollama response:" response))))
+                      "content" "Reply with exactly one word: hello"}])
+          content (:content response)]
+      (is (string? content))
+      (is (pos? (count content)))
+      (println "Ollama response:" content))))
