@@ -22,6 +22,23 @@
    [clojure.walk :refer [postwalk]]))
 
 ;;------------------------------------------------------------------------------
+;; Shared Constants
+;;------------------------------------------------------------------------------
+
+(def mcp-tools-schema-title
+  "Magic value for JSON Schema 'title' field to identify MCP tool schemas.
+   Used by MCP hat to mark schemas, and by llm-action to detect them.
+   
+   Using 'title' because it's standard JSON Schema (no meta-schema changes needed)
+   and is self-descriptive."
+  "mcp-tools")
+
+(defn mcp-tools-schema?
+  "Check if a schema is an MCP tools schema by its title."
+  [schema]
+  (= mcp-tools-schema-title (get schema "title")))
+
+;;------------------------------------------------------------------------------
 ;; Helper: Stringify Keys
 ;;------------------------------------------------------------------------------
 

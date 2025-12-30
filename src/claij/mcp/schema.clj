@@ -250,15 +250,18 @@
 
 (defn tool-cache->request-schema
   "Generate request schema for a single tool.
-   The inputSchema IS the documentation - it tells the LLM what parameters are valid."
+   Includes description and inputSchema to make the schema self-documenting.
+   LLMs can use the description to understand when to call the tool."
   [tool-cache]
   (let [tool-name (get tool-cache "name")
+        tool-desc (get tool-cache "description")
         input-schema (get tool-cache "inputSchema" {})]
-    {"type" "object"
-     "additionalProperties" false
-     "required" ["name" "arguments"]
-     "properties" {"name" {"const" tool-name}
-                   "arguments" input-schema}}))
+    (cond-> {"type" "object"
+             "additionalProperties" false
+             "required" ["name" "arguments"]
+             "properties" {"name" {"const" tool-name}
+                           "arguments" input-schema}}
+      tool-desc (assoc "description" tool-desc))))
 
 (defn tool-cache->response-schema [_] tool-response-schema)
 

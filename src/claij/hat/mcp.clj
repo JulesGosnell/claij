@@ -32,6 +32,7 @@
    [clojure.tools.logging :as log]
    [claij.action :refer [def-action]]
    [claij.hat :as hat]
+   [claij.llm.tools :refer [mcp-tools-schema-title]]
    [claij.mcp.bridge :as bridge]
    [claij.mcp.schema :as mcp-schema]
    [claij.parallel :as parallel]))
@@ -160,7 +161,10 @@
     \"calls\": {\"github\": [<request>, ...],
                \"tools\": [<request>, ...]}}
    
-   Each server gets a batch of JSON-RPC tool call requests."
+   Each server gets a batch of JSON-RPC tool call requests.
+   
+   The schema includes 'title' field with mcp-tools-schema-title value
+   so that llm-action can identify this as the tools component."
   [context {xid "id" :as _xition}]
   (let [servers (get-in context [:hats :mcp :servers] {})
         server-names (vec (keys servers))
@@ -169,7 +173,9 @@
         merged-cache {"tools" (vec (mapcat #(get % "tools" []) all-caches))}
         single-request-schema (mcp-schema/mcp-cache->request-schema merged-cache)
         batch-request-schema {"type" "array" "items" single-request-schema}]
-    {"type" "object"
+    {"title" mcp-tools-schema-title
+     "description" "MCP tool calling interface. Select tools and provide arguments."
+     "type" "object"
      "additionalProperties" false
      "required" ["id" "calls"]
      "properties" {"id" {"const" xid}
