@@ -120,6 +120,71 @@ At the end of every story, Claude performs a brief retro:
 
 ---
 
+## Complex Integration Strategy: Meet in the Middle
+
+When integrating new functionality into existing complex code, **avoid symptom-chasing**. If something doesn't work during integration, don't hack around it - understand WHY first.
+
+### The Anti-Pattern (What Goes Wrong)
+
+1. Build new feature
+2. Try to integrate
+3. Something breaks → add hack to fix it
+4. Something else breaks → add another hack
+5. Repeat until codebase is full of special cases
+
+**Root cause:** Jumping to integration before proving the pieces work, then chasing symptoms instead of understanding the architecture.
+
+### The Pattern: Meet in the Middle
+
+**Step 1: Prove both ends in isolation**
+
+- **Left side (new code):** Build in POC, rigorously test with concrete examples
+- **Right side (existing code):** Identify the exact integration points, understand how they currently work
+
+The goal is to reduce integration complexity toward trivial.
+
+**Step 2: If integration still not trivial, move the middle**
+
+- Write unit tests that define the exact interface between new and existing
+- Use concrete, proven-to-work examples from both sides
+- Pure functions that transform between formats
+- Incrementally adjust BOTH sides toward a clean meeting point
+- Keep testing at every step
+
+**Step 3: When integration is trivial, integrate**
+
+Only when:
+- Both sides are proven working
+- The interface is clean and tested
+- Integration is just "plug these two tested pieces together"
+
+### Practical Example: Native Tool Calling
+
+**Wrong approach (what failed):**
+1. Built translation layer
+2. Tried to integrate into llm-action
+3. FSM hung → hacked terminal state detection
+4. Action lookup failed → hacked action registration
+5. More breakage, more hacks
+
+**Right approach:**
+1. **Prove left:** POC shows native tools work with LLMs (XOR compliance)
+2. **Prove right:** Understand how existing MCP events flow through FSM
+3. **Define middle:** Unit tests for pack-request / unpack-response with concrete examples from both sides
+4. **Meet:** Pure transformation functions, tested in isolation
+5. **Integrate:** Trivial - just wire the proven functions into llm-action
+
+### Key Questions Before Integration
+
+1. "How does this work in the existing code?" - trace the happy path
+2. "What concrete examples do I have from both sides?"
+3. "Can I write a unit test for the transformation without touching integration?"
+4. "Is the integration now trivial, or do I need more preparation?"
+
+If you find yourself adding special-case code during integration, **STOP** - you haven't proven enough in isolation yet.
+
+---
+
 ## Git Rules
 
 ### Commit Format
@@ -155,7 +220,7 @@ At the end of every story, Claude performs a brief retro:
    - Once structure allows, return to original task
 
 3. **If still impossible**: Feature branch approach
-   - Create feature branch: `git checkout -b feature/<name>`
+   - Create feature branch: `git checkout -b feature/<n>`
    - Do the work on branch with commits
    - Ask Jules to merge and push at end of story
    - **Only Jules merges branches**
@@ -401,4 +466,5 @@ git diff
 
 | Date | Change |
 |------|--------|
+| 2025-12-30 | Added "Complex Integration Strategy: Meet in the Middle" section |
 | 2025-12-20 | Initial version - consolidated from existing docs and practical experience |
