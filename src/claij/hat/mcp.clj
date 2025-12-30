@@ -91,63 +91,6 @@
        :timeout-ms global-timeout})))
 
 ;;==============================================================================
-;; Tool Prompt Generation
-;;==============================================================================
-
-(defn format-tool-schema
-  "Format a single tool's schema for LLM consumption."
-  [{:strs [name description inputSchema]}]
-  (str "- " name ": " (or description "No description")
-       (when inputSchema
-         (str "\n  Input: " (pr-str inputSchema)))))
-
-(defn format-tools-prompt
-  "Generate prompt text describing available MCP tools grouped by server.
-   
-   Takes state-id, service-id, and tools-by-server map:
-   {\"github\" [{\"name\" \"list_issues\" ...} ...]
-    \"tools\"  [{\"name\" \"bash\" ...} ...]}
-   
-   For single-server configs, tools-by-server will have one key (\"default\").
-   
-   The prompt explains the cross-server batching format where multiple servers
-   can be called in a single round trip."
-  [state-id service-id tools-by-server]
-  (if (seq tools-by-server)
-    (let [server-names (sort (keys tools-by-server))
-          single-server? (= 1 (count server-names))
-          ;; Format tools grouped by server
-          server-sections (for [[server-name tools] (sort-by first tools-by-server)]
-                            (str (when-not single-server?
-                                   (str "### Server: " server-name "\n"))
-                                 (clojure.string/join "\n\n" (map format-tool-schema tools))))
-          tools-text (clojure.string/join "\n\n" server-sections)
-          ;; Build example
-          example-server (first server-names)
-          example-tool (get-in tools-by-server [example-server 0 "name"] "tool_name")]
-      (str "## MCP Tools\n\n"
-           tools-text
-           "\n\n"
-           "To call tools, output JSON with calls grouped by server:\n"
-           "```json\n"
-           "{\"id\": [\"" state-id "\", \"" service-id "\"],\n"
-           " \"calls\": {\n"
-           "   \"" example-server "\": [\n"
-           "     {\"jsonrpc\": \"2.0\", \"id\": 1, \"method\": \"tools/call\",\n"
-           "      \"params\": {\"name\": \"" example-tool "\", \"arguments\": {...}}}\n"
-           "   ]"
-           (when-not single-server?
-             (str ",\n   \"" (second server-names) "\": [...]"))
-           "\n }}\n"
-           "```\n\n"
-           (if single-server?
-             "Tool results will be returned in the `results` field keyed by server."
-             (str "Available servers: " (clojure.string/join ", " server-names) "\n\n"
-                  "You can call multiple tools across multiple servers in a single request.\n"
-                  "Results will be returned in the `results` field keyed by server."))))
-    "No MCP tools available."))
-
-;;==============================================================================
 ;; Schema Functions (hat-aware)
 ;;==============================================================================
 
@@ -309,8 +252,7 @@
           "xitions" [{"id" [state-id service-id]
                       "schema" request-schema-id}
                      {"id" [service-id state-id]
-                      "schema" response-schema-id}]
-          "prompts" [(format-tools-prompt state-id service-id all-tools-by-server)]}]))))
+                      "schema" response-schema-id}]}]))))
 
 ;;==============================================================================
 ;; MCP Service Action

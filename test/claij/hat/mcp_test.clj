@@ -86,10 +86,7 @@
       (is (= 2 (count (get fragment "xitions"))))
       ;; Xitions reference the registered schema IDs
       (is (= "mc-mcp-request" (get-in fragment ["xitions" 0 "schema"])))
-      (is (= "mc-mcp-response" (get-in fragment ["xitions" 1 "schema"])))
-      ;; Prompts include tool
-      (is (some #(clojure.string/includes? % "test_tool")
-                (get fragment "prompts"))))))
+      (is (= "mc-mcp-response" (get-in fragment ["xitions" 1 "schema"]))))))
 
 ;;------------------------------------------------------------------------------
 ;; Integration Tests (require actual MCP server)
@@ -109,10 +106,9 @@
         (is (fn? (get-in ctx' [:id->schema "mc-mcp-response"])))
         ;; Stop hook should be registered
         (is (seq (get-in ctx' [:hats :stop-hooks])))
-        ;; Fragment should have states/xitions/prompts
+        ;; Fragment should have states/xitions (no prompts - tools via API)
         (is (= "mc-mcp" (get-in fragment ["states" 0 "id"])))
         (is (= 2 (count (get fragment "xitions"))))
-        (is (seq (get fragment "prompts")))
         (finally
           ;; Cleanup
           (hat/run-stop-hooks ctx'))))))
@@ -316,10 +312,9 @@
           ;; Both servers initialized
           (is (= github-bridge (get-in ctx' [:hats :mcp :servers "github" :bridge])))
           (is (= tools-bridge (get-in ctx' [:hats :mcp :servers "tools" :bridge])))
-          ;; Prompt should mention both servers
-          (let [prompt (first (get fragment "prompts"))]
-            (is (clojure.string/includes? prompt "list_issues"))
-            (is (clojure.string/includes? prompt "bash"))))))))
+          ;; Fragment should have states and xitions (no prompts - tools via API)
+          (is (= "mc-mcp" (get-in fragment ["states" 0 "id"])))
+          (is (= 2 (count (get fragment "xitions")))))))))
 
 ;;------------------------------------------------------------------------------
 ;; Config Normalization Tests
