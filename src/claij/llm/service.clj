@@ -102,25 +102,26 @@
                       (str/join "\n\n" (map #(get % "content") system-msgs)))
         non-system (vec (remove #(= "system" (get % "role")) messages))
         ;; Convert OpenAI tool format to Anthropic format
-        ;; OpenAI: {:type "function" :function {:name ... :description ... :parameters ...}}
-        ;; Anthropic: {:name ... :description ... :input_schema ...}
+        ;; OpenAI: {"type" "function" "function" {"name" ... "description" ... "parameters" ...}}
+        ;; Anthropic: {"name" ... "description" ... "input_schema" ...}
         anthropic-tools (when (seq tools)
-                          (mapv (fn [{:keys [function]}]
-                                  {:name (:name function)
-                                   :description (:description function)
-                                   :input_schema (or (:parameters function)
-                                                     {:type "object" :properties {}})})
+                          (mapv (fn [tool]
+                                  (let [function (get tool "function")]
+                                    {"name" (get function "name")
+                                     "description" (get function "description")
+                                     "input_schema" (or (get function "parameters")
+                                                        {"type" "object" "properties" {}})}))
                                 tools))]
     {:url url
      :headers (merge {"Content-Type" "application/json"
                       "anthropic-version" "2023-06-01"}
                      (resolve-auth auth))
      :body (json/generate-string
-            (cond-> {:model model
-                     :max_tokens 4096
-                     :messages non-system}
-              system-text (assoc :system system-text)
-              anthropic-tools (assoc :tools anthropic-tools)))}))
+            (cond-> {"model" model
+                     "max_tokens" 4096
+                     "messages" non-system}
+              system-text (assoc "system" system-text)
+              anthropic-tools (assoc "tools" anthropic-tools)))}))
 
 (defmethod make-request "google"
   [_strategy url auth model messages options]
@@ -131,27 +132,28 @@
                       (str/join "\n\n" (map #(get % "content") system-msgs)))
         non-system (remove #(= "system" (get % "role")) messages)
         contents (mapv (fn [{:strs [role content]}]
-                         {:role (if (= role "assistant") "model" role)
-                          :parts [{:text content}]})
+                         {"role" (if (= role "assistant") "model" role)
+                          "parts" [{"text" content}]})
                        non-system)
         ;; Convert OpenAI tool format to Google format
-        ;; OpenAI: {:type "function" :function {:name ... :description ... :parameters ...}}
-        ;; Google: {:function_declarations [{:name ... :description ... :parameters ...}]}
+        ;; OpenAI: {"type" "function" "function" {"name" ... "description" ... "parameters" ...}}
+        ;; Google: {"function_declarations" [{"name" ... "description" ... "parameters" ...}]}
         google-tools (when (seq tools)
-                       [{:function_declarations
-                         (mapv (fn [{:keys [function]}]
-                                 {:name (:name function)
-                                  :description (:description function)
-                                  :parameters (or (:parameters function)
-                                                  {:type "object" :properties {}})})
+                       [{"function_declarations"
+                         (mapv (fn [tool]
+                                 (let [function (get tool "function")]
+                                   {"name" (get function "name")
+                                    "description" (get function "description")
+                                    "parameters" (or (get function "parameters")
+                                                     {"type" "object" "properties" {}})}))
                                tools)}])]
     {:url full-url
      :headers (merge {"Content-Type" "application/json"}
                      (resolve-auth auth))
      :body (json/generate-string
-            (cond-> {:contents contents}
-              system-text (assoc :systemInstruction {:parts [{:text system-text}]})
-              google-tools (assoc :tools google-tools)))}))
+            (cond-> {"contents" contents}
+              system-text (assoc "systemInstruction" {"parts" [{"text" system-text}]})
+              google-tools (assoc "tools" google-tools)))}))
 
 ;;------------------------------------------------------------------------------
 ;; Response Parsing - Dispatch on Strategy

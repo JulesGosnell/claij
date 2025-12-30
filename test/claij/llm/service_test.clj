@@ -376,3 +376,66 @@
       (is (string? content))
       (is (pos? (count content)))
       (println "Ollama response:" content))))
+
+;;------------------------------------------------------------------------------
+;; Tool Format Tests
+;;------------------------------------------------------------------------------
+
+(deftest test-make-request-with-tools
+  (testing "Anthropic tool format conversion - tools have string keys"
+    (with-redefs [svc/get-env (constantly "anthro-key")]
+      (let [;; Tools as produced by mcp-tool-schema->native-tool-def (string keys)
+            tools [{"type" "function"
+                    "function" {"name" "bash"
+                                "description" "Run shell command"
+                                "parameters" {"type" "object"
+                                              "properties" {"command" {"type" "string"}}}}}]
+            req (svc/make-request "anthropic"
+                                  "https://api.anthropic.com/v1/messages"
+                                  {:type :x-api-key :env "ANTHROPIC_API_KEY"}
+                                  "claude-sonnet-4-5"
+                                  [{"role" "user" "content" "test"}]
+                                  {:tools tools})
+            body (json/parse-string (:body req) false)]
+        ;; Anthropic expects: {"name" "bash" "description" "..." "input_schema" {...}}
+        (is (= 1 (count (get body "tools"))))
+        (let [tool (first (get body "tools"))]
+          (is (= "bash" (get tool "name")))
+          (is (= "Run shell command" (get tool "description")))
+          (is (map? (get tool "input_schema")))))))
+
+  (testing "Google tool format conversion - tools have string keys"
+    (with-redefs [svc/get-env (constantly "goog-key")]
+      (let [tools [{"type" "function"
+                    "function" {"name" "bash"
+                                "description" "Run shell command"
+                                "parameters" {"type" "object"
+                                              "properties" {"command" {"type" "string"}}}}}]
+            req (svc/make-request "google"
+                                  "https://generativelanguage.googleapis.com/v1beta/models"
+                                  {:type :query-param :param "key" :env "GOOGLE_API_KEY"}
+                                  "gemini-2.0-flash"
+                                  [{"role" "user" "content" "test"}]
+                                  {:tools tools})
+            body (json/parse-string (:body req) false)]
+        ;; Google expects: {"function_declarations" [{"name" "bash" ...}]}
+        (is (= 1 (count (get body "tools"))))
+        (let [decls (get-in body ["tools" 0 "function_declarations"])]
+          (is (= 1 (count decls)))
+          (is (= "bash" (get (first decls) "name")))))))
+
+  (testing "OpenAI-compat passes tools through unchanged"
+    (with-redefs [svc/get-env (constantly "test-key")]
+      (let [tools [{"type" "function"
+                    "function" {"name" "bash"
+                                "description" "Run shell command"
+                                "parameters" {"type" "object"}}}]
+            req (svc/make-request "openai-compat"
+                                  "http://localhost:11434/v1/chat/completions"
+                                  {:type :bearer :env "TEST_KEY"}
+                                  "gpt-4"
+                                  [{"role" "user" "content" "test"}]
+                                  {:tools tools})
+            body (json/parse-string (:body req) false)]
+        ;; OpenAI-compat passes tools through as-is
+        (is (= tools (get body "tools")))))))
