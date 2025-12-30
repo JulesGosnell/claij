@@ -99,13 +99,13 @@
      "additionalProperties" false
      "required" ["jsonrpc" "id" "result"]
      "properties" {"jsonrpc" {"const" "2.0"}
-                   "id" {"type" "integer"}
+                   "id" {"oneOf" [{"type" "integer"} {"type" "string"}]}
                    "result" tool-response-schema}}
     {"type" "object"
      "additionalProperties" false
      "required" ["jsonrpc" "id" "error"]
      "properties" {"jsonrpc" {"const" "2.0"}
-                   "id" {"type" "integer"}
+                   "id" {"oneOf" [{"type" "integer"} {"type" "string"}]}
                    "error" jsonrpc-error-schema}}]})
 
 ;; Resource schemas
@@ -320,7 +320,7 @@
    "additionalProperties" false
    "required" ["jsonrpc" "id" "method" "params"]
    "properties" {"jsonrpc" {"const" "2.0"}
-                 "id" {"type" "integer"}
+                 "id" {"oneOf" [{"type" "integer"} {"type" "string"}]}
                  "method" {"const" method}
                  "params" params-schema}})
 
@@ -331,7 +331,7 @@
    "additionalProperties" false
    "required" ["jsonrpc" "id" "result"]
    "properties" {"jsonrpc" {"const" "2.0"}
-                 "id" {"type" "integer"}
+                 "id" {"oneOf" [{"type" "integer"} {"type" "string"}]}
                  "result" result-schema}})
 
 (defn wrap-jsonrpc-notification
