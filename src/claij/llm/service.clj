@@ -174,57 +174,59 @@
 
 (defmethod parse-response "openai-compat"
   [_strategy response]
-  (let [message (get-in response [:choices 0 :message])
-        content (:content message)
-        tool-calls (:tool_calls message)
-        ;; Normalize tool_calls to consistent format
+  (let [message (get-in response ["choices" 0 "message"])
+        content (get message "content")
+        tool-calls (get message "tool_calls")
+        ;; Normalize tool_calls to consistent format (string keys throughout)
         normalized-tools (when (seq tool-calls)
-                           (mapv (fn [{:keys [id function]}]
-                                   {:id id
-                                    :name (:name function)
-                                    :arguments (if (string? (:arguments function))
-                                                 (json/parse-string (:arguments function) true)
-                                                 (:arguments function))})
+                           (mapv (fn [tc]
+                                   (let [function (get tc "function")]
+                                     {"id" (get tc "id")
+                                      "name" (get function "name")
+                                      "arguments" (let [args (get function "arguments")]
+                                                    (if (string? args)
+                                                      (json/parse-string args false)
+                                                      args))}))
                                  tool-calls))]
-    {:content content
-     :tool_calls normalized-tools}))
+    {"content" content
+     "tool_calls" normalized-tools}))
 
 (defmethod parse-response "anthropic"
   [_strategy response]
-  (let [content-blocks (get response :content)
+  (let [content-blocks (get response "content")
         ;; Extract text blocks
-        text-blocks (filter #(= "text" (:type %)) content-blocks)
+        text-blocks (filter #(= "text" (get % "type")) content-blocks)
         text-content (when (seq text-blocks)
-                       (str/join " " (map :text text-blocks)))
+                       (str/join " " (map #(get % "text") text-blocks)))
         ;; Extract tool_use blocks and normalize
-        tool-uses (filter #(= "tool_use" (:type %)) content-blocks)
+        tool-uses (filter #(= "tool_use" (get % "type")) content-blocks)
         normalized-tools (when (seq tool-uses)
-                           (mapv (fn [{:keys [id name input]}]
-                                   {:id id
-                                    :name name
-                                    :arguments input})
+                           (mapv (fn [tu]
+                                   {"id" (get tu "id")
+                                    "name" (get tu "name")
+                                    "arguments" (get tu "input")})
                                  tool-uses))]
-    {:content (when-not (str/blank? text-content) text-content)
-     :tool_calls normalized-tools}))
+    {"content" (when-not (str/blank? text-content) text-content)
+     "tool_calls" normalized-tools}))
 
 (defmethod parse-response "google"
   [_strategy response]
-  (let [parts (get-in response [:candidates 0 :content :parts])
+  (let [parts (get-in response ["candidates" 0 "content" "parts"])
         ;; Extract text parts
-        text-parts (filter :text parts)
+        text-parts (filter #(get % "text") parts)
         text-content (when (seq text-parts)
-                       (str/join " " (map :text text-parts)))
+                       (str/join " " (map #(get % "text") text-parts)))
         ;; Extract functionCall parts and normalize
-        function-calls (filter :functionCall parts)
+        function-calls (filter #(get % "functionCall") parts)
         normalized-tools (when (seq function-calls)
                            (mapv (fn [part]
-                                   (let [fc (:functionCall part)]
-                                     {:id (:name fc) ;; Google doesn't use separate IDs
-                                      :name (:name fc)
-                                      :arguments (:args fc)}))
+                                   (let [fc (get part "functionCall")]
+                                     {"id" (get fc "name") ;; Google doesn't use separate IDs
+                                      "name" (get fc "name")
+                                      "arguments" (get fc "args")}))
                                  function-calls))]
-    {:content (when-not (str/blank? text-content) text-content)
-     :tool_calls normalized-tools}))
+    {"content" (when-not (str/blank? text-content) text-content)
+     "tool_calls" normalized-tools}))
 
 ;;------------------------------------------------------------------------------
 ;; Service Registry
@@ -283,8 +285,8 @@
      options  - Optional extra options (e.g., {:tools [...]})
    
    Returns:
-     {:content    string or nil - text response
-      :tool_calls vector or nil - normalized tool calls}"
+     {\"content\"    string or nil - text response
+      \"tool_calls\" vector or nil - normalized tool calls}"
   ([registry service model messages]
    (call-llm-sync registry service model messages nil))
   ([registry service model messages options]
@@ -293,9 +295,8 @@
      (log/info (str "LLM Call: " service "/" model))
      (let [response (http/post (:url req)
                                {:headers (:headers req)
-                                :body (:body req)
-                                :as :json})]
-       (parse-response strategy (:body response))))))
+                                :body (:body req)})]
+       (parse-response strategy (json/parse-string (:body response) false))))))
 
 (defn call-llm-async
   "Make an asynchronous HTTP call to an LLM service.
@@ -324,7 +325,7 @@
       :body (:body req)}
      (fn [response]
        (try
-         (let [parsed (json/parse-string (:body response) true)
+         (let [parsed (json/parse-string (:body response) false)
                result (parse-response strategy parsed)]
            (handler result))
          (catch Exception e

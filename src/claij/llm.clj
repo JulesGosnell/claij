@@ -79,15 +79,17 @@
        (fn [response]
          (try
            ;; Parse JSON response and extract content/tool_calls via strategy
-           (let [parsed-response (json/parse-string (:body response) true)
-                 {:keys [content tool_calls]} (svc/parse-response strategy parsed-response)]
+           (let [parsed-response (json/parse-string (:body response) false)
+                 parsed (svc/parse-response strategy parsed-response)
+                 content (get parsed "content")
+                 tool_calls (get parsed "tool_calls")]
 
              ;; Handle tool_calls response (native tool calling)
              (if (seq tool_calls)
                (do
                  (log/info (str "      [OK] LLM Response: " (count tool_calls) " tool call(s)"))
                  (try
-                   (handler {:tool_calls tool_calls})
+                   (handler {"tool_calls" tool_calls})
                    (log/info "      [OK] Handler returned successfully (tool_calls)")
                    (catch Throwable t
                      (log/error t "      [X] Handler threw exception (tool_calls)"))))
@@ -99,9 +101,9 @@
                    (log/error (str "      [X] LLM returned nil content. Full response: "
                                    (pr-str parsed-response)))
                    (when error
-                     (error {:error "nil-content"
-                             :message "LLM service returned nil content"
-                             :raw-response parsed-response})))
+                     (error {"error" "nil-content"
+                             "message" "LLM service returned nil content"
+                             "raw-response" parsed-response})))
                  ;; Normal flow - process the content
                  (let [d (strip-md-json content)]
                    (try
@@ -145,22 +147,22 @@
                           ;; Max retries handler
                           (fn []
                             (log/debug (str "Final malformed response: " d))
-                            (when error (error {:error "max-retries-exceeded"
-                                                :raw-response d
-                                                :exception (.getMessage e)})))))))))))
+                            (when error (error {"error" "max-retries-exceeded"
+                                                "raw-response" d
+                                                "exception" (.getMessage e)})))))))))))
            (catch Throwable t
              (log/error t "Error processing LLM response"))))
        (fn [exception]
          (let [data (ex-data exception)
                body (when data (:body data))
                m (when body
-                   (try (json/parse-string body true)
+                   (try (json/parse-string body false)
                         (catch Exception _ nil)))]
            (log/error (str "      [X] LLM Request Failed: "
-                           (or (:error m) (.getMessage exception))))
+                           (or (get m "error") (.getMessage exception))))
            (when error
-             (error (or m {:error "request-failed"
-                           :message (.getMessage exception)
-                           :exception-type (type exception)})))))))))
+             (error (or m {"error" "request-failed"
+                           "message" (.getMessage exception)
+                           "exception-type" (str (type exception))})))))))))
 
 

@@ -120,7 +120,7 @@
 
       (let [error (deref error-promise 2000 :timeout)]
         (is (not= error :timeout) "Error handler should be called")
-        (is (= "nil-content" (:error error)))))))
+        (is (= "nil-content" (get error "error")))))))
 
 (deftest call-non-map-json-test
   (testing "non-map JSON response triggers retry"
@@ -165,7 +165,7 @@
 
       (let [error (deref error-promise 2000 :timeout)]
         (is (not= error :timeout) "Error handler should be called")
-        (is (= "service_unavailable" (:error error)))))))
+        (is (= "service_unavailable" (get error "error")))))))
 
 (deftest call-http-error-no-body-test
   (testing "HTTP error without body still calls error handler"
@@ -183,5 +183,5 @@
 
       (let [error (deref error-promise 2000 :timeout)]
         (is (not= error :timeout) "Error handler should be called")
-        (is (= "request-failed" (:error error)))
-        (is (= "Network timeout" (:message error)))))))
+        (is (= "request-failed" (get error "error")))
+        (is (= "Network timeout" (get error "message")))))))
