@@ -11,7 +11,8 @@
    [claij.llm.service :as llm-service]
    [claij.hat :as hat]
    [claij.parallel :as parallel]
-   [claij.model :as model]))
+   [claij.model :as model]
+   [claij.mcp.schema :as mcp-schema]))
 
 ;;------------------------------------------------------------------------------
 ;; Action Dispatch Helpers
@@ -1015,7 +1016,12 @@
    Service registry is taken from context :llm/registry or uses default-registry.
    
    Passes the output schema (JSON Schema oneOf of valid output transitions) to call
-   for structured output enforcement. The oneOf is discriminated by the 'id' const."
+   for structured output enforcement. The oneOf is discriminated by the 'id' const.
+   
+   Native Tool Calling:
+   When output xitions include an MCP tools xition (detected by schema title),
+   native tools are extracted and passed to the LLM. If LLM returns tool_calls,
+   they're converted to MCP event format for the FSM to route to the MCP state."
   {"type" "object"
    "properties" {"service" {"type" "string"}
                  "model" {"type" "string"}}}
@@ -1039,6 +1045,18 @@
           registry (or (get context :schema/defs)
                        (build-fsm-registry fsm context))
 
+          ;; Check for native tools in output xitions
+          ;; schema-resolver gets the schema for a xition, using hat schema fns if present
+          schema-resolver (fn [xition]
+                            (let [raw-schema (get-in xition ["schema"])
+                                  resolved (resolve-schema context xition raw-schema)]
+                              (schema/expand-refs resolved registry)))
+          
+          native-tools-info (mcp-schema/extract-native-tools-from-xitions 
+                             output-xitions schema-resolver)
+          native-tools (when native-tools-info (:tools native-tools-info))
+          mcp-xition (when native-tools-info (:mcp-xition native-tools-info))
+
           ;; Build prompt trail from history
           prompt-trail (trail->prompts context fsm trail)
 
@@ -1057,16 +1075,43 @@
                        initial-message
                        prompt-trail)
 
-          prompts (make-prompts fsm ix state full-trail service model)]
+          ;; Build base prompts
+          base-prompts (make-prompts fsm ix state full-trail service model)
+          
+          ;; Add XOR instruction when native tools are present
+          prompts (if native-tools
+                    (let [system-msg (first base-prompts)
+                          rest-msgs (rest base-prompts)
+                          enhanced-system {"role" "system"
+                                           "content" (str (get system-msg "content")
+                                                          "\n\n"
+                                                          mcp-schema/xor-tool-prompt)}]
+                      (cons enhanced-system rest-msgs))
+                    base-prompts)]
+      
+      (when native-tools
+        (log/info (str "   Native tools detected: " (count native-tools) " tools from MCP xition")))
       (log/info (str "   Using LLM: " service "/" model " with " (count prompts) " prompts"))
+      
       (call
        service model
        prompts
        (fn [output]
-         (log/info "llm-action got output, id:" (get output "id") ":" (pr-str output))
-         (handler context output))
+         ;; Handle tool_calls response (native tool calling)
+         (if-let [tool-calls (get output "tool_calls")]
+           (do
+             (log/info (str "llm-action: converting " (count tool-calls) " tool_calls to MCP event"))
+             (let [mcp-xition-id (get mcp-xition "id")
+                   mcp-event (mcp-schema/native-tool-calls->mcp-event mcp-xition-id tool-calls)]
+               (log/info "llm-action got tool_calls, routing to MCP:" (pr-str mcp-xition-id))
+               (handler context mcp-event)))
+           ;; Normal JSON response
+           (do
+             (log/info "llm-action got output, id:" (get output "id") ":" (pr-str output))
+             (handler context output))))
        {:registry llm-registry
         :schema output-schema
+        :tools native-tools
         :error (fn [error-info]
                  (log/error "LLM action failed:" (pr-str error-info))
                  ;; Return error to handler so FSM can see it

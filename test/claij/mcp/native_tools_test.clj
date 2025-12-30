@@ -268,3 +268,77 @@
   (testing "handles empty content"
     (let [result (mcp-schema/mcp-tool-result->native-tool-result {"result" {}} "call_789")]
       (is (= "" (get result "content"))))))
+
+;;==============================================================================
+;; Tests for XOR constraint helpers
+;;==============================================================================
+
+(deftest xor-tool-prompt-test
+  (testing "XOR prompt is defined and non-empty"
+    (is (string? mcp-schema/xor-tool-prompt))
+    (is (> (count mcp-schema/xor-tool-prompt) 50))))
+
+(deftest xor-violation?-test
+  (testing "detects XOR violation (both tool_calls and content)"
+    (is (true? (mcp-schema/xor-violation? {"tool_calls" [{"id" "1"}] "content" "hello"}))))
+
+  (testing "no violation with only tool_calls"
+    (is (false? (mcp-schema/xor-violation? {"tool_calls" [{"id" "1"}]})))
+    (is (false? (mcp-schema/xor-violation? {"tool_calls" [{"id" "1"}] "content" nil})))
+    (is (false? (mcp-schema/xor-violation? {"tool_calls" [{"id" "1"}] "content" ""})))
+    (is (false? (mcp-schema/xor-violation? {"tool_calls" [{"id" "1"}] "content" "   "}))))
+
+  (testing "no violation with only content"
+    (is (false? (mcp-schema/xor-violation? {"content" "hello"})))
+    (is (false? (mcp-schema/xor-violation? {"content" "hello" "tool_calls" nil})))
+    (is (false? (mcp-schema/xor-violation? {"content" "hello" "tool_calls" []})))))
+
+(deftest find-mcp-xition-test
+  (testing "finds xition with MCP tools schema"
+    (let [mcp-xition {"id" ["llm" "mcp"]}
+          other-xition {"id" ["llm" "end"]}
+          schema-resolver (fn [x]
+                            (if (= x mcp-xition)
+                              {"title" "mcp-tools"}
+                              {"title" "other"}))]
+      (is (= mcp-xition (mcp-schema/find-mcp-xition [other-xition mcp-xition] schema-resolver)))))
+
+  (testing "returns nil when no MCP xition"
+    (let [xitions [{"id" ["a" "b"]} {"id" ["b" "c"]}]
+          schema-resolver (constantly {"title" "not-mcp"})]
+      (is (nil? (mcp-schema/find-mcp-xition xitions schema-resolver))))))
+
+(deftest extract-native-tools-from-xitions-test
+  (testing "extracts tools when MCP xition exists"
+    (let [mcp-xition {"id" ["llm" "mcp"]}
+          schema-resolver (fn [x]
+                            (if (= x mcp-xition)
+                              full-mcp-schema-single-server
+                              {"title" "other"}))
+          result (mcp-schema/extract-native-tools-from-xitions [mcp-xition] schema-resolver)]
+      (is (some? result))
+      (is (= 2 (count (:tools result))))
+      (is (= mcp-xition (:mcp-xition result)))))
+
+  (testing "returns nil when no MCP xition"
+    (let [xitions [{"id" ["a" "b"]}]
+          schema-resolver (constantly {"title" "other"})]
+      (is (nil? (mcp-schema/extract-native-tools-from-xitions xitions schema-resolver))))))
+
+(deftest native-tool-calls->mcp-event-test
+  (testing "converts native tool_calls to MCP event format"
+    (let [mcp-xition-id ["llm" "llm-mcp"]
+          tool-calls [{"id" "call_1" "name" "bash" "arguments" {"cmd" "ls"}}
+                      {"id" "call_2" "name" "clojure_eval" "arguments" {"code" "(+ 1 2)"}}]
+          result (mcp-schema/native-tool-calls->mcp-event mcp-xition-id tool-calls)]
+      (is (= mcp-xition-id (get result "id")))
+      (is (= 2 (count (get-in result ["calls" "default"]))))))
+
+  (testing "routes prefixed tools to different servers"
+    (let [mcp-xition-id ["llm" "llm-mcp"]
+          tool-calls [{"id" "call_1" "name" "bash" "arguments" {"cmd" "ls"}}
+                      {"id" "call_2" "name" "github__list_issues" "arguments" {"repo" "x"}}]
+          result (mcp-schema/native-tool-calls->mcp-event mcp-xition-id tool-calls)]
+      (is (= mcp-xition-id (get result "id")))
+      (is (= 1 (count (get-in result ["calls" "default"]))))
+      (is (= 1 (count (get-in result ["calls" "github"])))))))

@@ -528,3 +528,80 @@
     {"role" "tool"
      "tool_call_id" tool-call-id
      "content" text-content}))
+
+;;------------------------------------------------------------------------------
+;; XOR Constraint for Native Tool Calling
+;;------------------------------------------------------------------------------
+
+(def xor-tool-prompt
+  "Prompt text to enforce XOR constraint: tool_calls OR content, never both.
+   LLMs are trained on chat UIs where returning both is normal - we need this
+   prompt to enforce clean separation for FSM transition routing."
+  "TOOL CALLING RULES:
+Return EITHER a tool call OR a JSON response, NEVER both.
+
+- If you need to use a tool: Return ONLY the tool call. Do NOT include any text or JSON.
+- If you have a final answer: Return ONLY the JSON object. Do NOT include any tool calls.
+
+Returning both tool_calls and content together is a protocol error.")
+
+(defn find-mcp-xition
+  "Find the MCP tools xition from a collection of output xitions.
+   Returns the xition whose schema has the native-tools-schema-title, or nil."
+  [output-xitions schema-resolver]
+  (first
+   (filter
+    (fn [xition]
+      (let [schema (schema-resolver xition)]
+        (native-tools-schema? schema)))
+    output-xitions)))
+
+(defn extract-native-tools-from-xitions
+  "Extract native tools from output xitions if an MCP xition exists.
+   
+   Returns {:tools [...] :mcp-xition xition} if MCP tools found, nil otherwise.
+   
+   schema-resolver is a function (fn [xition] schema) that resolves the schema
+   for a given xition (needed because schema resolution depends on FSM context)."
+  [output-xitions schema-resolver]
+  (when-let [mcp-xition (find-mcp-xition output-xitions schema-resolver)]
+    (let [schema (schema-resolver mcp-xition)
+          tools (mcp-request-schema->native-tool-defs schema)]
+      {:tools tools
+       :mcp-xition mcp-xition
+       :mcp-schema schema})))
+
+(defn xor-violation?
+  "Check if LLM response violates XOR constraint (has both tool_calls AND content).
+   Returns true if violation detected, false otherwise."
+  [response]
+  (boolean
+   (and (seq (get response "tool_calls"))
+        (some? (get response "content"))
+        (not (clojure.string/blank? (get response "content"))))))
+
+(defn native-tool-calls->mcp-event
+  "Convert native tool_calls to MCP event format.
+   
+   Takes the MCP xition id and a vector of native tool calls,
+   returns an MCP event that can be used as FSM transition.
+   
+   Native tool_calls (from LLM, string keys):
+   [{\"id\" \"call_123\" \"name\" \"bash\" \"arguments\" {\"cmd\" \"ls\"}}
+    {\"id\" \"call_456\" \"name\" \"github__list_issues\" \"arguments\" {\"repo\" \"x\"}}]
+   
+   MCP event:
+   {\"id\" [\"llm\" \"llm-mcp\"]
+    \"calls\" {\"default\" [{mcp-request}]
+              \"github\" [{mcp-request}]}}"
+  [mcp-xition-id tool-calls]
+  (let [grouped-calls (group-by 
+                       (fn [tc]
+                         (first (parse-prefixed-tool-name (get tc "name"))))
+                       tool-calls)
+        mcp-calls (into {}
+                        (map (fn [[server calls]]
+                               [server (mapv native-tool-call->mcp-tool-call calls)])
+                             grouped-calls))]
+    {"id" mcp-xition-id
+     "calls" mcp-calls}))
