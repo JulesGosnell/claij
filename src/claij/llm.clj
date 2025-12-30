@@ -71,6 +71,7 @@
     (let [{:keys [strategy]} (svc/lookup-service registry service)
           extra-options (when tools {:tools tools})
           req (svc/build-request-from-registry registry service model prompts extra-options)]
+      (log/info (str "      Request body size: " (count (:body req)) " bytes"))
       (http/post
        (:url req)
        {:async? true

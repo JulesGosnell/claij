@@ -147,9 +147,10 @@
      "action" "end"}]
 
    "xitions"
-   [;; Entry: audio bytes in
+   [;; Entry: audio bytes in (omit from trail - binary data is huge)
     {"id" ["start" "stt"]
      "label" "audio in"
+     "omit" true
      "schema" {"$ref" "#/$defs/entry"}}
 
     ;; STT → LLM: openapi-call response with text in body

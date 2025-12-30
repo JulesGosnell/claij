@@ -425,6 +425,13 @@
 ;; Used by llm-action to build the :tools parameter for LLM calls.
 ;;------------------------------------------------------------------------------
 
+(defn prefix-tool-name
+  "Prefix a tool name with server name for multi-server routing.
+   
+   Example: (prefix-tool-name \"github\" \"list_issues\") → \"github__list_issues\""
+  [server-name tool-name]
+  (str server-name "__" tool-name))
+
 (defn mcp-tool-schema->native-tool-def
   "Convert hat's tool schema to OpenAI native tool definition.
    
@@ -438,12 +445,21 @@
    {\"type\" \"function\"
     \"function\" {\"name\" \"bash\"
                  \"description\" \"Run shell command\"
-                 \"parameters\" {<inputSchema>}}}"
-  [tool-schema]
-  {"type" "function"
-   "function" {"name" (get-in tool-schema ["properties" "name" "const"])
-               "description" (get tool-schema "description" "")
-               "parameters" (get-in tool-schema ["properties" "arguments"] {})}})
+                 \"parameters\" {<inputSchema>}}}
+   
+   When server-name is provided, tool name is prefixed for routing:
+   {\"function\" {\"name\" \"clojure__bash\" ...}}"
+  ([tool-schema]
+   (mcp-tool-schema->native-tool-def tool-schema nil))
+  ([tool-schema server-name]
+   (let [raw-name (get-in tool-schema ["properties" "name" "const"])
+         tool-name (if server-name
+                     (prefix-tool-name server-name raw-name)
+                     raw-name)]
+     {"type" "function"
+      "function" {"name" tool-name
+                  "description" (get tool-schema "description" "")
+                  "parameters" (get-in tool-schema ["properties" "arguments"] {})}})))
 
 (defn mcp-tool-schemas-from-request-schema
   "Extract individual tool schemas from full MCP request schema.
@@ -465,6 +481,23 @@
   [mcp-schema]
   (when-let [tool-schemas (mcp-tool-schemas-from-request-schema mcp-schema)]
     (mapv mcp-tool-schema->native-tool-def tool-schemas)))
+
+(defn servers->native-tools
+  "Convert MCP servers map to vector of native tool definitions with prefixed names.
+   
+   Takes servers map from context [:hats :mcp :servers]:
+   {\"github\" {:cache {\"tools\" [{\"name\" \"list_issues\" ...}]}}
+    \"clojure\" {:cache {\"tools\" [{\"name\" \"bash\" ...}]}}}
+   
+   Returns native tool definitions with server-prefixed names:
+   [{\"type\" \"function\" \"function\" {\"name\" \"github__list_issues\" ...}}
+    {\"type\" \"function\" \"function\" {\"name\" \"clojure__bash\" ...}}]"
+  [servers]
+  (vec
+   (for [[server-name {:keys [cache]}] servers
+         tool (get cache "tools" [])]
+     (let [tool-schema (tool-cache->request-schema tool)]
+       (mcp-tool-schema->native-tool-def tool-schema server-name)))))
 
 ;;------------------------------------------------------------------------------
 ;; M1: Instance Conversions (Bidirectional)

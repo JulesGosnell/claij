@@ -342,3 +342,36 @@
       (is (= mcp-xition-id (get result "id")))
       (is (= 1 (count (get-in result ["calls" "default"]))))
       (is (= 1 (count (get-in result ["calls" "github"])))))))
+
+;;==============================================================================
+;; Tests for server-prefixed tool names
+;;==============================================================================
+
+(deftest prefix-tool-name-test
+  (testing "prefixes tool name with server"
+    (is (= "github__list_issues" (mcp-schema/prefix-tool-name "github" "list_issues")))
+    (is (= "clojure__bash" (mcp-schema/prefix-tool-name "clojure" "bash")))))
+
+(deftest mcp-tool-schema->native-tool-def-with-prefix-test
+  (testing "converts tool schema with server prefix"
+    (let [tool-schema {"type" "object"
+                       "description" "Run shell command"
+                       "properties" {"name" {"const" "bash"}
+                                     "arguments" {"type" "object"
+                                                  "properties" {"command" {"type" "string"}}}}}
+          result (mcp-schema/mcp-tool-schema->native-tool-def tool-schema "clojure")]
+      (is (= "clojure__bash" (get-in result ["function" "name"]))))))
+
+(deftest servers->native-tools-test
+  (testing "converts server caches to prefixed native tools"
+    (let [servers {"github" {:cache {"tools" [{"name" "list_issues"
+                                               "description" "List issues"
+                                               "inputSchema" {"type" "object"}}]}}
+                   "clojure" {:cache {"tools" [{"name" "bash"
+                                                "description" "Run command"
+                                                "inputSchema" {"type" "object"
+                                                               "properties" {"command" {"type" "string"}}}}]}}}
+          result (mcp-schema/servers->native-tools servers)]
+      (is (= 2 (count result)))
+      (is (some #(= "github__list_issues" (get-in % ["function" "name"])) result))
+      (is (some #(= "clojure__bash" (get-in % ["function" "name"])) result)))))

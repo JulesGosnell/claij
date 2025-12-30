@@ -1045,17 +1045,25 @@
           registry (or (get context :schema/defs)
                        (build-fsm-registry fsm context))
 
-          ;; Check for native tools in output xitions
-          ;; schema-resolver gets the schema for a xition, using hat schema fns if present
+          ;; Check for native tools - prefer server-aware extraction when available
+          ;; This gives us properly prefixed tool names for multi-server routing
+          mcp-servers (get-in context [:hats :mcp :servers])
+          
+          ;; Find MCP xition for routing tool_calls responses
           schema-resolver (fn [xition]
                             (let [raw-schema (get-in xition ["schema"])
                                   resolved (resolve-schema context xition raw-schema)]
                               (schema/expand-refs resolved registry)))
+          mcp-xition (mcp-schema/find-mcp-xition output-xitions schema-resolver)
           
-          native-tools-info (mcp-schema/extract-native-tools-from-xitions 
-                             output-xitions schema-resolver)
-          native-tools (when native-tools-info (:tools native-tools-info))
-          mcp-xition (when native-tools-info (:mcp-xition native-tools-info))
+          ;; Extract native tools - use server-aware function if we have MCP servers
+          native-tools (when mcp-xition
+                         (if (seq mcp-servers)
+                           ;; Use servers->native-tools for properly prefixed names
+                           (mcp-schema/servers->native-tools mcp-servers)
+                           ;; Fallback to schema-based extraction
+                           (let [schema (schema-resolver mcp-xition)]
+                             (mcp-schema/mcp-request-schema->native-tool-defs schema))))
 
           ;; Build prompt trail from history
           prompt-trail (trail->prompts context fsm trail)

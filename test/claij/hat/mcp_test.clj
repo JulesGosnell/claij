@@ -2,58 +2,10 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [claij.hat :as hat]
-   [claij.hat.mcp :refer [mcp-hat-maker format-tools-prompt format-tool-schema
+   [claij.hat.mcp :refer [mcp-hat-maker
                           hat-mcp-request-schema-fn hat-mcp-response-schema-fn
                           mcp-service-action normalize-mcp-config]]
    [claij.mcp.bridge :as bridge]))
-
-;;------------------------------------------------------------------------------
-;; Prompt Generation Tests (no bridge needed)
-;;------------------------------------------------------------------------------
-
-(deftest format-tools-prompt-test
-  (testing "formats empty tools map"
-    (is (= "No MCP tools available." (format-tools-prompt "mc" "mc-mcp" {}))))
-
-  (testing "formats single server with tools"
-    (let [tools-by-server {"default" [{"name" "read_file"
-                                       "description" "Read a file"
-                                       "inputSchema" {"type" "object"
-                                                      "properties" {"path" {"type" "string"}}}}]}
-          prompt (format-tools-prompt "mc" "mc-mcp" tools-by-server)]
-      (is (clojure.string/includes? prompt "read_file"))
-      (is (clojure.string/includes? prompt "Read a file"))
-      ;; Check for new calls format
-      (is (clojure.string/includes? prompt "\"calls\":"))
-      (is (clojure.string/includes? prompt "\"default\":"))
-      (is (clojure.string/includes? prompt "jsonrpc"))
-      ;; Single server shouldn't show server header
-      (is (not (clojure.string/includes? prompt "### Server:")))
-      ;; Should mention results field
-      (is (clojure.string/includes? prompt "results"))))
-
-  (testing "formats multiple servers with grouped tools"
-    (let [tools-by-server {"github" [{"name" "list_issues" "description" "List issues"}
-                                     {"name" "create_pr" "description" "Create PR"}]
-                           "tools" [{"name" "bash" "description" "Run bash"}]}
-          prompt (format-tools-prompt "mc" "mc-mcp" tools-by-server)]
-      ;; All tools present
-      (is (clojure.string/includes? prompt "list_issues"))
-      (is (clojure.string/includes? prompt "create_pr"))
-      (is (clojure.string/includes? prompt "bash"))
-      ;; Server headers present for multi-server
-      (is (clojure.string/includes? prompt "### Server: github"))
-      (is (clojure.string/includes? prompt "### Server: tools"))
-      ;; Available servers listed
-      (is (clojure.string/includes? prompt "Available servers:"))
-      ;; Mentions cross-server batching
-      (is (clojure.string/includes? prompt "multiple servers"))))
-
-  (testing "formats state IDs correctly"
-    (let [tools-by-server {"default" [{"name" "test" "description" "Test"}]}
-          prompt (format-tools-prompt "llm" "llm-mcp" tools-by-server)]
-      (is (clojure.string/includes? prompt "\"llm\""))
-      (is (clojure.string/includes? prompt "\"llm-mcp\"")))))
 
 ;;------------------------------------------------------------------------------
 ;; Hat Maker Contract Tests (no actual bridge)
@@ -127,31 +79,6 @@
         (is (= "worker-mcp" (get-in fragment2 ["states" 0 "id"])))
         (finally
           (hat/run-stop-hooks ctx2))))))
-
-;;------------------------------------------------------------------------------
-;; format-tool-schema Tests
-;;------------------------------------------------------------------------------
-
-(deftest format-tool-schema-test
-  (testing "formats tool with description and schema"
-    (let [tool {"name" "read_file"
-                "description" "Read a file"
-                "inputSchema" {"type" "object"}}
-          result (format-tool-schema tool)]
-      (is (clojure.string/starts-with? result "- read_file:"))
-      (is (clojure.string/includes? result "Read a file"))
-      (is (clojure.string/includes? result "Input:"))))
-
-  (testing "formats tool without inputSchema"
-    (let [tool {"name" "simple" "description" "Simple tool"}
-          result (format-tool-schema tool)]
-      (is (clojure.string/includes? result "simple"))
-      (is (not (clojure.string/includes? result "Input:")))))
-
-  (testing "formats tool without description"
-    (let [tool {"name" "nodesc"}
-          result (format-tool-schema tool)]
-      (is (clojure.string/includes? result "No description")))))
 
 ;;------------------------------------------------------------------------------
 ;; Schema Function Tests
