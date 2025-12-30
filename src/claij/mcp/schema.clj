@@ -2,7 +2,11 @@
   "JSON Schema generation for MCP protocol messages.
    
    Generates JSON Schema for MCP tool/resource/prompt calls that can be
-   used for FSM transition validation.")
+   used for FSM transition validation.
+   
+   Also provides conversion functions between MCP and Native (OpenAI) formats:
+   - M2 (Schema): mcp-tool-schema->native-tool-def
+   - M1 (Instance): native-tool-call->mcp-tool-call, mcp-tool-result->native-tool-result")
 
 ;;------------------------------------------------------------------------------
 ;; Static Schema Definitions (JSON Schema)
@@ -392,3 +396,135 @@
      "properties" {"id" {"const" xid}
                    "document" {"type" "string"}
                    "message" {"oneOf" [single-response-schema batch-response-schema]}}}))
+
+;;------------------------------------------------------------------------------
+;; Native ↔ MCP Format Conversions
+;;
+;; "Native" = OpenAI/LLM provider format (what LLM APIs speak)
+;; "MCP" = MCP protocol format (what MCP servers speak)
+;;
+;; M2 (Schema): For building LLM tools parameter from hat's schema
+;; M1 (Instance): For runtime message routing between LLM and MCP
+;;------------------------------------------------------------------------------
+
+;; Detection constant - used by hat to mark schemas, by llm-action to detect them
+(def native-tools-schema-title
+  "Magic value for JSON Schema 'title' field to identify MCP tool schemas.
+   Hat marks its output schema with this title so llm-action can detect it."
+  "mcp-tools")
+
+(defn native-tools-schema?
+  "Check if a schema is an MCP tools schema by its title marker."
+  [schema]
+  (= native-tools-schema-title (get schema "title")))
+
+;;------------------------------------------------------------------------------
+;; M2: Schema Conversions (MCP → Native)
+;; 
+;; These convert hat's tool schemas to OpenAI native tool definitions.
+;; Used by llm-action to build the :tools parameter for LLM calls.
+;;------------------------------------------------------------------------------
+
+(defn mcp-tool-schema->native-tool-def
+  "Convert hat's tool schema to OpenAI native tool definition.
+   
+   MCP tool schema (from tool-cache->request-schema):
+   {\"type\" \"object\"
+    \"description\" \"Run shell command\"
+    \"properties\" {\"name\" {\"const\" \"bash\"}
+                   \"arguments\" {<inputSchema>}}}
+   
+   OpenAI native tool definition:
+   {\"type\" \"function\"
+    \"function\" {\"name\" \"bash\"
+                 \"description\" \"Run shell command\"
+                 \"parameters\" {<inputSchema>}}}"
+  [tool-schema]
+  {"type" "function"
+   "function" {"name" (get-in tool-schema ["properties" "name" "const"])
+               "description" (get tool-schema "description" "")
+               "parameters" (get-in tool-schema ["properties" "arguments"] {})}})
+
+(defn mcp-tool-schemas-from-request-schema
+  "Extract individual tool schemas from full MCP request schema.
+   
+   The full schema (from hat-mcp-request-schema-fn) has structure:
+   {\"properties\" {\"calls\" {\"additionalProperties\" 
+                             {\"items\" {\"oneOf\" [{\"properties\" 
+                                                    {\"params\" {\"oneOf\" [<tool-schemas>]}}}]}}}}}
+   
+   Returns vector of tool schemas."
+  [mcp-schema]
+  (get-in mcp-schema ["properties" "calls" "additionalProperties" 
+                      "items" "oneOf" 0 "properties" "params" "oneOf"]))
+
+(defn mcp-request-schema->native-tool-defs
+  "Convert full MCP request schema to vector of native tool definitions.
+   
+   Full pipeline: MCP schema → extract tool schemas → convert each to native."
+  [mcp-schema]
+  (when-let [tool-schemas (mcp-tool-schemas-from-request-schema mcp-schema)]
+    (mapv mcp-tool-schema->native-tool-def tool-schemas)))
+
+;;------------------------------------------------------------------------------
+;; M1: Instance Conversions (Bidirectional)
+;;
+;; These convert runtime messages between LLM and MCP formats.
+;; Used by llm-action to route tool_calls to MCP and results back to LLM.
+;;------------------------------------------------------------------------------
+
+(defn parse-prefixed-tool-name
+  "Parse a potentially prefixed tool name into [server-name tool-name].
+   
+   Multi-server MCP setups use prefixed names for routing:
+   - \"github__list_issues\" → [\"github\" \"list_issues\"]
+   - \"tools__bash\" → [\"tools\" \"bash\"]
+   
+   Non-prefixed names go to default server:
+   - \"bash\" → [\"default\" \"bash\"]"
+  [prefixed-name]
+  (if-let [[_ server tool] (re-matches #"^([^_]+)__(.+)$" prefixed-name)]
+    [server tool]
+    ["default" prefixed-name]))
+
+(defn native-tool-call->mcp-tool-call
+  "Convert native tool_call to MCP tools/call request.
+   
+   Native tool_call (from LLM response):
+   {\"id\" \"call_123\"
+    \"name\" \"bash\"  
+    \"arguments\" {\"command\" \"ls\"}}
+   
+   MCP tools/call request:
+   {\"jsonrpc\" \"2.0\"
+    \"id\" \"call_123\"
+    \"method\" \"tools/call\"
+    \"params\" {\"name\" \"bash\" \"arguments\" {\"command\" \"ls\"}}}"
+  [{:strs [id name arguments] :as tool-call}]
+  (let [[_server tool-name] (parse-prefixed-tool-name name)]
+    {"jsonrpc" "2.0"
+     "id" id
+     "method" "tools/call"
+     "params" {"name" tool-name
+               "arguments" (or arguments {})}}))
+
+(defn mcp-tool-result->native-tool-result
+  "Convert MCP tool result to native tool result message for LLM.
+   
+   MCP result:
+   {\"result\" {\"content\" [{\"type\" \"text\" \"text\" \"output here\"}]}}
+   
+   Native tool result (for LLM conversation):
+   {\"role\" \"tool\"
+    \"tool_call_id\" \"call_123\"
+    \"content\" \"output here\"}"
+  [mcp-result tool-call-id]
+  (let [content-items (get-in mcp-result ["result" "content"] [])
+        ;; Concatenate all text content
+        text-content (->> content-items
+                          (filter #(= "text" (get % "type")))
+                          (map #(get % "text"))
+                          (clojure.string/join "\n"))]
+    {"role" "tool"
+     "tool_call_id" tool-call-id
+     "content" text-content}))

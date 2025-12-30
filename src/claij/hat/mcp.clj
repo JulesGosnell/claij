@@ -32,9 +32,8 @@
    [clojure.tools.logging :as log]
    [claij.action :refer [def-action]]
    [claij.hat :as hat]
-   [claij.llm.tools :refer [mcp-tools-schema-title]]
    [claij.mcp.bridge :as bridge]
-   [claij.mcp.schema :as mcp-schema]
+   [claij.mcp.schema :as mcp-schema :refer [native-tools-schema-title]]
    [claij.parallel :as parallel]))
 
 ;; Forward declaration for mcp-hat-maker to reference
@@ -163,7 +162,7 @@
    
    Each server gets a batch of JSON-RPC tool call requests.
    
-   The schema includes 'title' field with mcp-tools-schema-title value
+   The schema includes 'title' field with native-tools-schema-title value
    so that llm-action can identify this as the tools component."
   [context {xid "id" :as _xition}]
   (let [servers (get-in context [:hats :mcp :servers] {})
@@ -173,7 +172,7 @@
         merged-cache {"tools" (vec (mapcat #(get % "tools" []) all-caches))}
         single-request-schema (mcp-schema/mcp-cache->request-schema merged-cache)
         batch-request-schema {"type" "array" "items" single-request-schema}]
-    {"title" mcp-tools-schema-title
+    {"title" native-tools-schema-title
      "description" "MCP tool calling interface. Select tools and provide arguments."
      "type" "object"
      "additionalProperties" false
