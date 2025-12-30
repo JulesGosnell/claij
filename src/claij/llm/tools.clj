@@ -189,3 +189,48 @@
        (for [[server-name tools] tools-by-server
              tool tools]
          (mcp-tool->native-tool server-name tool))))))
+
+;;------------------------------------------------------------------------------
+;; Hat Schema → Native Tools (for llm-action integration)
+;;------------------------------------------------------------------------------
+
+(defn tool-schema->native-tool
+  "Convert hat's tool schema to OpenAI native tool format.
+   
+   Hat's schema (from tool-cache->request-schema):
+   {\"type\" \"object\"
+    \"description\" \"Run shell command\"
+    \"properties\" {\"name\" {\"const\" \"bash\"}
+                   \"arguments\" {<inputSchema>}}}
+   
+   OpenAI native format:
+   {\"type\" \"function\"
+    \"function\" {\"name\" \"bash\"
+                 \"description\" \"Run shell command\"
+                 \"parameters\" {<inputSchema>}}}"
+  [tool-schema]
+  {"type" "function"
+   "function" {"name" (get-in tool-schema ["properties" "name" "const"])
+               "description" (get tool-schema "description" "")
+               "parameters" (get-in tool-schema ["properties" "arguments"] {})}})
+
+(defn tool-schemas-from-mcp-schema
+  "Extract individual tool schemas from full MCP schema.
+   
+   The full MCP schema (from hat-mcp-request-schema-fn) has structure:
+   {\"properties\" {\"calls\" {\"additionalProperties\" 
+                             {\"items\" {\"oneOf\" [{\"properties\" 
+                                                    {\"params\" {\"oneOf\" [<tool-schemas>]}}}]}}}}}
+   
+   Returns vector of tool schemas."
+  [mcp-schema]
+  (get-in mcp-schema ["properties" "calls" "additionalProperties" 
+                      "items" "oneOf" 0 "properties" "params" "oneOf"]))
+
+(defn mcp-schema->native-tools
+  "Convert full MCP schema to vector of native tools.
+   
+   Full pipeline: MCP schema → extract tool schemas → convert each to native format."
+  [mcp-schema]
+  (let [tool-schemas (tool-schemas-from-mcp-schema mcp-schema)]
+    (mapv tool-schema->native-tool tool-schemas)))
