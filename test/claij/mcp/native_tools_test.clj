@@ -198,3 +198,73 @@
     (is (= ["default" "my_function"] (mcp-schema/parse-prefixed-tool-name "my_function")))
     ;; Multiple underscores after prefix
     (is (= ["server" "my_long_function"] (mcp-schema/parse-prefixed-tool-name "server__my_long_function")))))
+
+;;==============================================================================
+;; Tests for M1 Instance Conversions
+;; Runtime tool calls (LLM ↔ MCP)
+;;==============================================================================
+
+(def native-tool-call-bash
+  "Native tool call from LLM (all string keys)"
+  {"id" "call_abc123"
+   "name" "bash"
+   "arguments" {"command" "ls -la"}})
+
+(def native-tool-call-prefixed
+  "Native tool call with server prefix"
+  {"id" "call_gh1"
+   "name" "github__list_issues"
+   "arguments" {"repo" "claij"}})
+
+(def mcp-tool-call-bash
+  "Expected MCP request format"
+  {"jsonrpc" "2.0"
+   "id" "call_abc123"
+   "method" "tools/call"
+   "params" {"name" "bash"
+             "arguments" {"command" "ls -la"}}})
+
+(def mcp-tool-call-list-issues
+  "Expected MCP request format (prefix stripped)"
+  {"jsonrpc" "2.0"
+   "id" "call_gh1"
+   "method" "tools/call"
+   "params" {"name" "list_issues"
+             "arguments" {"repo" "claij"}}})
+
+(deftest native-tool-call->mcp-tool-call-test
+  (testing "converts native tool call to MCP request"
+    (is (= mcp-tool-call-bash
+           (mcp-schema/native-tool-call->mcp-tool-call native-tool-call-bash))))
+
+  (testing "strips server prefix from tool name"
+    (is (= mcp-tool-call-list-issues
+           (mcp-schema/native-tool-call->mcp-tool-call native-tool-call-prefixed))))
+
+  (testing "handles missing arguments"
+    (let [result (mcp-schema/native-tool-call->mcp-tool-call {"id" "x" "name" "foo"})]
+      (is (= {} (get-in result ["params" "arguments"]))))))
+
+(def mcp-tool-result
+  "MCP tool result format"
+  {"result" {"content" [{"type" "text" "text" "file1.txt\nfile2.txt"}]}})
+
+(def mcp-tool-result-multi
+  "MCP result with multiple content items"
+  {"result" {"content" [{"type" "text" "text" "first"}
+                        {"type" "text" "text" "second"}]}})
+
+(deftest mcp-tool-result->native-tool-result-test
+  (testing "converts MCP result to native tool result message"
+    (let [result (mcp-schema/mcp-tool-result->native-tool-result mcp-tool-result "call_123")]
+      (is (= "tool" (get result "role")))
+      (is (= "call_123" (get result "tool_call_id")))
+      (is (= "file1.txt\nfile2.txt" (get result "content")))))
+
+  (testing "concatenates multiple text content items"
+    (let [result (mcp-schema/mcp-tool-result->native-tool-result mcp-tool-result-multi "call_456")]
+      (is (= "first\nsecond" (get result "content")))))
+
+  (testing "handles empty content"
+    (let [result (mcp-schema/mcp-tool-result->native-tool-result {"result" {}} "call_789")]
+      (is (= "" (get result "content"))))))
