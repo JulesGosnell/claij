@@ -185,3 +185,26 @@
         (is (not= error :timeout) "Error handler should be called")
         (is (= "request-failed" (get error "error")))
         (is (= "Network timeout" (get error "message")))))))
+
+(deftest call-tool-calls-response-test
+  (testing "tool_calls response passes through to handler"
+    (let [result-promise (promise)
+          mock-post (fn [_url _opts success-callback _error-callback]
+                      ;; Return response with tool_calls
+                      (success-callback {:body (json/write-str
+                                                {"choices" [{"message" 
+                                                             {"content" nil
+                                                              "tool_calls" [{"id" "call_123"
+                                                                             "function" {"name" "get_weather"
+                                                                                         "arguments" "{\"city\":\"London\"}"}}]}}]})}))]
+      (with-redefs [clj-http.client/post mock-post]
+        (llm/call
+         "test-service" "model"
+         [{"role" "user" "content" "test"}]
+         (fn [result] (deliver result-promise result))
+         {:registry test-registry}))
+
+      (let [result (deref result-promise 2000 :timeout)]
+        (is (not= result :timeout) "Handler should be called")
+        (is (= [{"id" "call_123" "name" "get_weather" "arguments" {"city" "London"}}]
+               (get result "tool_calls")))))))
