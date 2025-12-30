@@ -10,6 +10,7 @@
    - GitHub tools (issues, PRs, code)
    - Clojure tools (REPL, file operations)"
   (:require
+   [clojure.tools.logging :as log]
    [claij.schema :refer [def-fsm]]
    [claij.fsm :as fsm]
    [claij.actions :as actions]
@@ -185,25 +186,37 @@
 (defn make-bdd-context
   "Create context for running BDD FSM.
    
-   Options:
-   - :service - LLM service (default: ollama:local)
-   - :model - LLM model (default: mistral:7b)
+   Options (can also be set via environment variables):
+   - :service - LLM service (env: BDD_LLM_SERVICE, default: anthropic)
+   - :model - LLM model (env: BDD_LLM_MODEL, default: provider's direct model)
    - :stt-url - STT service URL (default: prognathodon:8000)
-   - :tts-url - TTS service URL (default: prognathodon:8001)"
+   - :tts-url - TTS service URL (default: prognathodon:8001)
+   
+   Example configurations:
+   - Anthropic native: BDD_LLM_SERVICE=anthropic BDD_LLM_MODEL=claude-sonnet-4-5
+   - OpenRouter Claude: BDD_LLM_SERVICE=openrouter BDD_LLM_MODEL=anthropic/claude-sonnet-4.5
+   - Google native: BDD_LLM_SERVICE=google BDD_LLM_MODEL=gemini-3-flash-preview
+   - OpenRouter GPT: BDD_LLM_SERVICE=openrouter BDD_LLM_MODEL=openai/gpt-5.2
+   - xAI native: BDD_LLM_SERVICE=xai BDD_LLM_MODEL=grok-code-fast-1
+   - OpenRouter Grok: BDD_LLM_SERVICE=openrouter BDD_LLM_MODEL=x-ai/grok-code-fast-1"
   [{:keys [service model stt-url tts-url]
-    :or {service "anthropic"
-         model (model/direct-model :anthropic)
-         stt-url default-stt-url
+    :or {stt-url default-stt-url
          tts-url default-tts-url}}]
-  {:id->action bdd-actions
-   :llm/service service
-   :llm/model model
-   ;; Register MCP hat maker
-   :hats {:registry (-> (hat/make-hat-registry)
-                        (hat/register-hat "mcp" mcp-hat/mcp-hat-maker))}
-   ;; These could be used to override FSM config at runtime
-   :stt-url stt-url
-   :tts-url tts-url})
+  (let [;; Environment variables override options, options override defaults
+        env-service (System/getenv "BDD_LLM_SERVICE")
+        env-model (System/getenv "BDD_LLM_MODEL")
+        final-service (or service env-service "anthropic")
+        final-model (or model env-model (model/direct-model :anthropic))]
+    (log/info "BDD context: LLM provider" (str final-service "/" final-model))
+    {:id->action bdd-actions
+     :llm/service final-service
+     :llm/model final-model
+     ;; Register MCP hat maker
+     :hats {:registry (-> (hat/make-hat-registry)
+                          (hat/register-hat "mcp" mcp-hat/mcp-hat-maker))}
+     ;; These could be used to override FSM config at runtime
+     :stt-url stt-url
+     :tts-url tts-url}))
 
 ;;; ============================================================
 ;;; Convenience Functions
