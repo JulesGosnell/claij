@@ -23,8 +23,10 @@
    [claij.mcp.schema :as mcp-schema]
    ;; Schema validation
    [claij.schema :as schema]
-   ;; Official OpenAI schemas from OpenAPI spec
-   [claij.llm.openai-schema :as openai-schema]))
+   ;; Official API schemas from OpenAPI specs
+   [claij.llm.openai-schema :as openai-schema]
+   [claij.llm.anthropic-schema :as anthropic-schema]
+   [claij.llm.google-schema :as google-schema]))
 
 ;;------------------------------------------------------------------------------
 ;; Environment
@@ -45,44 +47,14 @@
 ;; Used to validate both integration test results and unit test fixtures.
 
 (def anthropic-request-schema
-  "Anthropic Messages API request format"
-  {"type" "object"
-   "required" ["model" "max_tokens" "messages"]
-   "properties"
-   {"model" {"type" "string"}
-    "max_tokens" {"type" "integer"}
-    "system" {"type" "string"}
-    "messages" {"type" "array"
-                "items" {"type" "object"
-                         "required" ["role" "content"]
-                         "properties" {"role" {"enum" ["user" "assistant"]}
-                                       "content" {"oneOf" [{"type" "string"}
-                                                           {"type" "array"}]}}}}
-    "tools" {"type" "array"
-             "items" {"type" "object"
-                      "required" ["name" "input_schema"]
-                      "properties" {"name" {"type" "string"}
-                                    "description" {"type" "string"}
-                                    "input_schema" {"type" "object"}}}}}})
+  "Anthropic Messages API request format.
+   Source: Official Anthropic OpenAPI spec via claij.llm.anthropic-schema"
+  anthropic-schema/request-schema)
 
 (def anthropic-response-schema
-  "Anthropic Messages API response format"
-  {"type" "object"
-   "required" ["id" "type" "role" "content" "model" "stop_reason"]
-   "properties"
-   {"id" {"type" "string"}
-    "type" {"const" "message"}
-    "role" {"const" "assistant"}
-    "content" {"type" "array"
-               "items" {"type" "object"
-                        "required" ["type"]
-                        "properties" {"type" {"enum" ["text" "tool_use"]}
-                                      "text" {"type" "string"}
-                                      "id" {"type" "string"}
-                                      "name" {"type" "string"}
-                                      "input" {"type" "object"}}}}
-    "model" {"type" "string"}
-    "stop_reason" {"type" "string"}}})
+  "Anthropic Messages API response format.
+   Source: Official Anthropic OpenAPI spec via claij.llm.anthropic-schema"
+  anthropic-schema/response-schema)
 
 (def openai-request-schema
   "OpenAI-compatible API request format (OpenRouter, xAI, Ollama).
@@ -95,33 +67,14 @@
   openai-schema/response-schema)
 
 (def google-request-schema
-  "Google Gemini API request format"
-  {"type" "object"
-   "required" ["contents"]
-   "properties"
-   {"contents" {"type" "array"
-                "items" {"type" "object"
-                         "required" ["role" "parts"]
-                         "properties" {"role" {"enum" ["user" "model"]}
-                                       "parts" {"type" "array"
-                                                "items" {"type" "object"}}}}}
-    "tools" {"type" "array"
-             "items" {"type" "object"
-                      "properties" {"function_declarations" {"type" "array"}}}}}})
+  "Google Gemini API request format.
+   Source: Official Google OpenAPI spec via claij.llm.google-schema"
+  google-schema/request-schema)
 
 (def google-response-schema
-  "Google Gemini API response format"
-  {"type" "object"
-   "required" ["candidates"]
-   "properties"
-   {"candidates" {"type" "array"
-                  "items" {"type" "object"
-                           "required" ["content"]
-                           "properties" {"content" {"type" "object"
-                                                    "required" ["parts" "role"]
-                                                    "properties" {"parts" {"type" "array"}
-                                                                  "role" {"const" "model"}}}
-                                         "finishReason" {"type" "string"}}}}}})
+  "Google Gemini API response format.
+   Source: Official Google OpenAPI spec via claij.llm.google-schema"
+  google-schema/response-schema)
 
 ;;------------------------------------------------------------------------------
 ;; Schema Validation Helper
@@ -160,14 +113,9 @@
 ;; Native Tool Call Schemas (for specific tool_call validation)
 
 (def anthropic-tool-use-schema
-  "Schema for Anthropic tool_use content block"
-  {"type" "object"
-   "required" ["type" "id" "name" "input"]
-   "properties"
-   {"type" {"const" "tool_use"}
-    "id" {"type" "string"}
-    "name" {"type" "string"}
-    "input" {"type" "object"}}})
+  "Schema for Anthropic tool_use content block.
+   Source: Official Anthropic OpenAPI spec via claij.llm.anthropic-schema"
+  anthropic-schema/tool-use-block-schema)
 
 (def openai-tool-call-schema
   "Schema for OpenAI tool_call object.
@@ -175,15 +123,9 @@
   openai-schema/tool-call-item-schema)
 
 (def google-function-call-schema
-  "Schema for Google functionCall part"
-  {"type" "object"
-   "required" ["functionCall"]
-   "properties"
-   {"functionCall" {"type" "object"
-                    "required" ["name" "args"]
-                    "properties"
-                    {"name" {"type" "string"}
-                     "args" {"type" "object"}}}}})
+  "Schema for Google functionCall part.
+   Source: Official Google OpenAPI spec via claij.llm.google-schema"
+  google-schema/function-call-schema)
 
 (defn tool-call-schema-for-api-type
   "Get the tool_call schema for an API type"
