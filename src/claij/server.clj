@@ -168,6 +168,8 @@
                   [:td.links
                    [:a {:href (str "/fsm/" id "/graph.svg")} "SVG"]
                    " | "
+                   [:a {:href (str "/fsm/" id "/graph.svg?hats=true")} "SVG+Hats"]
+                   " | "
                    [:a {:href (str "/fsm/" id "/document")} "JSON"]]])]]])}))
 
 (defn fsm-html-handler
