@@ -81,13 +81,11 @@
 (defn xai-available? [] (env-key-set? "XAI_API_KEY"))
 
 (defmacro when-service-available
-  "Run test body only if service is available, otherwise log warning and skip"
+  "Run test body only if service is available, otherwise fail with clear message"
   [available-fn service-name env-var & body]
   `(if (~available-fn)
      (do ~@body)
-     (do
-       (println (str "\n⚠️  SKIPPING: " ~service-name " - " ~env-var " not set"))
-       (is true "Skipped - API key not configured"))))
+     (is false (str ~service-name " unavailable - " ~env-var " not set"))))
 
 ;;------------------------------------------------------------------------------
 ;; Test Prompt
