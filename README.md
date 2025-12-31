@@ -38,6 +38,7 @@
 
 | Date | Feature | Description |
 |------|---------|-------------|
+| 2025-12-31 | **🛠️ Native Tool Calling** | MCP tools now use native LLM tool calling APIs instead of prompt engineering. All 4 providers (Claude, GPT, Gemini, Grok) tested via both native APIs and OpenRouter—8/8 passing. Voice-driven MCP: speak a command → tool executes → hear the result. *Code from the bath!* |
 | 2025-12-27 | **🔌 JSON Schema** | Back to JSON Schema for low-friction integration. MCP tools and OpenAPI endpoints already speak JSON Schema—why translate? LLMs have better "muscle memory" for it too. Uses m3 library with draft-2020-12 for nested `$ref` resolution. Simplicity wins. |
 | 2025-12-20 | **🦙 Ollama Integration** | Local LLM inference via Ollama is now a first-class citizen. Zero API costs, data stays on your network, no rate limits. Uses OpenAI-compatible protocol—just configure `{"service" "ollama:local" "model" "mistral:7b"}`. Supports multiple Ollama instances via named services. |
 | 2025-12-19 | **🛁 Bath Driven Development** | Voice UI working on iPhone! Record voice → STT → LLM → TTS → playback, all from Safari on iOS. HTTPS with self-signed certs, WebAudio fixes for iOS. Talk to Claude from the bathtub. |
