@@ -4,12 +4,72 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.data.json :as json]
    [claij.llm :as llm]
-   [claij.llm.service :as svc]))
+   [claij.llm.service :as svc]
+   [claij.llm.openai-schema :as openai-schema]
+   [claij.schema :as schema]))
 
 (def test-registry
   {"test-service" {:strategy "openai-compat"
                    :url "http://test.local/v1/chat/completions"
                    :auth nil}})
+
+;;------------------------------------------------------------------------------
+;; Fixture Validation
+;; All mock responses should be valid OpenAI API responses
+
+(defn valid-openai-response?
+  "Validate a mock response against the official OpenAI schema"
+  [response]
+  (let [validation (schema/validate openai-schema/response-schema response)]
+    (when-not (:valid? validation)
+      (throw (ex-info "Invalid mock response fixture"
+                      {:response response
+                       :errors (:errors validation)})))
+    true))
+
+(defn mock-response
+  "Create a validated mock OpenAI response"
+  [content]
+  (let [response {"choices" [{"message" {"content" content
+                                         "role" "assistant"}
+                              "index" 0
+                              "finish_reason" "stop"}]
+                  "id" "mock-id"
+                  "object" "chat.completion"
+                  "model" "test-model"
+                  "created" 1234567890}]
+    (valid-openai-response? response)
+    response))
+
+(defn mock-tool-response
+  "Create a validated mock OpenAI response with tool calls"
+  [tool-calls]
+  (let [response {"choices" [{"message" {"content" nil
+                                         "role" "assistant"
+                                         "tool_calls" tool-calls}
+                              "index" 0
+                              "finish_reason" "tool_calls"}]
+                  "id" "mock-id"
+                  "object" "chat.completion"
+                  "model" "test-model"
+                  "created" 1234567890}]
+    (valid-openai-response? response)
+    response))
+
+;;------------------------------------------------------------------------------
+;; Tests
+
+(deftest fixture-validation-test
+  (testing "mock-response produces valid OpenAI responses"
+    (is (valid-openai-response? (mock-response "{\"id\": \"test\"}")))
+    (is (valid-openai-response? (mock-response nil))))
+
+  (testing "mock-tool-response produces valid OpenAI responses"
+    (is (valid-openai-response?
+         (mock-tool-response [{"id" "call_123"
+                               "type" "function"
+                               "function" {"name" "test_fn"
+                                           "arguments" "{}"}}])))))
 
 (deftest edn-parse-retry-mock-test
   (testing "EDN parse errors trigger retries with error feedback"
@@ -192,7 +252,7 @@
           mock-post (fn [_url _opts success-callback _error-callback]
                       ;; Return response with tool_calls
                       (success-callback {:body (json/write-str
-                                                {"choices" [{"message" 
+                                                {"choices" [{"message"
                                                              {"content" nil
                                                               "tool_calls" [{"id" "call_123"
                                                                              "function" {"name" "get_weather"
