@@ -187,8 +187,8 @@
   "Create context for running BDD FSM.
    
    Options (can also be set via environment variables):
-   - :service - LLM service (env: BDD_LLM_SERVICE, default: anthropic)
-   - :model - LLM model (env: BDD_LLM_MODEL, default: provider's direct model)
+   - :service - LLM service (env: BDD_LLM_SERVICE, default: openrouter)
+   - :model - LLM model (env: BDD_LLM_MODEL, default: xai via openrouter)
    - :stt-url - STT service URL (default: prognathodon:8000)
    - :tts-url - TTS service URL (default: prognathodon:8001)
    
@@ -205,8 +205,8 @@
   (let [;; Environment variables override options, options override defaults
         env-service (System/getenv "BDD_LLM_SERVICE")
         env-model (System/getenv "BDD_LLM_MODEL")
-        final-service (or service env-service "anthropic")
-        final-model (or model env-model (model/direct-model :anthropic))]
+        final-service (or service env-service "openrouter")
+        final-model (or model env-model (model/openrouter-model :xai))]
     (log/info "BDD context: LLM provider" (str final-service "/" final-model))
     {:id->action bdd-actions
      :llm/service final-service
