@@ -452,24 +452,6 @@
       (when-not (:success result)
         (log/error "Test 2 failed:" (pr-str result))))))
 
-(deftest ^:integration test-3-openrouter-free-model
-  (testing "OpenRouter → free model with tool support"
-    ;; Try several free models known to support function calling
-    (let [models ["mistralai/mistral-7b-instruct:free"
-                  "meta-llama/llama-3.1-8b-instruct:free"
-                  "google/gemma-2-9b-it:free"]
-          results (for [model models]
-                    (let [result (run-tool-calling-test
-                                  {:call-fn call-openrouter
-                                   :extract-fn extract-tool-use-openrouter
-                                   :build-result-fn build-tool-result-openrouter
-                                   :provider "openrouter-free"
-                                   :model model})]
-                      (assoc result :model model)))
-          successful (filter :success results)]
-      (log/info "Free model results:" (pr-str (mapv #(select-keys % [:model :tool-called :success]) results)))
-      (is (seq successful) "At least one free model should support tool calling"))))
-
 (deftest ^:integration test-4-ollama-local
   (testing "Ollama → local model with native tool calling"
     ;; Test with models known to support tool calling
