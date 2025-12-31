@@ -444,8 +444,18 @@ closes #<issue>: Complete <story title>
 | `[Phase N]` | Normal phase completion (after tests pass) |
 | `[fix]` | Fixing CI or test failure |
 | `[docs]` | Documentation-only updates |
+| `#0` | Change too small to merit a story (typo fix, minor tweak) |
 
 ### Examples
+
+**Trivial change** (no story needed):
+```
+#0: Fix typo in README
+```
+
+```
+#0: Add SVG+Hats link to FSM catalogue
+```
 
 **Phase completion** (the normal case):
 ```
