@@ -235,6 +235,32 @@ This is the vision: **an elastic collection of LLMs coordinating on a self-impro
 
 ---
 
+## Contributing
+
+### Commit Message Format
+
+All commits must reference a GitHub issue:
+
+```
+#NNN: Description in imperative mood
+```
+
+Examples:
+- `#127: Enforce commit message format`
+- `#126: Add native tool calling for MCP`
+
+### Git Hooks
+
+Install the commit message hook:
+
+```bash
+./hooks/install.sh
+```
+
+This enforces the `#NNN: description` format.
+
+---
+
 ## Current Status
 
 **This project is experimental.** It's eating its own dogfood—largely AI-generated, iteratively refined, sometimes messy. Don't mistake this for production code or my normal coding style.

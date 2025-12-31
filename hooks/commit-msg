@@ -1,0 +1,18 @@
+#!/bin/bash
+# Enforce story number prefix in commit messages
+# Format: #NNN: description
+
+if ! grep -qE '^#[0-9]+:' "$1"; then
+  echo ""
+  echo "ERROR: Commit message must start with a story number and colon"
+  echo ""
+  echo "  Required format: #NNN: description"
+  echo "  Example: #127: Enforce commit message format"
+  echo ""
+  echo "Your message was:"
+  echo "---"
+  cat "$1"
+  echo "---"
+  echo ""
+  exit 1
+fi
