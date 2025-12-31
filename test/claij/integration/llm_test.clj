@@ -22,7 +22,9 @@
    ;; Production prompts - tests must use these
    [claij.mcp.schema :as mcp-schema]
    ;; Schema validation
-   [claij.schema :as schema]))
+   [claij.schema :as schema]
+   ;; Official OpenAI schemas from OpenAPI spec
+   [claij.llm.openai-schema :as openai-schema]))
 
 ;;------------------------------------------------------------------------------
 ;; Environment
@@ -83,51 +85,14 @@
     "stop_reason" {"type" "string"}}})
 
 (def openai-request-schema
-  "OpenAI-compatible API request format (OpenRouter, xAI, Ollama)"
-  {"type" "object"
-   "required" ["model" "messages"]
-   "properties"
-   {"model" {"type" "string"}
-    "messages" {"type" "array"
-                "items" {"type" "object"
-                         "required" ["role"]
-                         "properties" {"role" {"enum" ["system" "user" "assistant" "tool"]}
-                                       "content" {"oneOf" [{"type" "string"}
-                                                           {"type" "null"}]}
-                                       "tool_calls" {"type" "array"}
-                                       "tool_call_id" {"type" "string"}}}}
-    "tools" {"type" "array"
-             "items" {"type" "object"
-                      "required" ["type" "function"]
-                      "properties" {"type" {"const" "function"}
-                                    "function" {"type" "object"
-                                                "required" ["name"]
-                                                "properties" {"name" {"type" "string"}
-                                                              "description" {"type" "string"}
-                                                              "parameters" {"type" "object"}}}}}}
-    "stream" {"type" "boolean"}
-    "max_tokens" {"type" "integer"}}})
+  "OpenAI-compatible API request format (OpenRouter, xAI, Ollama).
+   Source: Official OpenAI OpenAPI spec via claij.llm.openai-schema"
+  openai-schema/request-schema)
 
 (def openai-response-schema
-  "OpenAI-compatible API response format"
-  {"type" "object"
-   "required" ["choices"]
-   "properties"
-   {"id" {"type" "string"}
-    "object" {"type" "string"}
-    "model" {"type" "string"}
-    "choices" {"type" "array"
-               "items" {"type" "object"
-                        "required" ["message"]
-                        "properties" {"index" {"type" "integer"}
-                                      "message" {"type" "object"
-                                                 "required" ["role"]
-                                                 "properties" {"role" {"const" "assistant"}
-                                                               "content" {"oneOf" [{"type" "string"}
-                                                                                   {"type" "null"}]}
-                                                               "tool_calls" {"type" "array"
-                                                                             "items" {"type" "object"}}}}
-                                      "finish_reason" {"type" "string"}}}}}})
+  "OpenAI-compatible API response format.
+   Source: Official OpenAI OpenAPI spec via claij.llm.openai-schema"
+  openai-schema/response-schema)
 
 (def google-request-schema
   "Google Gemini API request format"
@@ -169,12 +134,27 @@
     :openai openai-response-schema
     :google google-response-schema))
 
+(defn request-schema-for-api-type
+  "Get the request schema for an API type"
+  [api-type]
+  (case api-type
+    :anthropic anthropic-request-schema
+    :openai openai-request-schema
+    :google google-request-schema))
+
 (defn validate-response
   "Validate an HTTP response body against the API schema.
    Returns {:valid? true} or {:valid? false :errors [...]}."
   [api-type response-body]
   (let [response-schema (response-schema-for-api-type api-type)]
     (schema/validate response-schema response-body)))
+
+(defn validate-request
+  "Validate an HTTP request body against the API schema.
+   Returns {:valid? true} or {:valid? false :errors [...]}."
+  [api-type request-body]
+  (let [request-schema (request-schema-for-api-type api-type)]
+    (schema/validate request-schema request-body)))
 
 ;;------------------------------------------------------------------------------
 ;; Native Tool Call Schemas (for specific tool_call validation)
@@ -190,17 +170,9 @@
     "input" {"type" "object"}}})
 
 (def openai-tool-call-schema
-  "Schema for OpenAI tool_call object"
-  {"type" "object"
-   "required" ["id" "type" "function"]
-   "properties"
-   {"id" {"type" "string"}
-    "type" {"const" "function"}
-    "function" {"type" "object"
-                "required" ["name" "arguments"]
-                "properties"
-                {"name" {"type" "string"}
-                 "arguments" {"type" "string"}}}}})
+  "Schema for OpenAI tool_call object.
+   Source: Official OpenAI OpenAPI spec via claij.llm.openai-schema"
+  openai-schema/tool-call-item-schema)
 
 (def google-function-call-schema
   "Schema for Google functionCall part"
@@ -358,22 +330,29 @@ CRITICAL FORMAT RULES:
                 :connection-timeout 10000})))
 
 (defn call-openai!
-  "Direct call to OpenAI-compatible API (OpenRouter, xAI, Ollama)"
+  "Direct call to OpenAI-compatible API (OpenRouter, xAI, Ollama).
+   Validates request against schema before sending."
   [url model messages & [{:keys [tools api-key]}]]
   (let [body (cond-> {"model" model
                       "messages" messages
                       "stream" false
                       "max_tokens" 1024}
                tools (assoc "tools" tools))
-        headers (cond-> {"Content-Type" "application/json"}
-                  api-key (assoc "Authorization" (str "Bearer " api-key)))]
-    (http/post url
-               {:headers headers
-                :body (json/generate-string body)
-                :as :json-strict-string-keys
-                :throw-exceptions false
-                :socket-timeout 60000
-                :connection-timeout 10000})))
+        ;; Validate request before sending
+        validation (validate-request :openai body)]
+    (when-not (:valid? validation)
+      (throw (ex-info "Request validation failed"
+                      {:errors (:errors validation)
+                       :body body})))
+    (let [headers (cond-> {"Content-Type" "application/json"}
+                    api-key (assoc "Authorization" (str "Bearer " api-key)))]
+      (http/post url
+                 {:headers headers
+                  :body (json/generate-string body)
+                  :as :json-strict-string-keys
+                  :throw-exceptions false
+                  :socket-timeout 60000
+                  :connection-timeout 10000}))))
 
 (defn call-google!
   "Direct call to Google Gemini API"
