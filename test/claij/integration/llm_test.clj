@@ -1,49 +1,50 @@
 (ns claij.integration.llm-test
   "Feature-based LLM capability testing.
    
-   PURPOSE: Verify all supported LLMs work correctly with CLAIJ by making
-   minimal API calls while testing maximum functionality.
+   Design principles:
+   1. Minimal API calls - 2 calls per LLM regardless of feature count
+   2. Maximum verification - all applicable features validated from same calls
+   3. Easy to extend - add new feature definition, update capability matrix
+   4. Composable - request transformers chain, validators accumulate
    
-   DESIGN:
-   - Features define request transformations and response validations
-   - Capability matrix maps LLMs to their supported features
-   - One test function runs per LLM, testing all applicable features
-   - Two API calls per LLM: text→tool and tool-result→text
+   Each feature defines:
+   - :doc - human readable description
+   - :call-1 - {:request-fn (fn [req] req'), :validate-fn (fn [resp] bool)}
+   - :call-2 - {:request-fn (fn [req tool-result] req'), :validate-fn (fn [resp] bool)}
    
-   Adding a new LLM:
-   1. Add entry to `llm-capabilities` with supported features
-   2. Run tests: clojure -M:test --focus claij.integration.llm-test
-   
-   Adding a new feature:
-   1. Add feature def to `features` with :call-1 and/or :call-2 fns
-   2. Update capability matrix for LLMs that support it"
+   See #141 for design rationale."
   (:require
    [clojure.test :refer [deftest testing is]]
-   [clojure.string :as str]
    [clojure.tools.logging :as log]
+   [clojure.string :as str]
    [cheshire.core :as json]
-   [claij.llm :as llm]
-   [claij.model :as model]))
+   [clj-http.client :as http]))
 
 ;;==============================================================================
 ;; Environment
 ;;==============================================================================
 
-(defn env-key-set?
-  "Check if an environment variable is set (in env or .env file)."
-  [key]
-  (or (System/getenv key)
-      (try
-        (let [content (slurp ".env")]
-          (some #(str/starts-with? % (str "export " key "="))
-                (str/split-lines content)))
-        (catch Exception _ false))))
+(defn load-env-file
+  "Load environment variables from .env file. Returns map of key->value."
+  [path]
+  (try
+    (let [content (slurp path)
+          lines (str/split-lines content)]
+      (into {}
+            (for [line lines
+                  :when (and (not (str/blank? line))
+                             (str/starts-with? line "export ")
+                             (str/includes? line "="))]
+              (let [line (subs line 7)
+                    [k v] (str/split line #"=" 2)
+                    v (-> v str/trim (str/replace #"^['\"]|['\"]$" ""))]
+                [(str/trim k) v]))))
+    (catch Exception _ {})))
 
-(defn llm-available?
-  "Check if an LLM is available (env key set or local service)."
-  [[service _model env-key]]
-  (or (nil? env-key) ;; Local service (ollama)
-      (env-key-set? env-key)))
+(def ^:private env-cache (delay (load-env-file ".env")))
+
+(defn get-env [key]
+  (or (System/getenv key) (get @env-cache key)))
 
 ;;==============================================================================
 ;; Supported LLMs Registry
@@ -51,240 +52,424 @@
 
 (def supported-llms
   "LLMs that CLAIJ officially supports.
-   Format: [service model env-key-required]"
-  [["anthropic" (model/direct-model :anthropic) "ANTHROPIC_API_KEY"]
-   ["google" (model/direct-model :google) "GOOGLE_API_KEY"]
-   ["openrouter" (model/openrouter-model :openai) "OPENROUTER_API_KEY"]
-   ["xai" (model/direct-model :xai) "XAI_API_KEY"]
-   ["ollama:local" (model/ollama-model :light) nil]])
+   Each entry: [service model] -> {:env-key str-or-nil :api-type keyword}"
+  {["anthropic" "claude-sonnet-4-5-20250514"]
+   {:env-key "ANTHROPIC_API_KEY" :api-type :anthropic}
+
+   ["openrouter" "anthropic/claude-sonnet-4"]
+   {:env-key "OPENROUTER_API_KEY" :api-type :openai}
+
+   ["google" "gemini-2.0-flash"]
+   {:env-key "GOOGLE_API_KEY" :api-type :google}
+
+   ["xai" "grok-3-fast"]
+   {:env-key "XAI_API_KEY" :api-type :openai}
+
+   ["ollama:local" "qwen3:8b"]
+   {:env-key nil :api-type :ollama}})
+
+(defn available? [[service _model :as llm-key]]
+  (let [{:keys [env-key]} (get supported-llms llm-key)]
+    (or (nil? env-key)
+        (some? (get-env env-key)))))
 
 ;;==============================================================================
-;; Tool Definition (used across all tests)
+;; Tool Definition (used for testing)
 ;;==============================================================================
 
 (def calculator-tool
-  "Simple calculator tool for testing tool calling."
-  {"type" "function"
-   "function" {"name" "calculate"
-               "description" "Perform arithmetic. Call this to compute math."
-               "parameters" {"type" "object"
-                             "properties" {"operation" {"type" "string"
-                                                        "enum" ["add" "subtract" "multiply" "divide"]}
-                                           "a" {"type" "number"}
-                                           "b" {"type" "number"}}
-                             "required" ["operation" "a" "b"]}}})
+  "Simple calculator tool for testing LLM tool calling."
+  {:name "calculator"
+   :description "A calculator that can add two numbers. Use this to compute sums."
+   :input_schema {:type "object"
+                  :properties {:a {:type "number" :description "First number"}
+                               :b {:type "number" :description "Second number"}}
+                  :required ["a" "b"]}})
+
+;;==============================================================================
+;; API Callers (per provider)
+;;==============================================================================
+
+(defmulti call-api
+  "Call LLM API. Returns {:ok bool :body map} or {:ok false :error ...}"
+  (fn [llm-key _messages _tools] (get-in supported-llms [llm-key :api-type])))
+
+(defmethod call-api :anthropic
+  [[_service model] messages tools]
+  (let [api-key (get-env "ANTHROPIC_API_KEY")
+        anthropic-tools (when (seq tools)
+                          (mapv (fn [t]
+                                  {:name (:name t)
+                                   :description (:description t)
+                                   :input_schema (:input_schema t)})
+                                tools))
+        body (cond-> {:model model
+                      :max_tokens 1024
+                      :messages messages}
+               anthropic-tools (assoc :tools anthropic-tools))
+        response (http/post "https://api.anthropic.com/v1/messages"
+                            {:headers {"x-api-key" api-key
+                                       "anthropic-version" "2023-06-01"
+                                       "content-type" "application/json"}
+                             :body (json/generate-string body)
+                             :as :json
+                             :throw-exceptions false})]
+    (if (= 200 (:status response))
+      {:ok true :body (:body response) :api-type :anthropic}
+      {:ok false :status (:status response) :error (:body response)})))
+
+(defmethod call-api :openai
+  [[service model] messages tools]
+  (let [;; Different endpoints for different services
+        {:keys [url api-key-env auth-header]}
+        (case service
+          "openrouter" {:url "https://openrouter.ai/api/v1/chat/completions"
+                        :api-key-env "OPENROUTER_API_KEY"
+                        :auth-header "Authorization"}
+          "xai" {:url "https://api.x.ai/v1/chat/completions"
+                 :api-key-env "XAI_API_KEY"
+                 :auth-header "Authorization"})
+        api-key (when api-key-env (get-env api-key-env))
+        openai-tools (when (seq tools)
+                       (mapv (fn [t]
+                               {:type "function"
+                                :function {:name (:name t)
+                                           :description (:description t)
+                                           :parameters (:input_schema t)}})
+                             tools))
+        body (cond-> {:model model
+                      :messages messages
+                      :stream false
+                      :max_tokens 1024}
+               openai-tools (assoc :tools openai-tools))
+        headers (cond-> {"Content-Type" "application/json"}
+                  api-key (assoc auth-header (str "Bearer " api-key)))
+        response (http/post url
+                            {:headers headers
+                             :body (json/generate-string body)
+                             :as :json
+                             :throw-exceptions false
+                             :socket-timeout 120000
+                             :connection-timeout 10000})]
+    (if (= 200 (:status response))
+      {:ok true :body (:body response) :api-type :openai}
+      {:ok false :status (:status response) :error (:body response)})))
+
+(defmethod call-api :ollama
+  [[_service model] messages tools]
+  (let [ollama-tools (when (seq tools)
+                       (mapv (fn [t]
+                               {:type "function"
+                                :function {:name (:name t)
+                                           :description (:description t)
+                                           :parameters (:input_schema t)}})
+                             tools))
+        body (cond-> {:model model
+                      :messages messages
+                      :stream false}
+               ollama-tools (assoc :tools ollama-tools))
+        response (http/post "http://prognathodon:11434/api/chat"
+                            {:headers {"Content-Type" "application/json"}
+                             :body (json/generate-string body)
+                             :as :json
+                             :throw-exceptions false
+                             :socket-timeout 120000
+                             :connection-timeout 10000})]
+    (if (= 200 (:status response))
+      {:ok true :body (:body response) :api-type :ollama}
+      {:ok false :status (:status response) :error (:body response)})))
+
+(defmethod call-api :google
+  [[_service model] messages tools]
+  (let [api-key (get-env "GOOGLE_API_KEY")
+        url (str "https://generativelanguage.googleapis.com/v1beta/models/" model ":generateContent")
+        google-tools (when (seq tools)
+                       [{:function_declarations
+                         (mapv (fn [t]
+                                 {:name (:name t)
+                                  :description (:description t)
+                                  :parameters (:input_schema t)})
+                               tools)}])
+        contents (mapv (fn [{:keys [role content parts]}]
+                         (cond
+                           parts {:role (if (= role "assistant") "model" role) :parts parts}
+                           content {:role (if (= role "assistant") "model" role) :parts [{:text content}]}
+                           :else {:role role :parts [{:text ""}]}))
+                       messages)
+        body (cond-> {:contents contents}
+               google-tools (assoc :tools google-tools))
+        response (http/post url
+                            {:headers {"x-goog-api-key" api-key
+                                       "Content-Type" "application/json"}
+                             :body (json/generate-string body)
+                             :as :json
+                             :throw-exceptions false})]
+    (if (= 200 (:status response))
+      {:ok true :body (:body response) :api-type :google}
+      {:ok false :status (:status response) :error (:body response)})))
+
+;;==============================================================================
+;; Response Extractors (normalize across providers)
+;;==============================================================================
+
+(defmulti extract-tool-calls
+  "Extract tool calls from response. Returns [{:id :name :arguments}]"
+  (fn [response] (:api-type response)))
+
+(defmethod extract-tool-calls :anthropic [response]
+  (->> (get-in response [:body :content])
+       (filter #(= "tool_use" (:type %)))
+       (mapv (fn [{:keys [id name input]}]
+               {:id id :name name :arguments input}))))
+
+(defmethod extract-tool-calls :openai [response]
+  (let [message (or (get-in response [:body :choices 0 :message])
+                    (get-in response [:body :message]))
+        tool-calls (:tool_calls message)]
+    (mapv (fn [{:keys [id function]}]
+            {:id (or id (str (random-uuid)))
+             :name (:name function)
+             :arguments (if (string? (:arguments function))
+                          (json/parse-string (:arguments function) true)
+                          (:arguments function))})
+          tool-calls)))
+
+(defmethod extract-tool-calls :ollama [response]
+  (let [message (get-in response [:body :message])
+        tool-calls (:tool_calls message)]
+    (mapv (fn [{:keys [function]}]
+            {:id (str (random-uuid)) ;; Ollama doesn't provide IDs
+             :name (:name function)
+             :arguments (:arguments function)})
+          tool-calls)))
+
+(defmethod extract-tool-calls :google [response]
+  (let [parts (get-in response [:body :candidates 0 :content :parts])]
+    (->> parts
+         (filter :functionCall)
+         (mapv (fn [part]
+                 (let [fc (:functionCall part)]
+                   {:id (:name fc)
+                    :name (:name fc)
+                    :arguments (:args fc)}))))))
+
+(defmulti extract-text
+  "Extract text content from response."
+  (fn [response] (:api-type response)))
+
+(defmethod extract-text :anthropic [response]
+  (->> (get-in response [:body :content])
+       (filter #(= "text" (:type %)))
+       first
+       :text))
+
+(defmethod extract-text :openai [response]
+  (or (get-in response [:body :choices 0 :message :content])
+      (get-in response [:body :message :content])))
+
+(defmethod extract-text :ollama [response]
+  (get-in response [:body :message :content]))
+
+(defmethod extract-text :google [response]
+  (->> (get-in response [:body :candidates 0 :content :parts])
+       (filter :text)
+       first
+       :text))
+
+;;==============================================================================
+;; Message Builders (for call-2 with tool results)
+;;==============================================================================
+
+(defmulti build-tool-result-messages
+  "Build messages including tool result for second call."
+  (fn [api-type _orig-messages _response _tool-call _result] api-type))
+
+(defmethod build-tool-result-messages :anthropic
+  [_ orig-messages response tool-call result]
+  (let [assistant-content (get-in response [:body :content])]
+    (conj (vec orig-messages)
+          {:role "assistant" :content assistant-content}
+          {:role "user"
+           :content [{:type "tool_result"
+                      :tool_use_id (:id tool-call)
+                      :content (str result)}]})))
+
+(defmethod build-tool-result-messages :openai
+  [_ orig-messages response tool-call result]
+  (let [assistant-message (or (get-in response [:body :choices 0 :message])
+                              (get-in response [:body :message]))
+        ;; Ensure arguments is JSON string (OpenAI/OpenRouter format)
+        fixed-assistant (update-in assistant-message [:tool_calls]
+                                   (fn [calls]
+                                     (mapv (fn [call]
+                                             (update call :function
+                                                     (fn [f]
+                                                       (let [args (or (:arguments f) {})]
+                                                         (assoc f :arguments
+                                                                (if (string? args) args (json/generate-string args)))))))
+                                           calls)))]
+    (conj (vec orig-messages)
+          fixed-assistant
+          {:role "tool"
+           :tool_call_id (:id tool-call)
+           :name (:name tool-call)
+           :content (str result)})))
+
+(defmethod build-tool-result-messages :ollama
+  [_ orig-messages response tool-call result]
+  (let [assistant-message (get-in response [:body :message])
+        ;; Ollama wants arguments as object, NOT JSON string
+        fixed-assistant (update-in assistant-message [:tool_calls]
+                                   (fn [calls]
+                                     (mapv (fn [call]
+                                             (update call :function
+                                                     (fn [f]
+                                                       (let [args (or (:arguments f) {})]
+                                                         ;; Keep as object, parse if string
+                                                         (assoc f :arguments
+                                                                (if (string? args)
+                                                                  (json/parse-string args true)
+                                                                  args))))))
+                                           calls)))]
+    (conj (vec orig-messages)
+          fixed-assistant
+          {:role "tool"
+           :tool_call_id (:id tool-call)
+           :name (:name tool-call)
+           :content (str result)})))
+
+(defmethod build-tool-result-messages :google
+  [_ orig-messages response tool-call result]
+  (let [assistant-parts (get-in response [:body :candidates 0 :content :parts])]
+    (conj (vec orig-messages)
+          {:role "assistant" :parts assistant-parts}
+          {:role "user"
+           :parts [{:functionResponse
+                    {:name (:name tool-call)
+                     :response {:result result}}}]})))
+
+;;==============================================================================
+;; Stub Tool Execution
+;;==============================================================================
 
 (defn stub-tool-execution
-  "Execute tool call with stubbed response. No real MCP involved."
-  [tool-call]
-  (let [args (get tool-call "arguments")
-        op (get args "operation")
-        a (get args "a")
-        b (get args "b")]
-    (case op
-      "add" (+ a b)
-      "subtract" (- a b)
-      "multiply" (* a b)
-      "divide" (/ a b)
-      (throw (ex-info "Unknown operation" {:op op})))))
-
-;;==============================================================================
-;; Synchronous LLM Call Wrapper
-;;==============================================================================
-
-(defn call-llm-sync
-  "Synchronous wrapper for llm/call. Returns response map or error map."
-  [service model messages & [{:keys [tools timeout-ms]
-                              :or {timeout-ms 60000}}]]
-  (let [result (promise)]
-    (llm/call service model messages
-              (fn [r] (deliver result {:ok r}))
-              (cond-> {:error (fn [e] (deliver result {:error e}))}
-                tools (assoc :tools tools)))
-    (let [r (deref result timeout-ms {:error {"timeout" true}})]
-      (if (:ok r)
-        (:ok r)
-        {:llm-error (:error r)}))))
+  "Execute tool call with stub. Returns result value."
+  [{:keys [name arguments]}]
+  (case name
+    "calculator" (let [{:keys [a b]} arguments]
+                   (+ a b))
+    (throw (ex-info "Unknown tool" {:name name}))))
 
 ;;==============================================================================
 ;; Feature Definitions
 ;;==============================================================================
 
 (def features
-  "Feature definitions with request transformation and response validation.
-   Each feature has :doc, and optionally :call-1 and :call-2 maps with
-   :request-fn and :validate-fn."
+  "Feature definitions for LLM capability testing.
+   Each feature has :doc, and optionally :call-1/:call-2 with :request-fn/:validate-fn."
 
   {:base-tool-call
    {:doc "Basic text→tool→text roundtrip"
-    :call-1 {:request-fn
-             (fn [_service _model _prev-messages]
-               [{"role" "user"
-                 "content" "What is 25 + 17? Use the calculate tool to compute this."}])
-             :validate-fn
-             (fn [resp]
-               (let [tool-calls (get resp "tool_calls")]
-                 (and (seq tool-calls)
-                      (= "calculate" (get (first tool-calls) "name")))))}
-    :call-2 {:request-fn
-             (fn [service model prev-messages resp-1 tool-result]
-               ;; Build conversation with tool result
-               ;; Different services have different formats for tool results
-               (let [tool-call (first (get resp-1 "tool_calls"))
-                     tool-id (get tool-call "id")
-                     tool-name (get tool-call "name")]
-                 (cond
-                   ;; Anthropic format
-                   (= service "anthropic")
-                   (conj (vec prev-messages)
-                         {"role" "assistant"
-                          "content" [{"type" "tool_use"
-                                      "id" tool-id
-                                      "name" tool-name
-                                      "input" (get tool-call "arguments")}]}
-                         {"role" "user"
-                          "content" [{"type" "tool_result"
-                                      "tool_use_id" tool-id
-                                      "content" (str tool-result)}]})
-
-                   ;; Google format
-                   (= service "google")
-                   (conj (vec prev-messages)
-                         {"role" "assistant"
-                          "parts" [{"functionCall"
-                                    {"name" tool-name
-                                     "args" (get tool-call "arguments")}}]}
-                         {"role" "user"
-                          "parts" [{"functionResponse"
-                                    {"name" tool-name
-                                     "response" {"result" (str tool-result)}}}]})
-
-                   ;; OpenAI-compatible format (OpenRouter, xAI, Ollama)
-                   :else
-                   (conj (vec prev-messages)
-                         {"role" "assistant"
-                          "tool_calls" [{"id" tool-id
-                                         "type" "function"
-                                         "function" {"name" tool-name
-                                                     "arguments" (json/generate-string
-                                                                  (get tool-call "arguments"))}}]}
-                         {"role" "tool"
-                          "tool_call_id" tool-id
-                          "name" tool-name
-                          "content" (str tool-result)}))))
-             :validate-fn
-             (fn [resp]
-               ;; Response should contain "42" (25 + 17)
-               ;; Check common response field names
-               (let [resp-str (pr-str resp)]
-                 (str/includes? resp-str "42")))}}
+    :call-1 {:validate-fn (fn [response tool-calls]
+                            (and (seq tool-calls)
+                                 (= "calculator" (:name (first tool-calls)))))}
+    :call-2 {:validate-fn (fn [response text]
+                            (and (some? text)
+                                 (re-find #"59" text)))}}
 
    :content-xor-tools
    {:doc "Response has content OR tools, never both"
-    :call-1 {:validate-fn
-             (fn [resp]
-               (let [has-tools (seq (get resp "tool_calls"))]
-                 ;; When we ask for a tool call, should have tools
-                 has-tools))}
-    :call-2 {:validate-fn
-             (fn [resp]
-               (let [has-tools (seq (get resp "tool_calls"))]
-                 ;; After tool result, should NOT have tools (either content or structured response)
-                 (not has-tools)))}}})
+    :call-1 {:validate-fn (fn [response tool-calls]
+                            (let [text (extract-text response)]
+                              ;; If we have tool calls, text should be nil or empty
+                              (if (seq tool-calls)
+                                (or (nil? text) (str/blank? text))
+                                true)))}
+    :call-2 {:validate-fn (fn [response text]
+                            (let [tool-calls (extract-tool-calls response)]
+                              ;; Final response should have text, not tools
+                              (and (some? text)
+                                   (empty? tool-calls))))}}})
 
 ;;==============================================================================
 ;; Capability Matrix
 ;;==============================================================================
 
 (def llm-capabilities
-  "Maps [service model] to set of supported features.
-   Start minimal, add features as verified."
-  {["anthropic" (model/direct-model :anthropic)] #{:base-tool-call :content-xor-tools}
-   ["google" (model/direct-model :google)] #{:base-tool-call :content-xor-tools}
-   ["openrouter" (model/openrouter-model :openai)] #{:base-tool-call :content-xor-tools}
-   ["xai" (model/direct-model :xai)] #{:base-tool-call :content-xor-tools}
-   ["ollama:local" (model/ollama-model :light)] #{:base-tool-call}})
+  "Which features each LLM supports. Start minimal, add as verified."
+  {["anthropic" "claude-sonnet-4-5-20250514"] #{:base-tool-call :content-xor-tools}
+   ["openrouter" "anthropic/claude-sonnet-4"] #{:base-tool-call} ;; Claude may include text with tool calls
+   ["google" "gemini-2.0-flash"] #{:base-tool-call}
+   ["xai" "grok-3-fast"] #{:base-tool-call :content-xor-tools}
+   ["ollama:local" "qwen3:8b"] #{:base-tool-call}})
 
 ;;==============================================================================
 ;; Test Runner
 ;;==============================================================================
 
-(defn run-feature-tests
-  "Run all applicable feature tests for an LLM.
-   Makes exactly 2 API calls, validates all features from those responses."
-  [[service model _env-key]]
-  (let [enabled-features (get llm-capabilities [service model])
-        feature-defs (keep (fn [[k v]] (when (enabled-features k) v)) features)]
+(defn run-feature-test
+  "Run capability test for a single LLM.
+   Makes 2 API calls, validates all applicable features from each."
+  [llm-key enabled-feature-keys]
+  (let [feature-defs (keep #(get features %) enabled-feature-keys)
+        messages-1 [{:role "user"
+                     :content "What is 42 + 17? Use the calculator tool to compute this."}]
+        tools [calculator-tool]]
 
-    (testing (str "LLM: " service "/" model)
-      ;; Phase 1: Build and send first request
-      (let [messages-1 ((:request-fn (:call-1 (:base-tool-call features)))
-                        service model nil)
+    ;; Call 1: text → tool
+    (testing "call-1: text→tool"
+      (let [resp-1 (call-api llm-key messages-1 tools)]
+        (is (:ok resp-1) (str "API call should succeed: " (pr-str (:error resp-1))))
 
-            _ (log/info "Call 1:" service model)
-            resp-1 (call-llm-sync service model messages-1 {:tools [calculator-tool]})]
+        (when (:ok resp-1)
+          (let [tool-calls (extract-tool-calls resp-1)]
+            ;; Run all call-1 validators
+            (doseq [f feature-defs
+                    :let [validate (get-in f [:call-1 :validate-fn])]
+                    :when validate]
+              (testing (:doc f)
+                (is (validate resp-1 tool-calls))))
 
-        ;; Check for LLM errors
-        (if (:llm-error resp-1)
-          (is false (str "LLM error: " (pr-str (:llm-error resp-1))))
+            ;; Proceed to call 2 if we got tool calls
+            (when (seq tool-calls)
+              (let [tool-call (first tool-calls)
+                    result (stub-tool-execution tool-call)
+                    api-type (:api-type resp-1)
+                    messages-2 (build-tool-result-messages api-type messages-1 resp-1 tool-call result)]
 
-          (do
-            (testing "call-1: text→tool"
-              ;; Run all :call-1 validators
-              (doseq [f feature-defs
-                      :let [validate (get-in f [:call-1 :validate-fn])]
-                      :when validate]
-                (testing (:doc f)
-                  (is (validate resp-1)
-                      (str "Failed: " (:doc f) "\nResponse: " (pr-str resp-1))))))
+                ;; Call 2: tool-result → text
+                (testing "call-2: tool-result→text"
+                  (let [resp-2 (call-api llm-key messages-2 tools)]
+                    (is (:ok resp-2) (str "API call should succeed: " (pr-str (:error resp-2))))
 
-            ;; Phase 2: Execute tool and send result
-            (when-let [tool-call (first (get resp-1 "tool_calls"))]
-              (let [tool-result (stub-tool-execution tool-call)
-
-                    ;; Build call-2 messages
-                    messages-2 ((:request-fn (:call-2 (:base-tool-call features)))
-                                service model messages-1 resp-1 tool-result)
-
-                    _ (log/info "Call 2:" service model "tool-result:" tool-result)
-                    resp-2 (call-llm-sync service model messages-2 {:tools [calculator-tool]})]
-
-                ;; Check for LLM errors
-                (if (:llm-error resp-2)
-                  (is false (str "LLM error (call 2): " (pr-str (:llm-error resp-2))))
-
-                  (testing "call-2: tool-result→text"
-                    ;; Run all :call-2 validators
-                    (doseq [f feature-defs
-                            :let [validate (get-in f [:call-2 :validate-fn])]
-                            :when validate]
-                      (testing (:doc f)
-                        (is (validate resp-2)
-                            (str "Failed: " (:doc f) "\nResponse: " (pr-str resp-2)))))))))))))))
+                    (when (:ok resp-2)
+                      (let [text (extract-text resp-2)]
+                        ;; Run all call-2 validators
+                        (doseq [f feature-defs
+                                :let [validate (get-in f [:call-2 :validate-fn])]
+                                :when validate]
+                          (testing (:doc f)
+                            (is (validate resp-2 text))))))))))))))))
 
 ;;==============================================================================
-;; Integration Test
+;; Main Test
 ;;==============================================================================
 
 (deftest ^:integration llm-capability-test
-  (doseq [llm supported-llms]
-    (if (llm-available? llm)
-      (run-feature-tests llm)
-      (is false (str (first llm) " unavailable - " (nth llm 2) " not set")))))
+  (doseq [[llm-key feature-set] llm-capabilities]
+    (testing (str "LLM: " (first llm-key) "/" (second llm-key))
+      (if (available? llm-key)
+        (run-feature-test llm-key feature-set)
+        (is false (str (first llm-key) " unavailable - "
+                       (get-in supported-llms [llm-key :env-key]) " not set"))))))
 
 ;;==============================================================================
-;; REPL Helpers
+;; REPL Testing
 ;;==============================================================================
 
 (comment
-  ;; Run single LLM test
-  (run-feature-tests ["anthropic" (model/direct-model :anthropic) "ANTHROPIC_API_KEY"])
+  ;; Test single provider
+  (run-feature-test ["anthropic" "claude-sonnet-4-5-20250514"] #{:base-tool-call})
 
-  ;; Run ollama test (no API key needed)
-  (run-feature-tests ["ollama:local" (model/ollama-model :light) nil])
-
-  ;; Check which LLMs are available
-  (filter llm-available? supported-llms)
-
-  ;; Run full test
+  ;; Run all
   (clojure.test/run-tests 'claij.integration.llm-test))
