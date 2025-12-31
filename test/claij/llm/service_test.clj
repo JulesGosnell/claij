@@ -372,7 +372,7 @@
                     "mistral:7b"
                     [{"role" "user"
                       "content" "Reply with exactly one word: hello"}])
-          content (:content response)]
+          content (get response "content")]
       (is (string? content))
       (is (pos? (count content)))
       (println "Ollama response:" content))))
