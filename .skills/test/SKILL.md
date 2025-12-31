@@ -51,3 +51,27 @@ Always use proper coordination:
 - core.async channels
 
 Rule: Thread/sleep = bug waiting to happen
+
+## Directory Boundaries
+
+**Test code MUST stay in `./test/`** - never leak into `./src/`:
+- Test fixtures, test configs, test utilities → `test/`
+- Test-only MCP servers, mock data → `test/` or `bin/` (for scripts)
+- If production code needs test-specific config, use dependency injection or test fixtures
+
+**Why this matters:**
+- Production builds should not include test code
+- Clear separation of concerns
+- Avoids bloating production artifacts
+- Makes it obvious what's test vs production
+
+**Examples:**
+```clojure
+;; BAD - test config in production namespace
+(def test-mcp-config  ;; in src/claij/mcp/bridge.clj
+  {"command" "python3" ...})
+
+;; GOOD - test config in test namespace
+(def test-mcp-config  ;; in test/claij/mcp/bridge_test.clj
+  {"command" "python3" ...})
+```

@@ -9,7 +9,7 @@
    [clojure.data.json :refer [write-str read-str]]
    [clojure.core.async :refer [chan <!! >!!] :as async]
    [claij.schema :as schema]
-   [claij.mcp.bridge :refer [start-mcp-bridge]]
+   [claij.mcp.bridge :as bridge :refer [start-mcp-bridge]]
    [claij.mcp.protocol :refer [initialise-request
                                initialised-notification
                                list-tools-request
@@ -50,6 +50,16 @@
                                             resolve-mcp-response-schema
                                             resolve-mcp-tool-input-schema
                                             find-tool-in-cache]]))
+
+;;------------------------------------------------------------------------------
+;; Test Configuration
+;;------------------------------------------------------------------------------
+
+(def test-mcp-config
+  "Fast MCP server for testing - Python-based, instant start/stop."
+  {"command" "python3"
+   "args" ["bin/mcp-test-server.py"]
+   "transport" "stdio"})
 
 ;;------------------------------------------------------------------------------
 ;; Helper for JSON Schema validation
@@ -759,7 +769,7 @@
 (deftest ^:integration mcp-walk-through-test
   (testing "MCP bridge can send requests and receive responses"
     (let [n 100
-          config {"command" "bash" "args" ["-c" "cd /home/jules/src/claij && ./bin/mcp-clojure-tools.sh"] "transport" "stdio"}
+          config test-mcp-config
           ic (chan n (map write-str))
           ;; Filter out notifications - they have "method" key, responses have "result" key
           notification? (fn [msg] (and (map? msg) (contains? msg "method")))

@@ -8,6 +8,16 @@
    [claij.mcp.bridge :as bridge]))
 
 ;;------------------------------------------------------------------------------
+;; Test Configuration
+;;------------------------------------------------------------------------------
+
+(def test-mcp-config
+  "Fast MCP server for testing - Python-based, instant start/stop."
+  {"command" "python3"
+   "args" ["bin/mcp-test-server.py"]
+   "transport" "stdio"})
+
+;;------------------------------------------------------------------------------
 ;; Hat Maker Contract Tests (no actual bridge)
 ;;------------------------------------------------------------------------------
 
@@ -46,7 +56,7 @@
 
 (deftest ^:integration mcp-hat-integration-test
   (testing "hat initializes bridge and populates cache"
-    (let [hat-fn (mcp-hat-maker "mc" nil)
+    (let [hat-fn (mcp-hat-maker "mc" {:config test-mcp-config})
           [ctx' fragment] (hat-fn {})]
       (try
         ;; Bridge should be initialized
@@ -67,9 +77,9 @@
 
 (deftest ^:integration mcp-hat-reuse-test
   (testing "second hat on different state reuses bridge"
-    (let [hat-fn1 (mcp-hat-maker "mc" nil)
+    (let [hat-fn1 (mcp-hat-maker "mc" {:config test-mcp-config})
           [ctx1 _] (hat-fn1 {})
-          hat-fn2 (mcp-hat-maker "worker" nil)
+          hat-fn2 (mcp-hat-maker "worker" {:config test-mcp-config})
           [ctx2 fragment2] (hat-fn2 ctx1)]
       (try
         ;; Same bridge object
