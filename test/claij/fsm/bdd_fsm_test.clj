@@ -141,8 +141,8 @@
       (is (contains? ctx :llm/service))
       (is (contains? ctx :llm/model))
       (is (contains? ctx :hats))
-      (is (= "anthropic" (:llm/service ctx)))
-      (is (= (model/direct-model :anthropic) (:llm/model ctx)))))
+      (is (= "openrouter" (:llm/service ctx)))
+      (is (= (model/openrouter-model :xai) (:llm/model ctx)))))
 
   (testing "Creates context with custom values"
     (let [ctx (make-bdd-context {:service "anthropic"
