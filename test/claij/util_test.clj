@@ -2,7 +2,8 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [claij.util :refer [trace json->clj clj->json index-by map-values ->key
-                       should-retry? make-retrier assert-env-var]]))
+                       should-retry? make-retrier assert-env-var
+                       strip-keys-recursive]]))
 
 ;;==============================================================================
 ;; Pure utility function tests
@@ -216,3 +217,61 @@
 
       (is (= :max-retries-exceeded (mock-async-call 0)))
       (is (= [0 1 2] @attempts) "Made exactly 3 attempts"))))
+
+;;==============================================================================
+;; JSON Schema sanitization
+;;==============================================================================
+
+(deftest strip-keys-recursive-test
+  (testing "Removes specified keys at top level"
+    (is (= {"type" "object" "properties" {}}
+           (strip-keys-recursive #{"additionalProperties"}
+                                 {"type" "object" "additionalProperties" false "properties" {}}))))
+  
+  (testing "Removes multiple keys at top level"
+    (is (= {"type" "object"}
+           (strip-keys-recursive #{"additionalProperties" "$schema"}
+                                 {"type" "object" 
+                                  "additionalProperties" false 
+                                  "$schema" "http://json-schema.org/draft-07/schema#"}))))
+  
+  (testing "Recursively removes from nested objects"
+    (is (= {"type" "object"
+            "properties" {"name" {"type" "string"}
+                          "config" {"type" "object"
+                                    "properties" {"timeout" {"type" "integer"}}}}}
+           (strip-keys-recursive
+            #{"additionalProperties" "$schema"}
+            {"type" "object"
+             "additionalProperties" false
+             "$schema" "http://json-schema.org/draft-07/schema#"
+             "properties" {"name" {"type" "string" "additionalProperties" false}
+                           "config" {"type" "object"
+                                     "additionalProperties" false
+                                     "properties" {"timeout" {"type" "integer"}}}}}))))
+  
+  (testing "Handles arrays"
+    (is (= {"type" "array" "items" {"type" "string"}}
+           (strip-keys-recursive
+            #{"additionalProperties" "$schema"}
+            {"type" "array" "additionalProperties" false "items" {"type" "string" "$schema" "foo"}}))))
+  
+  (testing "Preserves non-targeted fields"
+    (is (= {"type" "object"
+            "required" ["name"]
+            "properties" {"name" {"type" "string" "description" "The name"}}}
+           (strip-keys-recursive
+            #{"additionalProperties"}
+            {"type" "object"
+             "required" ["name"]
+             "additionalProperties" false
+             "properties" {"name" {"type" "string" "description" "The name"}}}))))
+  
+  (testing "Handles empty keys set"
+    (is (= {"a" 1 "b" 2}
+           (strip-keys-recursive #{} {"a" 1 "b" 2}))))
+  
+  (testing "Handles primitives"
+    (is (= "hello" (strip-keys-recursive #{"x"} "hello")))
+    (is (= 42 (strip-keys-recursive #{"x"} 42)))
+    (is (= nil (strip-keys-recursive #{"x"} nil)))))

@@ -68,3 +68,41 @@
          (when on-max-retries (on-max-retries)))))))
 
 
+
+;;------------------------------------------------------------------------------
+;; JSON key stripping
+
+(defn strip-keys-recursive
+  "Recursively remove specified keys from a nested data structure.
+   
+   Walks maps and sequences, removing any map entries whose keys are
+   in the provided key-set.
+   
+   Useful for sanitizing JSON schemas that contain fields not supported
+   by all consumers (e.g., Google's API rejects 'additionalProperties').
+   
+   Args:
+     key-set - Set of keys (strings) to remove
+     data    - The data structure to process
+   
+   Returns:
+     Data structure with specified keys removed at all levels.
+   
+   Example:
+     (strip-keys-recursive #{\"$schema\" \"additionalProperties\"}
+                           {\"type\" \"object\" \"additionalProperties\" false})
+     => {\"type\" \"object\"}"
+  [key-set data]
+  (cond
+    (map? data)
+    (into {}
+          (comp
+           (remove (fn [[k _]] (contains? key-set k)))
+           (map (fn [[k v]] [k (strip-keys-recursive key-set v)])))
+          data)
+    
+    (sequential? data)
+    (mapv (partial strip-keys-recursive key-set) data)
+    
+    :else
+    data))

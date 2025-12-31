@@ -25,7 +25,12 @@
    [clojure.string :as str]
    [clojure.tools.logging :as log]
    [cheshire.core :as json]
-   [clj-http.client :as http]))
+   [clj-http.client :as http]
+   [claij.util :refer [strip-keys-recursive]]))
+
+(def sanitize-schema-for-google
+  "Remove JSON Schema fields that Google's native API rejects."
+  (partial strip-keys-recursive #{"additionalProperties" "$schema"}))
 
 ;;------------------------------------------------------------------------------
 ;; Auth Resolution
@@ -141,11 +146,12 @@
         google-tools (when (seq tools)
                        [{"function_declarations"
                          (mapv (fn [tool]
-                                 (let [function (get tool "function")]
+                                 (let [function (get tool "function")
+                                       params (or (get function "parameters")
+                                                  {"type" "object" "properties" {}})]
                                    {"name" (get function "name")
                                     "description" (get function "description")
-                                    "parameters" (or (get function "parameters")
-                                                     {"type" "object" "properties" {}})}))
+                                    "parameters" (sanitize-schema-for-google params)}))
                                tools)}])]
     {:url full-url
      :headers (merge {"Content-Type" "application/json"}
