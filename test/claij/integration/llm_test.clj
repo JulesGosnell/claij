@@ -20,7 +20,9 @@
    [cheshire.core :as json]
    [clj-http.client :as http]
    ;; Production prompts - tests must use these
-   [claij.mcp.schema :as mcp-schema]))
+   [claij.mcp.schema :as mcp-schema]
+   ;; Schema validation
+   [claij.schema :as schema]))
 
 ;;------------------------------------------------------------------------------
 ;; Environment
@@ -42,119 +44,182 @@
 
 (def anthropic-request-schema
   "Anthropic Messages API request format"
-  {:type "object"
-   :required ["model" "max_tokens" "messages"]
-   :properties
-   {"model" {:type "string"}
-    "max_tokens" {:type "integer"}
-    "system" {:type "string"}
-    "messages" {:type "array"
-                :items {:type "object"
-                        :required ["role" "content"]
-                        :properties {"role" {:enum ["user" "assistant"]}
-                                     "content" {:oneOf [{:type "string"}
-                                                        {:type "array"}]}}}}
-    "tools" {:type "array"
-             :items {:type "object"
-                     :required ["name" "input_schema"]
-                     :properties {"name" {:type "string"}
-                                  "description" {:type "string"}
-                                  "input_schema" {:type "object"}}}}}})
+  {"type" "object"
+   "required" ["model" "max_tokens" "messages"]
+   "properties"
+   {"model" {"type" "string"}
+    "max_tokens" {"type" "integer"}
+    "system" {"type" "string"}
+    "messages" {"type" "array"
+                "items" {"type" "object"
+                         "required" ["role" "content"]
+                         "properties" {"role" {"enum" ["user" "assistant"]}
+                                       "content" {"oneOf" [{"type" "string"}
+                                                           {"type" "array"}]}}}}
+    "tools" {"type" "array"
+             "items" {"type" "object"
+                      "required" ["name" "input_schema"]
+                      "properties" {"name" {"type" "string"}
+                                    "description" {"type" "string"}
+                                    "input_schema" {"type" "object"}}}}}})
 
 (def anthropic-response-schema
   "Anthropic Messages API response format"
-  {:type "object"
-   :required ["id" "type" "role" "content" "model" "stop_reason"]
-   :properties
-   {"id" {:type "string"}
-    "type" {:const "message"}
-    "role" {:const "assistant"}
-    "content" {:type "array"
-               :items {:type "object"
-                       :required ["type"]
-                       :properties {"type" {:enum ["text" "tool_use"]}
-                                    "text" {:type "string"}
-                                    "id" {:type "string"}
-                                    "name" {:type "string"}
-                                    "input" {:type "object"}}}}
-    "model" {:type "string"}
-    "stop_reason" {:type "string"}}})
+  {"type" "object"
+   "required" ["id" "type" "role" "content" "model" "stop_reason"]
+   "properties"
+   {"id" {"type" "string"}
+    "type" {"const" "message"}
+    "role" {"const" "assistant"}
+    "content" {"type" "array"
+               "items" {"type" "object"
+                        "required" ["type"]
+                        "properties" {"type" {"enum" ["text" "tool_use"]}
+                                      "text" {"type" "string"}
+                                      "id" {"type" "string"}
+                                      "name" {"type" "string"}
+                                      "input" {"type" "object"}}}}
+    "model" {"type" "string"}
+    "stop_reason" {"type" "string"}}})
 
 (def openai-request-schema
   "OpenAI-compatible API request format (OpenRouter, xAI, Ollama)"
-  {:type "object"
-   :required ["model" "messages"]
-   :properties
-   {"model" {:type "string"}
-    "messages" {:type "array"
-                :items {:type "object"
-                        :required ["role" "content"]
-                        :properties {"role" {:enum ["system" "user" "assistant" "tool"]}
-                                     "content" {:oneOf [{:type "string"}
-                                                        {:type "null"}]}
-                                     "tool_calls" {:type "array"}
-                                     "tool_call_id" {:type "string"}}}}
-    "tools" {:type "array"
-             :items {:type "object"
-                     :required ["type" "function"]
-                     :properties {"type" {:const "function"}
-                                  "function" {:type "object"
-                                              :required ["name"]
-                                              :properties {"name" {:type "string"}
-                                                           "description" {:type "string"}
-                                                           "parameters" {:type "object"}}}}}}
-    "stream" {:type "boolean"}
-    "max_tokens" {:type "integer"}}})
+  {"type" "object"
+   "required" ["model" "messages"]
+   "properties"
+   {"model" {"type" "string"}
+    "messages" {"type" "array"
+                "items" {"type" "object"
+                         "required" ["role"]
+                         "properties" {"role" {"enum" ["system" "user" "assistant" "tool"]}
+                                       "content" {"oneOf" [{"type" "string"}
+                                                           {"type" "null"}]}
+                                       "tool_calls" {"type" "array"}
+                                       "tool_call_id" {"type" "string"}}}}
+    "tools" {"type" "array"
+             "items" {"type" "object"
+                      "required" ["type" "function"]
+                      "properties" {"type" {"const" "function"}
+                                    "function" {"type" "object"
+                                                "required" ["name"]
+                                                "properties" {"name" {"type" "string"}
+                                                              "description" {"type" "string"}
+                                                              "parameters" {"type" "object"}}}}}}
+    "stream" {"type" "boolean"}
+    "max_tokens" {"type" "integer"}}})
 
 (def openai-response-schema
   "OpenAI-compatible API response format"
-  {:type "object"
-   :required ["choices"]
-   :properties
-   {"id" {:type "string"}
-    "object" {:type "string"}
-    "model" {:type "string"}
-    "choices" {:type "array"
-               :items {:type "object"
-                       :required ["message"]
-                       :properties {"index" {:type "integer"}
-                                    "message" {:type "object"
-                                               :required ["role"]
-                                               :properties {"role" {:const "assistant"}
-                                                            "content" {:oneOf [{:type "string"}
-                                                                               {:type "null"}]}
-                                                            "tool_calls" {:type "array"
-                                                                          :items {:type "object"}}}}
-                                    "finish_reason" {:type "string"}}}}}})
+  {"type" "object"
+   "required" ["choices"]
+   "properties"
+   {"id" {"type" "string"}
+    "object" {"type" "string"}
+    "model" {"type" "string"}
+    "choices" {"type" "array"
+               "items" {"type" "object"
+                        "required" ["message"]
+                        "properties" {"index" {"type" "integer"}
+                                      "message" {"type" "object"
+                                                 "required" ["role"]
+                                                 "properties" {"role" {"const" "assistant"}
+                                                               "content" {"oneOf" [{"type" "string"}
+                                                                                   {"type" "null"}]}
+                                                               "tool_calls" {"type" "array"
+                                                                             "items" {"type" "object"}}}}
+                                      "finish_reason" {"type" "string"}}}}}})
 
 (def google-request-schema
   "Google Gemini API request format"
-  {:type "object"
-   :required ["contents"]
-   :properties
-   {"contents" {:type "array"
-                :items {:type "object"
-                        :required ["role" "parts"]
-                        :properties {"role" {:enum ["user" "model"]}
-                                     "parts" {:type "array"
-                                              :items {:type "object"}}}}}
-    "tools" {:type "array"
-             :items {:type "object"
-                     :properties {"function_declarations" {:type "array"}}}}}})
+  {"type" "object"
+   "required" ["contents"]
+   "properties"
+   {"contents" {"type" "array"
+                "items" {"type" "object"
+                         "required" ["role" "parts"]
+                         "properties" {"role" {"enum" ["user" "model"]}
+                                       "parts" {"type" "array"
+                                                "items" {"type" "object"}}}}}
+    "tools" {"type" "array"
+             "items" {"type" "object"
+                      "properties" {"function_declarations" {"type" "array"}}}}}})
 
 (def google-response-schema
   "Google Gemini API response format"
-  {:type "object"
-   :required ["candidates"]
-   :properties
-   {"candidates" {:type "array"
-                  :items {:type "object"
-                          :required ["content"]
-                          :properties {"content" {:type "object"
-                                                  :required ["parts" "role"]
-                                                  :properties {"parts" {:type "array"}
-                                                               "role" {:const "model"}}}
-                                       "finishReason" {:type "string"}}}}}})
+  {"type" "object"
+   "required" ["candidates"]
+   "properties"
+   {"candidates" {"type" "array"
+                  "items" {"type" "object"
+                           "required" ["content"]
+                           "properties" {"content" {"type" "object"
+                                                    "required" ["parts" "role"]
+                                                    "properties" {"parts" {"type" "array"}
+                                                                  "role" {"const" "model"}}}
+                                         "finishReason" {"type" "string"}}}}}})
+
+;;------------------------------------------------------------------------------
+;; Schema Validation Helper
+
+(defn response-schema-for-api-type
+  "Get the response schema for an API type"
+  [api-type]
+  (case api-type
+    :anthropic anthropic-response-schema
+    :openai openai-response-schema
+    :google google-response-schema))
+
+(defn validate-response
+  "Validate an HTTP response body against the API schema.
+   Returns {:valid? true} or {:valid? false :errors [...]}."
+  [api-type response-body]
+  (let [response-schema (response-schema-for-api-type api-type)]
+    (schema/validate response-schema response-body)))
+
+;;------------------------------------------------------------------------------
+;; Native Tool Call Schemas (for specific tool_call validation)
+
+(def anthropic-tool-use-schema
+  "Schema for Anthropic tool_use content block"
+  {"type" "object"
+   "required" ["type" "id" "name" "input"]
+   "properties"
+   {"type" {"const" "tool_use"}
+    "id" {"type" "string"}
+    "name" {"type" "string"}
+    "input" {"type" "object"}}})
+
+(def openai-tool-call-schema
+  "Schema for OpenAI tool_call object"
+  {"type" "object"
+   "required" ["id" "type" "function"]
+   "properties"
+   {"id" {"type" "string"}
+    "type" {"const" "function"}
+    "function" {"type" "object"
+                "required" ["name" "arguments"]
+                "properties"
+                {"name" {"type" "string"}
+                 "arguments" {"type" "string"}}}}})
+
+(def google-function-call-schema
+  "Schema for Google functionCall part"
+  {"type" "object"
+   "required" ["functionCall"]
+   "properties"
+   {"functionCall" {"type" "object"
+                    "required" ["name" "args"]
+                    "properties"
+                    {"name" {"type" "string"}
+                     "args" {"type" "object"}}}}})
+
+(defn tool-call-schema-for-api-type
+  "Get the tool_call schema for an API type"
+  [api-type]
+  (case api-type
+    :anthropic anthropic-tool-use-schema
+    :openai openai-tool-call-schema
+    :google google-function-call-schema))
 
 ;;------------------------------------------------------------------------------
 ;; LLM Capability Matrix
@@ -393,16 +458,22 @@ CRITICAL FORMAT RULES:
         response (call-fn messages {:tools [tool-def]})
         status (:status response)]
     (if (= 200 status)
-      (let [{:keys [tool-calls]} (extract-fn response)]
-        (if (seq tool-calls)
-          (let [tc (first tool-calls)
-                name (get tc "name")
-                args (get tc "arguments")]
-            (if (and (= "calculator" name)
-                     (= "add" (get args "op")))
-              {:pass? true :tool-call tc}
-              {:pass? false :error (str "Wrong tool call: " (pr-str tc))}))
-          {:pass? false :error "No tool calls in response"}))
+      (let [body (:body response)
+            ;; Validate response against API schema
+            validation (validate-response api-type body)]
+        (if-not (:valid? validation)
+          {:pass? false :error (str "Schema validation failed: " (pr-str (:errors validation)))}
+          ;; Schema valid, now check content
+          (let [{:keys [tool-calls]} (extract-fn response)]
+            (if (seq tool-calls)
+              (let [tc (first tool-calls)
+                    name (get tc "name")
+                    args (get tc "arguments")]
+                (if (and (= "calculator" name)
+                         (= "add" (get args "op")))
+                  {:pass? true :tool-call tc}
+                  {:pass? false :error (str "Wrong tool call: " (pr-str tc))}))
+              {:pass? false :error "No tool calls in response"}))))
       {:pass? false :error (str "HTTP " status ": " (pr-str (:body response)))})))
 
 (defn test-tuple-3-format
@@ -421,17 +492,23 @@ CRITICAL FORMAT RULES:
                   {"role" "user" "content" (json/generate-string tuple-3)}]
         response (call-fn messages {})]
     (if (= 200 (:status response))
-      (let [{:keys [text]} (extract-fn response)]
-        (if text
-          (try
-            (let [parsed (json/parse-string text)]
-              (if (and (get parsed "id")
-                       (get parsed "sum"))
-                {:pass? true :response parsed}
-                {:pass? false :error (str "Missing required fields: " (pr-str parsed))}))
-            (catch Exception e
-              {:pass? false :error (str "JSON parse error: " (.getMessage e) " - " text)}))
-          {:pass? false :error "No text content in response"}))
+      (let [body (:body response)
+            ;; Validate response against API schema
+            validation (validate-response api-type body)]
+        (if-not (:valid? validation)
+          {:pass? false :error (str "Schema validation failed: " (pr-str (:errors validation)))}
+          ;; Schema valid, now check content
+          (let [{:keys [text]} (extract-fn response)]
+            (if text
+              (try
+                (let [parsed (json/parse-string text)]
+                  (if (and (get parsed "id")
+                           (get parsed "sum"))
+                    {:pass? true :response parsed}
+                    {:pass? false :error (str "Missing required fields: " (pr-str parsed))}))
+                (catch Exception e
+                  {:pass? false :error (str "JSON parse error: " (.getMessage e) " - " text)}))
+              {:pass? false :error "No text content in response"}))))
       {:pass? false :error (str "HTTP " (:status response) ": " (pr-str (:body response)))})))
 
 (defn test-content-xor-tools
@@ -442,18 +519,60 @@ CRITICAL FORMAT RULES:
                    "content" "What is 2 + 2? Use the calculator tool."}]
         response (call-fn messages {:tools [tool-def]})]
     (if (= 200 (:status response))
-      (let [{:keys [text tool-calls]} (extract-fn response)
-            has-text? (and text (not (str/blank? text)))
-            has-tools? (seq tool-calls)]
-        (cond
-          (and has-text? has-tools?)
-          {:pass? false :error (str "XOR violation: both content and tool_calls present"
-                                    "\ntext: " (pr-str text)
-                                    "\ntools: " (pr-str tool-calls))}
-          (or has-text? has-tools?)
-          {:pass? true :has-text? has-text? :has-tools? has-tools?}
-          :else
-          {:pass? false :error "Neither content nor tool_calls present"}))
+      (let [body (:body response)
+            ;; Validate response against API schema
+            validation (validate-response api-type body)]
+        (if-not (:valid? validation)
+          {:pass? false :error (str "Schema validation failed: " (pr-str (:errors validation)))}
+          ;; Schema valid, now check XOR constraint
+          (let [{:keys [text tool-calls]} (extract-fn response)
+                has-text? (and text (not (str/blank? text)))
+                has-tools? (seq tool-calls)]
+            (cond
+              (and has-text? has-tools?)
+              {:pass? false :error (str "XOR violation: both content and tool_calls present"
+                                        "\ntext: " (pr-str text)
+                                        "\ntools: " (pr-str tool-calls))}
+              (or has-text? has-tools?)
+              {:pass? true :has-text? has-text? :has-tools? has-tools?}
+              :else
+              {:pass? false :error "Neither content nor tool_calls present"}))))
+      {:pass? false :error (str "HTTP " (:status response) ": " (pr-str (:body response)))})))
+
+(defn extract-raw-tool-calls
+  "Extract raw tool_calls from response body (not normalized)"
+  [api-type response-body]
+  (case api-type
+    :anthropic
+    (->> (get response-body "content")
+         (filter #(= "tool_use" (get % "type"))))
+
+    :openai
+    (get-in response-body ["choices" 0 "message" "tool_calls"])
+
+    :google
+    (->> (get-in response-body ["candidates" 0 "content" "parts"])
+         (filter #(contains? % "functionCall")))))
+
+(defn test-native-tools
+  "Test that native tool call responses match API-specific schema"
+  [api-type call-fn tool-def]
+  (let [messages [{"role" "user"
+                   "content" "What is 2 + 2? Use the calculator tool."}]
+        response (call-fn messages {:tools [tool-def]})]
+    (if (= 200 (:status response))
+      (let [body (:body response)
+            raw-tool-calls (extract-raw-tool-calls api-type body)]
+        (if (seq raw-tool-calls)
+          (let [tool-call-schema (tool-call-schema-for-api-type api-type)
+                first-tc (first raw-tool-calls)
+                validation (schema/validate tool-call-schema first-tc)]
+            (if (:valid? validation)
+              {:pass? true :tool-call first-tc}
+              {:pass? false :error (str "Tool call schema validation failed: "
+                                        (pr-str (:errors validation))
+                                        "\nTool call: " (pr-str first-tc))}))
+          {:pass? false :error "No tool calls in response"}))
       {:pass? false :error (str "HTTP " (:status response) ": " (pr-str (:body response)))})))
 
 ;;------------------------------------------------------------------------------
@@ -505,6 +624,11 @@ CRITICAL FORMAT RULES:
       (when (features :content-xor-tools)
         (testing "content-xor-tools"
           (let [result (test-content-xor-tools api-type call-fn extract-fn tool-def)]
+            (is (:pass? result) (or (:error result) "")))))
+
+      (when (features :native-tools)
+        (testing "native-tools"
+          (let [result (test-native-tools api-type call-fn tool-def)]
             (is (:pass? result) (or (:error result) ""))))))))
 
 ;;------------------------------------------------------------------------------
