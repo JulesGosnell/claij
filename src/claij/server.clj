@@ -708,7 +708,10 @@ a{color:#00ff88;font-size:1.2em}ol{line-height:2}</style></head>
    - :join? - Block the calling thread (default false)"
   [{:keys [port ssl-port keystore key-password join?]
     :or {port 8080 join? false}}]
-  (let [opts (cond-> {:join? join?}
+  (let [opts (cond-> {:join? join?
+                      ;; Set idle timeout to 5 minutes to support long-running FSMs
+                      ;; (society FSM can take 60-120 seconds for multi-LLM coordination)
+                      :max-idle-time 300000}
                ;; HTTP
                port (assoc :port port)
                (nil? port) (assoc :port -1) ;; Disable HTTP if nil

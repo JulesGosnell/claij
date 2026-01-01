@@ -270,8 +270,8 @@
               ;; The FSM will prepend the synthetic trail automatically
               (submit entry-event)
 
-              ;; Step 8: Wait for completion (2 minute timeout)
-              (let [result (await 120000)]
+              ;; Step 8: Wait for completion (3 minute timeout for multi-LLM coordination)
+              (let [result (await 180000)]
                 (if (= result :timeout)
                   {:status 504
                    :body {"error" {"message" "FSM execution timed out"

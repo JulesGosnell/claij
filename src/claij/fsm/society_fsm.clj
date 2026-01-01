@@ -2,11 +2,10 @@
   "Simple society FSM for demonstrating multi-LLM collaboration.
    
    Takes plain text queries and distributes them across multiple LLMs
-   (Claude, Grok, GPT, Gemini), then summarizes their responses with
+   (Claude, Grok, GPT), then summarizes their responses with
    clear attribution.
    
-   Perfect for Open WebUI and other chat interfaces - just ask a question
-   and get perspectives from multiple AI models!"
+   Reduced from 4 to 3 reviewers to stay under 60s timeout."
   (:require
    [claij.schema :refer [def-fsm]]))
 
@@ -43,12 +42,7 @@
    "summary"
    {:type "object"
     :properties {"summary" {:type "string"
-                            :description "Consolidated summary with attribution (e.g. '**Claude**: suggests X. **Grok**: argues Y.')"}
-                 "perspectives" {:type "array"
-                                 :description "List of individual perspectives (optional, for structure)"
-                                 :items {:type "object"
-                                         :properties {"llm" {:type "string"}
-                                                      "point" {:type "string"}}}}}
+                            :description "Consolidated summary with attribution (e.g. '**Claude**: suggests X. **Grok**: argues Y.')"}}
     :required ["summary"]
     :additionalProperties false}})
 
@@ -70,7 +64,6 @@
       "- Decide whether to consult the society or answer directly"
       "- For substantive questions, distribute across ALL available LLMs"
       "- For simple mechanical tasks, answer directly without consulting others"
-      "- After gathering responses (if needed), create a clear summary with attribution"
       ""
       "WHEN TO CONSULT THE SOCIETY:"
       "- Substantive questions needing diverse perspectives"
@@ -89,19 +82,18 @@
       "- Claude: {\"name\": \"Claude\", \"service\": \"openrouter\", \"model\": \"anthropic/claude-sonnet-4.5\"}"
       "- Grok: {\"name\": \"Grok\", \"service\": \"openrouter\", \"model\": \"x-ai/grok-code-fast-1\"}"
       "- GPT: {\"name\": \"GPT\", \"service\": \"openrouter\", \"model\": \"openai/gpt-5.2\"}"
-      "- Gemini: {\"name\": \"Gemini\", \"service\": \"openrouter\", \"model\": \"google/gemini-3-flash-preview\"}"
       ""
       "WORKFLOW FOR DIRECT ANSWERS:"
       "1. Receive user question in 'message' field"
       "2. Recognize it as a simple/mechanical task"
-      "3. Answer directly using transition [\"chairman\" \"end\"] with your summary"
+      "3. Answer directly using transition [\"chairman\" \"end\"]"
       ""
       "WORKFLOW FOR SOCIETY CONSULTATION:"
       "1. Receive user question in 'message' field"
       "2. Decide this needs diverse perspectives"
-      "3. Send to EACH of the 4 LLMs using transition [\"chairman\" \"reviewer\"]"
-      "4. Collect all 4 responses (they return via [\"reviewer\" \"chairman\"])"
-      "5. Create summary with clear attribution: '**Claude** suggests X. **Grok** argues Y.'"
+      "3. Send to EACH of the 3 LLMs using transition [\"chairman\" \"reviewer\"]"
+      "4. Collect all 3 responses (they return via [\"reviewer\" \"chairman\"])"
+      "5. Create summary with clear attribution: '**Claude** suggests X. **Grok** argues Y. **GPT** notes Z.'"
       "6. End using transition [\"chairman\" \"end\"] with your summary"
       ""
       "CRITICAL - USE THESE EXACT TRANSITION IDS:"
@@ -117,11 +109,11 @@
       "Direct: {\"id\": [\"chairman\", \"end\"], \"summary\": \"Python Programming Discussion\"}"
       ""
       "Request: 'What's the best programming language?'"
-      "Consult: This benefits from diverse perspectives - ask all 4 LLMs!"
+      "Consult: This benefits from diverse perspectives - ask all 3 LLMs!"
       ""
       "IMPORTANT:"
       "- Be efficient - don't waste resources on tasks that don't need collaboration"
-      "- When consulting society: SINGLE PASS, query ALL 4 LLMs, then summarize"
+      "- When consulting society: SINGLE PASS, query ALL 3 LLMs, then summarize"
       "- Always attribute to specific LLMs when using the society"
       "- For mechanical tasks, just do them yourself quickly"]}
 
