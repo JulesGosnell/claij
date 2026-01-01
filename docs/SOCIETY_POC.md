@@ -2,7 +2,7 @@
 
 ## Multi-LLM Collaboration via OpenAI-Compatible Endpoint
 
-We've successfully demonstrated CLAIJ's **society FSM** working through an OpenAI-compatible chat interface (Open WebUI), coordinating **4 different LLMs** to provide diverse perspectives on user questions.
+We've successfully demonstrated CLAIJ's **society FSM** working through an OpenAI-compatible chat interface (Open WebUI), coordinating **3 different LLMs** to provide diverse perspectives on user questions.
 
 ### What Works
 
@@ -14,7 +14,7 @@ We've successfully demonstrated CLAIJ's **society FSM** working through an OpenA
 - ✅ CORS support for browser-based clients
 
 **Society FSM - Smart Delegation**
-- ✅ **Substantive questions**: Consults all 4 LLMs (Claude, Grok, GPT, Gemini) via OpenRouter
+- ✅ **Substantive questions**: Consults 3 LLMs (Claude, Grok, GPT) via OpenRouter
 - ✅ **Mechanical tasks**: Chairman handles directly (tagging, titles, follow-up suggestions)
 - ✅ **Intelligent routing**: Chairman decides when collaboration adds value
 - ✅ **Clear attribution**: Responses show which LLM said what
@@ -32,21 +32,32 @@ technical expertise for setup...
 
 GPT: Pros include being open-source/self-hostable (better privacy/control), 
 supporting multiple backends with multi-model chat...
-
-Gemini: Excels for local-first workflows with high privacy through self-hosting 
-and a feature-rich interface for switching between backends...
 ```
+
+### Visualization
+
+**Open WebUI Interface**
+
+![Society FSM in Open WebUI](../doc/OpenWebUI-Society.png)
+
+*Screenshot showing CLAIJ Society FSM responding through Open WebUI interface with multi-LLM perspectives*
+
+**Society FSM Graph**
+
+![Society FSM Structure](../doc/society-fsm.svg)
+
+*FSM state diagram: Chairman routes to reviewers (sequential), then synthesizes attributed summary*
 
 ### Performance Optimization
 
 **Smart Delegation Savings**:
-- **Substantive question**: 4 LLM calls (~60 seconds) - full society consultation
+- **Substantive question**: 3 LLM calls (~45 seconds) - full society consultation
 - **Follow-up suggestions**: 1 LLM call (~4 seconds) - Chairman only
 - **Title generation**: 1 LLM call (~2 seconds) - Chairman only  
 - **Tag generation**: 1 LLM call (~2 seconds) - Chairman only
 
-**Without smart delegation**: All 4 requests would require 16 LLM calls (~240 seconds)
-**With smart delegation**: 7 LLM calls (~68 seconds) - **56% fewer calls, 71% faster!**
+**Without smart delegation**: All 4 requests would require 12 LLM calls (~180 seconds)
+**With smart delegation**: 6 LLM calls (~53 seconds) - **50% fewer calls, 71% faster!**
 
 ### Current Limitations & Workarounds
 
@@ -90,8 +101,8 @@ This demonstrates CLAIJ's core value proposition:
 - [ ] Progressive display of multi-LLM responses
 
 **Performance Optimization**:
-- [ ] **Parallel LLM calls** - Query all 4 reviewers simultaneously instead of sequentially
-- [ ] Expected speedup: ~75% reduction in wall-clock time (from 60s to ~15s)
+- [ ] **Parallel LLM calls** - Query all 3 reviewers simultaneously instead of sequentially
+- [ ] Expected speedup: ~67% reduction in wall-clock time (from 45s to ~15s)
 - [ ] Use existing `claij.parallel` namespace
 
 **Future Enhancements** (Issue #148):
@@ -117,14 +128,14 @@ This demonstrates CLAIJ's core value proposition:
    - "What should I consider when choosing Z?"
 
 4. **Watch the society collaborate**:
-   - Chairman distributes question to 4 LLMs
+   - Chairman distributes question to 3 LLMs
    - Each provides unique perspective
    - Chairman synthesizes with attribution
 
 ### Attribution
 
 - OpenRouter used for LLM access (avoiding direct API rate limits)
-- Models: Claude Sonnet 4.5, Grok Code Fast, GPT-5.2, Gemini 3 Flash
+- Models: Claude Sonnet 4.5, Grok Code Fast, GPT-5.2
 - Test platform: Open WebUI (open-source ChatGPT alternative)
 
 ---
