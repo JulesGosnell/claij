@@ -616,16 +616,21 @@
                  ;; Send event to entry channel
                  ;; Only add to trail if entry transition doesn't have omit=true
                  ;; Use entry-xition-id (["start" first-state]) for the from/to, not input-data
+                 ;; If context has :initial-trail, prepend it (for OpenAI compat)
                  (let [[from to] entry-xition-id
                        entry-omit? (get entry-xition "omit")
+                       base-trail (or (:initial-trail context) [])
+                       entry-trail-item {:from from :to to :event input-data}
                        initial-trail (if entry-omit?
-                                       []
-                                       [{:from from :to to :event input-data}])
+                                       base-trail
+                                       (conj (vec base-trail) entry-trail-item))
                        message {:context context
                                 :event input-data
                                 :trail initial-trail}]
                    (safe-channel-operation #(>!! entry-channel %) message)
-                   (log/info (str "   Submitted document to FSM: " start-state))))
+                   (log/info (str "   Submitted document to FSM: " start-state
+                                  (when (seq base-trail)
+                                    (str " (with " (count base-trail) " prior trail entries)"))))))
 
         await-fn (fn
                    ([] (deref completion-promise))
@@ -903,35 +908,41 @@
         expand (fn [s] (schema/expand-refs s registry))]
     (mapcat
      (fn [{:keys [from to event error]}]
-       (let [;; Look up source state to determine role
-             source-state (id->s from)
-             from-is-llm? (= "llm" (get source-state "action"))
-             role (if from-is-llm? "assistant" "user")
-             ;; Get the transition and resolve its schema (handles string lookups)
-             ix (id->x [from to])
-             ix-schema-raw (resolve-schema context ix (get ix "schema"))
-             ix-schema (expand ix-schema-raw)
-             ;; Compute output schema (JSON Schema anyOf from destination state's outgoing transitions)
-             ;; Resolve each schema then expand refs
-             output-xitions (state-output-xitions to)
-             output-schemas (mapv #(resolve-schema context % (get % "schema")) output-xitions)
-             s-schema-raw (if (= 1 (count output-schemas))
-                            (first output-schemas)
-                            {"oneOf" output-schemas})
-             s-schema (expand s-schema-raw)]
-         (cond
-           ;; Error entry - always user message with error feedback
-           error
-           [{"role" "user" "content" [(:message error) ix-schema]}]
+       ;; NEW: Handle synthetic "chat" entries from OpenAI compat layer
+       ;; These are pre-formatted messages that should pass through as-is
+       (if (= "chat" from)
+         ;; Synthetic entry - event is already a message with role/content
+         [event]
+         ;; Regular FSM entry - do the normal processing
+         (let [;; Look up source state to determine role
+               source-state (id->s from)
+               from-is-llm? (= "llm" (get source-state "action"))
+               role (if from-is-llm? "assistant" "user")
+               ;; Get the transition and resolve its schema (handles string lookups)
+               ix (id->x [from to])
+               ix-schema-raw (resolve-schema context ix (get ix "schema"))
+               ix-schema (expand ix-schema-raw)
+               ;; Compute output schema (JSON Schema anyOf from destination state's outgoing transitions)
+               ;; Resolve each schema then expand refs
+               output-xitions (state-output-xitions to)
+               output-schemas (mapv #(resolve-schema context % (get % "schema")) output-xitions)
+               s-schema-raw (if (= 1 (count output-schemas))
+                              (first output-schemas)
+                              {"oneOf" output-schemas})
+               s-schema (expand s-schema-raw)]
+           (cond
+             ;; Error entry - always user message with error feedback
+             error
+             [{"role" "user" "content" [(:message error) ix-schema]}]
 
-           ;; Assistant (LLM output) - just the document, NOT a triple
-           ;; This prevents Claude from mimicking the triple format
-           from-is-llm?
-           [{"role" "assistant" "content" event}]
+             ;; Assistant (LLM output) - just the document, NOT a triple
+             ;; This prevents Claude from mimicking the triple format
+             from-is-llm?
+             [{"role" "assistant" "content" event}]
 
-           ;; User request - show the triple for context
-           :else
-           [{"role" "user" "content" [ix-schema event s-schema]}])))
+             ;; User request - show the triple for context
+             :else
+             [{"role" "user" "content" [ix-schema event s-schema]}]))))
      trail)))
 
 (defn make-prompts
@@ -1048,14 +1059,14 @@
           ;; Check for native tools - prefer server-aware extraction when available
           ;; This gives us properly prefixed tool names for multi-server routing
           mcp-servers (get-in context [:hats :mcp :servers])
-          
+
           ;; Find MCP xition for routing tool_calls responses
           schema-resolver (fn [xition]
                             (let [raw-schema (get-in xition ["schema"])
                                   resolved (resolve-schema context xition raw-schema)]
                               (schema/expand-refs resolved registry)))
           mcp-xition (mcp-schema/find-mcp-xition output-xitions schema-resolver)
-          
+
           ;; Extract native tools - use server-aware function if we have MCP servers
           native-tools (when mcp-xition
                          (if (seq mcp-servers)
@@ -1085,7 +1096,7 @@
 
           ;; Build base prompts
           base-prompts (make-prompts fsm ix state full-trail service model)
-          
+
           ;; Add XOR instruction when native tools are present
           prompts (if native-tools
                     (let [system-msg (first base-prompts)
@@ -1096,11 +1107,11 @@
                                                           mcp-schema/xor-tool-prompt)}]
                       (cons enhanced-system rest-msgs))
                     base-prompts)]
-      
+
       (when native-tools
         (log/info (str "   Native tools detected: " (count native-tools) " tools from MCP xition")))
       (log/info (str "   Using LLM: " service "/" model " with " (count prompts) " prompts"))
-      
+
       (call
        service model
        prompts

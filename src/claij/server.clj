@@ -33,10 +33,12 @@
    [claij.fsm.registry :as registry]
    [claij.fsm.code-review-fsm :refer [code-review-fsm]]
    [claij.fsm.bdd-fsm :as bdd]
+   [claij.fsm.society-fsm :refer [society-fsm]]
    [claij.schema :as schema]
    [claij.actions :as actions]
    [claij.stt.whisper.multipart :refer [extract-bytes validate-audio]]
-   [claij.model :as model])
+   [claij.model :as model]
+   [claij.openai.compat :as openai-compat])
   (:import
    [java.net URL])
   (:gen-class))
@@ -103,6 +105,7 @@
   (do
     (registry/register-fsm! "code-review-fsm" code-review-fsm)
     (registry/register-fsm! "bdd" bdd/bdd-fsm)
+    (registry/register-fsm! "society" society-fsm)
     :initialized))
 
 ;; Backwards-compatible accessor (returns map of id -> definition)
@@ -498,6 +501,24 @@
            :responses {200 {:body string?}}
            :handler health-handler}}]
 
+   ;; OpenAI-compatible API endpoints  
+   ["/v1"
+    ["/chat/completions"
+     {:post {:summary "OpenAI-compatible chat completions"
+             :description "Run CLAIJ FSMs via OpenAI-compatible API. Use model format: claij/fsm-id"
+             :parameters {:body :map}
+             :responses {200 {:body :map}
+                         400 {:body :map}
+                         404 {:body :map}
+                         500 {:body :map}
+                         504 {:body :map}}
+             :handler openai-compat/chat-completion-handler}}]
+    ["/models"
+     {:get {:summary "List available models (FSMs)"
+            :description "Returns list of FSMs formatted as OpenAI models"
+            :responses {200 {:body :map}}
+            :handler openai-compat/list-models-handler}}]]
+
    ;; Certificate download for iOS
    ["/install-cert"
     {:get {:no-doc true
@@ -621,13 +642,36 @@ a{color:#00ff88;font-size:1.2em}ol{line-height:2}</style></head>
             :handler llm-handler}}]])
 
 ;;------------------------------------------------------------------------------
+;; CORS Middleware
+
+(defn wrap-cors
+  "Add CORS headers to allow browser-based clients (like Open WebUI) to access the API"
+  [handler]
+  (fn [request]
+    (let [response (handler request)]
+      (-> response
+          (assoc-in [:headers "Access-Control-Allow-Origin"] "*")
+          (assoc-in [:headers "Access-Control-Allow-Methods"] "GET, POST, PUT, DELETE, OPTIONS")
+          (assoc-in [:headers "Access-Control-Allow-Headers"] "Content-Type, Authorization")))))
+
+;;------------------------------------------------------------------------------
+;; Muuntaja Configuration
+
+(def muuntaja-instance
+  "Custom muuntaja instance that uses string keys instead of keywords.
+   This ensures consistency - JSON string keys stay as strings throughout."
+  (m/create
+   (-> m/default-options
+       (assoc-in [:formats "application/json" :decoder-opts] {:decode-key-fn str}))))
+
+;;------------------------------------------------------------------------------
 ;; App
 
 (def app
   (-> (ring/ring-handler
        (ring/router
         routes
-        {:data {:muuntaja m/instance
+        {:data {:muuntaja muuntaja-instance
                 :middleware [parameters/parameters-middleware
                              muuntaja/format-negotiate-middleware
                              muuntaja/format-response-middleware
@@ -647,6 +691,7 @@ a{color:#00ff88;font-size:1.2em}ol{line-height:2}</style></head>
             "/bdd" (resp/redirect "/bdd.html")
             nil))
         (ring/create-default-handler)))
+      wrap-cors
       (wrap-resource "public")))
 
 ;;------------------------------------------------------------------------------
