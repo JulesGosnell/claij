@@ -30,17 +30,21 @@
       (is (= message (:event entry))))))
 
 (deftest openai-messages->trail-test
-  (testing "converts multiple messages to trail"
+  (testing "converts multiple messages to trail, filtering system messages"
     (let [messages [{"role" "system" "content" "You are helpful"}
                     {"role" "user" "content" "Hello"}
                     {"role" "assistant" "content" "Hi there"}
                     {"role" "user" "content" "Help me"}]
-          trail (compat/openai-messages->trail messages)]
+          trail (compat/openai-messages->trail messages)
+          ;; System messages are filtered out, expect only 3 messages
+          expected-messages [{"role" "user" "content" "Hello"}
+                             {"role" "assistant" "content" "Hi there"}
+                             {"role" "user" "content" "Help me"}]]
 
-      (is (= 4 (count trail)))
+      (is (= 3 (count trail)))
       (is (every? #(= "chat" (:from %)) trail))
       (is (every? #(= "chat" (:to %)) trail))
-      (is (= messages (mapv :event trail)))))
+      (is (= expected-messages (mapv :event trail)))))
 
   (testing "handles empty message array"
     (let [trail (compat/openai-messages->trail [])]
