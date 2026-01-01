@@ -226,6 +226,16 @@
                :stream stream
                :roles message-roles}))
 
+  ;; CRITICAL: Streaming not implemented - reject streaming requests
+  ;; This prevents Open WebUI from waiting for SSE chunks that never arrive
+  (when stream
+    (log/warn "OpenAI compat: Streaming requested but not supported - rejecting request")
+    (throw (ex-info "Streaming not supported. Please disable streaming in your client settings."
+                    {:status 400
+                     :error {:message "Streaming is not currently supported by CLAIJ. Please set 'stream': false in your request."
+                             :type "invalid_request_error"
+                             :code "streaming_not_supported"}})))
+
   (try
     ;; Step 1: Parse model name to get FSM ID
     (let [fsm-id (parse-model-name model)]
