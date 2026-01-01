@@ -186,6 +186,15 @@ See [Issue #50](https://github.com/JulesGosnell/claij/issues/50) for the Evals r
 
 Voice-controlled development from the bathtub. Speak a command → STT transcribes → LLM processes with GitHub/Clojure tools → TTS speaks the response. Local Ollama inference, zero cloud costs.
 
+**Real-world win**: During a technical discussion about multimodal architecture, a feature idea emerged. Instead of context-switching to GitHub, typing a title, formatting markdown, and losing flow—the idea was spoken to the BDD FSM and became a GitHub issue in 30 seconds. **Ideas captured at the speed of thought.**
+
+The traditional workflow has fatal friction:
+- Great shower insight → "I'll write it down later" → forgotten
+- Brilliant idea while exercising → too much effort to stop → lost  
+- Important context during meeting → "I should file an issue" → never happens
+
+Voice removes the barrier. When capturing an idea is as easy as saying it, 10x more ideas survive from thought to action. No typing, no formatting, no interruption to flow state.
+
 ![BDD FSM](doc/bdd-fsm.svg)
 
 ### Multi-LLM Code Review
