@@ -212,7 +212,7 @@
                  \"finish_reason\" \"stop\"}]}
    
    Error responses:
-   - 400: Invalid model name
+   - 400: Invalid model name or streaming requested
    - 404: FSM not found
    - 500: FSM execution error
    - 504: FSM timeout"
@@ -228,79 +228,80 @@
 
   ;; CRITICAL: Streaming not implemented - reject streaming requests
   ;; This prevents Open WebUI from waiting for SSE chunks that never arrive
-  (when stream
-    (log/warn "OpenAI compat: Streaming requested but not supported - rejecting request")
-    (throw (ex-info "Streaming not supported. Please disable streaming in your client settings."
-                    {:status 400
-                     :error {:message "Streaming is not currently supported by CLAIJ. Please set 'stream': false in your request."
-                             :type "invalid_request_error"
-                             :code "streaming_not_supported"}})))
+  (if stream
+    (do
+      (log/warn "OpenAI compat: Streaming requested but not supported - rejecting request")
+      {:status 400
+       :body {"error" {"message" "Streaming is not currently supported by CLAIJ. Please set 'stream': false in your request."
+                       "type" "invalid_request_error"
+                       "code" "streaming_not_supported"}}})
 
-  (try
-    ;; Step 1: Parse model name to get FSM ID
-    (let [fsm-id (parse-model-name model)]
-      (if-not fsm-id
-        {:status 400
-         :body {"error" {"message" "Invalid model name - expected format: claij/fsm-id"
-                         "type" "invalid_request_error"}}}
+    ;; Non-streaming path
+    (try
+      ;; Step 1: Parse model name to get FSM ID
+      (let [fsm-id (parse-model-name model)]
+        (if-not fsm-id
+          {:status 400
+           :body {"error" {"message" "Invalid model name - expected format: claij/fsm-id"
+                           "type" "invalid_request_error"}}}
 
-        ;; Step 2: Look up FSM in registry
-        (if-let [fsm-entry (registry/get-fsm-entry fsm-id)]
-          (let [fsm-def (:definition fsm-entry)
+          ;; Step 2: Look up FSM in registry
+          (if-let [fsm-entry (registry/get-fsm-entry fsm-id)]
+            (let [fsm-def (:definition fsm-entry)
 
-                ;; Step 3: Convert OpenAI messages to synthetic trail entries
-                synthetic-trail (openai-messages->trail messages)
+                  ;; Step 3: Convert OpenAI messages to synthetic trail entries
+                  synthetic-trail (openai-messages->trail messages)
 
-                ;; Step 4: Create entry event from messages
-                entry-event (make-entry-event fsm-id messages)
+                  ;; Step 4: Create entry event from messages
+                  entry-event (make-entry-event fsm-id messages)
 
-                ;; Step 5: Create FSM context with initial trail
-                ;; Use OpenRouter with Claude to avoid hitting Anthropic credit limits
-                context (-> (actions/make-context
-                             {:llm/service "openrouter"
-                              :llm/model (model/openrouter-model :anthropic)})
-                            ;; NEW: Add synthetic trail to context
-                            (assoc :initial-trail synthetic-trail))
+                  ;; Step 5: Create FSM context with initial trail
+                  ;; Use OpenRouter with Claude to avoid hitting Anthropic credit limits
+                  context (-> (actions/make-context
+                               {:llm/service "openrouter"
+                                :llm/model (model/openrouter-model :anthropic)})
+                              ;; NEW: Add synthetic trail to context
+                              (assoc :initial-trail synthetic-trail))
 
-                ;; Step 6: Start FSM (it will pick up :initial-trail from context)
-                {:keys [submit await stop]} (fsm/start-fsm context fsm-def)]
+                  ;; Step 6: Start FSM (it will pick up :initial-trail from context)
+                  {:keys [submit await stop]} (fsm/start-fsm context fsm-def)]
 
-            (try
-              ;; Step 7: Submit minimal entry event
-              ;; The FSM will prepend the synthetic trail automatically
-              (submit entry-event)
+              (try
+                ;; Step 7: Submit minimal entry event
+                ;; The FSM will prepend the synthetic trail automatically
+                (submit entry-event)
 
-              ;; Step 8: Wait for completion (3 minute timeout for multi-LLM coordination)
-              (let [result (await 180000)]
-                (if (= result :timeout)
-                  {:status 504
-                   :body {"error" {"message" "FSM execution timed out"
-                                   "type" "timeout_error"}}}
+                ;; Step 8: Wait for completion (3 minute timeout for multi-LLM coordination)
+                (let [result (await 180000)]
+                  (if (= result :timeout)
+                    {:status 504
+                     :body {"error" {"message" "FSM execution timed out"
+                                     "type" "timeout_error"}}}
 
-                  ;; Step 9: Extract final event from trail
-                  (let [[_final-context trail] result
-                        final-event (fsm/last-event trail)
+                    ;; Step 9: Extract final event from trail
+                    (let [[_final-context trail] result
+                          final-event (fsm/last-event trail)
 
-                        ;; Step 10: Convert to OpenAI response format
-                        response (fsm-output->openai-response model final-event)]
+                          ;; Step 10: Convert to OpenAI response format
+                          response (fsm-output->openai-response model final-event)]
 
-                    {:status 200
-                     :body response})))
+                      {:status 200
+                       :body response})))
 
-              (finally
-                ;; Clean up FSM
-                (future (stop)))))
+                (finally
+                  ;; Clean up FSM
+                  (future (stop)))))
 
-          ;; FSM not found
-          {:status 404
-           :body {"error" {"message" (str "FSM not found: " fsm-id)
-                           "type" "invalid_request_error"}}})))
+            ;; FSM not found
+            {:status 404
+             :body {"error" {"message" (str "FSM not found: " fsm-id)
+                             "type" "invalid_request_error"}}})))
 
-    (catch Exception e
-      (log/error e "OpenAI compat: Error handling request")
-      {:status 500
-       :body {"error" {"message" (.getMessage e)
-                       "type" "internal_error"}}})))
+      (catch Exception e
+        (log/error e "OpenAI compat: Error handling request")
+        {:status 500
+         :body {"error" {"message" (.getMessage e)
+                         "type" "internal_error"}}}))))
 
 ;;------------------------------------------------------------------------------
 ;; Models Endpoint
