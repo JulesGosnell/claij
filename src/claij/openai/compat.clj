@@ -88,13 +88,34 @@
                              \"content\" <content-string>}
                  \"finish_reason\" \"stop\"}]}
    
-   The FSM output event is converted to a string for the content field.
-   We use pr-str for now - could be made more sophisticated."
+   Extracts the appropriate content field based on FSM type."
   [model-name fsm-output]
-  (let [;; Extract content from FSM output
-        ;; For now, convert the entire output to a string
-        ;; TODO: Make this more sophisticated - extract specific fields, format nicely, etc.
-        content (pr-str fsm-output)
+  (let [;; Parse model name to get FSM ID
+        fsm-id (parse-model-name model-name)
+
+        ;; Extract content based on FSM type
+        content (cond
+                  ;; Society FSM: extract summary field
+                  (= fsm-id "society")
+                  (get fsm-output "summary")
+
+                  ;; Code review FSM: extract notes field
+                  (= fsm-id "code-review-fsm")
+                  (get fsm-output "notes")
+
+                  ;; BDD FSM: would extract voice/audio field
+                  (= fsm-id "bdd")
+                  (get fsm-output "tts") ; or whatever the audio field is
+
+                  ;; Default: look for common field names, fallback to pr-str
+                  :else
+                  (or (get fsm-output "summary")
+                      (get fsm-output "answer")
+                      (get fsm-output "message")
+                      (get fsm-output "content")
+                      (get fsm-output "notes")
+                      ;; If no known fields, stringify the whole thing
+                      (pr-str fsm-output)))
 
         ;; Generate unique completion ID
         completion-id (str "chatcmpl-" (java.util.UUID/randomUUID))
