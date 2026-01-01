@@ -42,10 +42,25 @@
 (defn openai-messages->trail
   "Convert OpenAI message array to synthetic trail entries.
    
+   IMPORTANT: Filters out system messages to prevent UI metadata/prompts
+   from interfering with FSM execution. Only user and assistant messages
+   are preserved.
+   
    Takes: [{\"role\" \"system\" \"content\" \"...\"} ...]
    Returns: [{:from \"chat\" :to \"chat\" :event {...}} ...]"
   [messages]
-  (mapv openai-message->trail-entry messages))
+  (let [;; Filter to only user and assistant messages
+        ;; This prevents Open WebUI's system prompts (tagging, categorization, etc.)
+        ;; from bleeding into the FSM's conversation context
+        filtered-messages (filterv #(contains? #{"user" "assistant"} (get % "role")) messages)
+
+        ;; Log filtering for debugging
+        filtered-count (- (count messages) (count filtered-messages))]
+
+    (when (pos? filtered-count)
+      (log/info "OpenAI compat: Filtered out" filtered-count "system messages"))
+
+    (mapv openai-message->trail-entry filtered-messages)))
 
 ;;------------------------------------------------------------------------------
 ;; Model Name Parsing
@@ -203,11 +218,13 @@
    - 504: FSM timeout"
   [{{:strs [model messages stream]} :body-params :as request}]
 
-  ;; DEBUG: Log the entire request structure
-  (log/info "OpenAI compat: Full request keys:" (keys request))
-  (log/info "OpenAI compat: body-params:" (:body-params request))
-  (log/info "OpenAI compat: POST /v1/chat/completions"
-            {:model model :message-count (count messages) :stream stream})
+  ;; DEBUG: Log the request details including message roles
+  (let [message-roles (mapv #(get % "role") messages)]
+    (log/info "OpenAI compat: POST /v1/chat/completions"
+              {:model model
+               :message-count (count messages)
+               :stream stream
+               :roles message-roles}))
 
   (try
     ;; Step 1: Parse model name to get FSM ID
