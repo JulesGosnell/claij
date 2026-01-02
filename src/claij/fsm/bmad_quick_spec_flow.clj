@@ -10,7 +10,9 @@
   Agent: Barry (Quick Flow Solo Dev)
   From: _bmad/bmm/agents/quick-flow-solo-dev.md
   
-  Transformation patterns documented for meta-FSM builder (#158).")
+  Transformation patterns documented for meta-FSM builder (#158)."
+  (:require
+   [claij.schema :refer [def-fsm]]))
 
 ;; ============================================================================
 ;; BMAD Agent Persona (Extracted from quick-flow-solo-dev.md)
@@ -46,265 +48,350 @@
   - **Self-Contained**: A fresh agent can implement the feature without reading workflow history")
 
 ;; ============================================================================
-;; FSM Schema
+;; JSON Schemas
 ;; ============================================================================
 
-(def schema
-  [:map
-   [:id :keyword]
-   [:name :string]
-   [:description :string]
-   [:version :string]
-   [:states
-    [:vector
-     [:map
-      [:id :keyword]
-      [:type [:enum :llm-state :action-state :decision-state :terminal-state]]
-      [:prompt {:optional true} :string]
-      [:actions {:optional true} [:vector :map]]
-      [:transitions {:optional true}
-       [:vector
-        [:map
-         [:to :keyword]
-         [:condition {:optional true} :string]]]]]]]
-   [:initial-state :keyword]
-   [:context-schema {:optional true} :map]])
+(def bmad-quick-spec-schemas
+  "Schema definitions for Quick Spec Flow events."
+
+  {;; Entry: user provides feature request
+   "entry"
+   {"type" "object"
+    "description" "Initial feature request from user"
+    "additionalProperties" false
+    "required" ["id" "message"]
+    "properties"
+    {"id" {"const" ["start" "init"]}
+     "message" {"type" "string"
+                "description" "What feature or capability to build"}}}
+
+   ;; Init → understand: greeting sent, request captured
+   "init-to-understand"
+   {"type" "object"
+    "additionalProperties" false
+    "required" ["id" "user-request"]
+    "properties"
+    {"id" {"const" ["init" "understand-requirements"]}
+     "user-request" {"type" "string"
+                     "description" "User's feature request"}}}
+
+   ;; Understand → investigate: requirements captured
+   "understand-to-investigate"
+   {"type" "object"
+    "additionalProperties" false
+    "required" ["id" "title" "problem-statement" "solution" "scope"]
+    "properties"
+    {"id" {"const" ["understand-requirements" "investigate-codebase"]}
+     "title" {"type" "string"}
+     "problem-statement" {"type" "string"}
+     "solution" {"type" "string"}
+     "scope" {"type" "object"
+              "properties"
+              {"in-scope" {"type" "string"}
+               "out-of-scope" {"type" "string"}}}}}
+
+   ;; Investigate → generate: technical context gathered
+   "investigate-to-generate"
+   {"type" "object"
+    "additionalProperties" false
+    "required" ["id" "tech-stack" "code-patterns" "files-to-modify" "test-patterns"]
+    "properties"
+    {"id" {"const" ["investigate-codebase" "generate-plan"]}
+     "tech-stack" {"type" "array" "items" {"type" "string"}}
+     "code-patterns" {"type" "array" "items" {"type" "string"}}
+     "files-to-modify" {"type" "array" "items" {"type" "string"}}
+     "test-patterns" {"type" "array" "items" {"type" "string"}}}}
+
+   ;; Generate → review: implementation plan created
+   "generate-to-review"
+   {"type" "object"
+    "additionalProperties" false
+    "required" ["id" "generated-spec"]
+    "properties"
+    {"id" {"const" ["generate-plan" "review"]}
+     "generated-spec" {"type" "string"
+                       "description" "Complete tech spec with tasks and ACs"}}}
+
+   ;; Review → end: spec finalized
+   "exit"
+   {"type" "object"
+    "additionalProperties" false
+    "required" ["id" "final-spec-path" "task-count" "ac-count" "files-count"]
+    "properties"
+    {"id" {"const" ["review" "end"]}
+     "final-spec-path" {"type" "string"}
+     "task-count" {"type" "integer"}
+     "ac-count" {"type" "integer"}
+     "files-count" {"type" "integer"}}}})
 
 ;; ============================================================================
-;; Quick Spec Flow FSM Definition
+;; FSM Definition
 ;; ============================================================================
 
-(def fsm
-  {:id :bmad-quick-spec-flow
-   :name "BMAD Quick Spec Flow"
-   :description "Create implementation-ready technical specifications through conversational discovery, code investigation, and structured documentation. Converted from BMAD Method's create-tech-spec workflow."
-   :version "0.1.0-poc"
+(def-fsm
+  bmad-quick-spec-flow
 
-   :states
+  {"id" "bmad-quick-spec-flow"
+   "schemas" bmad-quick-spec-schemas
+   "prompts" [barry-persona
+              "You are helping a user create an implementation-ready technical specification."]
+
+   "states"
    [;; ======================================================================
     ;; INIT: Load config, greet user, get feature request
     ;; ======================================================================
-    ;; Source: workflow.md initialization + step-01-understand.md sections 1-2
-    ;; Persona: Barry from quick-flow-solo-dev.md
-    {:id :init
-     :type :llm-state
-     :prompt (str barry-persona "\n\n"
-                  "You are starting a new Quick Spec Flow session.\n\n"
-                  "**Your Role:**\n"
-                  "- Greet the user warmly and professionally\n"
-                  "- Ask what feature or capability they want to build\n"
-                  "- Keep it brief - just get the initial description\n"
-                  "- Don't ask detailed questions yet\n\n"
-                  "Output your greeting and question as a natural conversation starter.")
-     :transitions
-     [{:to :understand-requirements}]}
+    {"id" "init"
+     "action" "llm"
+     "prompts"
+     ["You are starting a new Quick Spec Flow session."
+      ""
+      "**Your Role:**"
+      "- Greet the user warmly and professionally"
+      "- Ask what feature or capability they want to build"
+      "- Keep it brief - just get the initial description"
+      "- Don't ask detailed questions yet"
+      ""
+      "Look for the user's message in the 'message' field."
+      ""
+      "Output using transition {\"id\": [\"init\", \"understand-requirements\"], \"user-request\": \"...\"}"]}
 
     ;; ======================================================================
     ;; UNDERSTAND REQUIREMENTS: Quick scan, informed questions, capture core understanding
     ;; ======================================================================
-    ;; Source: step-01-understand.md sections 2-4
-    {:id :understand-requirements
-     :type :llm-state
-     :prompt (str barry-persona "\n\n"
-                  "**Step 1 of 4: Analyze Requirement Delta**\n\n"
-                  "The user has described what they want to build: {{user-request}}\n\n"
-                  "**Your Task:**\n\n"
-                  "1. **Quick Orient Scan** (< 30 seconds):\n"
-                  "   - Search for relevant files/classes/functions the user mentioned\n"
-                  "   - Skim the structure (don't deep-dive yet - that's next step)\n"
-                  "   - Check for project-context.md\n"
-                  "   - Note: tech stack, obvious patterns, file locations\n"
-                  "   - Build mental model of the likely landscape\n\n"
-                  "2. **Ask Informed Questions**:\n"
-                  "   Instead of generic questions, ask specific ones based on what you found:\n"
-                  "   - Reference specific files/classes/patterns you found\n"
-                  "   - Ask about architectural decisions\n"
-                  "   - If no code found, ask about intended patterns\n\n"
-                  "3. **Capture Core Understanding** and confirm:\n"
-                  "   - **Title**: Clear, concise name for this work\n"
-                  "   - **Problem Statement**: What problem are we solving?\n"
-                  "   - **Solution**: High-level approach (1-2 sentences)\n"
-                  "   - **In Scope**: What's included\n"
-                  "   - **Out of Scope**: What's explicitly NOT included\n\n"
-                  "**Output Format:**\n"
-                  "Present your questions and understanding as natural dialogue.\n"
-                  "End with a clear confirmation request.")
-     :transitions
-     [{:to :investigate-codebase}]}
+    {"id" "understand-requirements"
+     "action" "llm"
+     "prompts"
+     ["**Step 1 of 4: Analyze Requirement Delta**"
+      ""
+      "The user wants to build: {{user-request}}"
+      ""
+      "**Your Task:**"
+      ""
+      "1. **Quick Orient Scan** (< 30 seconds):"
+      "   - Search for relevant files/classes/functions the user mentioned"
+      "   - Skim the structure (don't deep-dive yet - that's next step)"
+      "   - Check for project-context.md"
+      "   - Note: tech stack, obvious patterns, file locations"
+      "   - Build mental model of the likely landscape"
+      ""
+      "2. **Ask Informed Questions**:"
+      "   Instead of generic questions, ask specific ones based on what you found:"
+      "   - Reference specific files/classes/patterns you found"
+      "   - Ask about architectural decisions"
+      "   - If no code found, ask about intended patterns"
+      ""
+      "3. **Capture Core Understanding** and confirm:"
+      "   - **Title**: Clear, concise name for this work"
+      "   - **Problem Statement**: What problem are we solving?"
+      "   - **Solution**: High-level approach (1-2 sentences)"
+      "   - **In Scope**: What's included"
+      "   - **Out of Scope**: What's explicitly NOT included"
+      ""
+      "Present your questions and understanding as natural dialogue."
+      "End with a clear confirmation request."
+      ""
+      "Output using transition:"
+      "{\"id\": [\"understand-requirements\", \"investigate-codebase\"],"
+      " \"title\": \"...\","
+      " \"problem-statement\": \"...\","
+      " \"solution\": \"...\","
+      " \"scope\": {\"in-scope\": \"...\", \"out-of-scope\": \"...\"}}"]}
 
     ;; ======================================================================
     ;; INVESTIGATE CODEBASE: Deep code investigation, map technical constraints
     ;; ======================================================================
-    ;; Source: step-02-investigate.md
-    {:id :investigate-codebase
-     :type :llm-state
-     :prompt (str barry-persona "\n\n"
-                  "**Step 2 of 4: Map Technical Constraints & Anchor Points**\n\n"
-                  "**Confirmed Understanding:**\n"
-                  "- Title: {{title}}\n"
-                  "- Problem: {{problem-statement}}\n"
-                  "- Solution: {{solution}}\n"
-                  "- Scope: {{scope}}\n\n"
-                  "**Your Task:**\n\n"
-                  "Execute deep code investigation:\n\n"
-                  "1. **Read and Analyze Code**:\n"
-                  "   For each relevant file:\n"
-                  "   - Read the complete file(s)\n"
-                  "   - Identify patterns, conventions, coding style\n"
-                  "   - Note dependencies and imports\n"
-                  "   - Find related test files\n\n"
-                  "2. **If NO relevant code found (Clean Slate)**:\n"
-                  "   - Identify target directory where feature should live\n"
-                  "   - Scan parent directories for architectural context\n"
-                  "   - Identify standard project utilities or boilerplate\n"
-                  "   - Document this as 'Confirmed Clean Slate'\n\n"
-                  "3. **Document Technical Context**:\n"
-                  "   Capture and confirm:\n"
-                  "   - **Tech Stack**: Languages, frameworks, libraries\n"
-                  "   - **Code Patterns**: Architecture patterns, naming conventions, file structure\n"
-                  "   - **Files to Modify/Create**: Specific files that need changes or creation\n"
-                  "   - **Test Patterns**: How tests are structured, test frameworks used\n\n"
-                  "4. **Check for project-context.md**:\n"
-                  "   If exists, extract patterns and conventions\n\n"
-                  "**Output Format:**\n"
-                  "Present findings as a structured summary with clear sections.")
-     :transitions
-     [{:to :generate-plan}]}
+    {"id" "investigate-codebase"
+     "action" "llm"
+     "prompts"
+     ["**Step 2 of 4: Map Technical Constraints & Anchor Points**"
+      ""
+      "**Confirmed Understanding:**"
+      "- Title: {{title}}"
+      "- Problem: {{problem-statement}}"
+      "- Solution: {{solution}}"
+      "- Scope: {{scope.in-scope}}"
+      ""
+      "**Your Task:**"
+      ""
+      "Execute deep code investigation:"
+      ""
+      "1. **Read and Analyze Code**:"
+      "   For each relevant file:"
+      "   - Read the complete file(s)"
+      "   - Identify patterns, conventions, coding style"
+      "   - Note dependencies and imports"
+      "   - Find related test files"
+      ""
+      "2. **If NO relevant code found (Clean Slate)**:"
+      "   - Identify target directory where feature should live"
+      "   - Scan parent directories for architectural context"
+      "   - Identify standard project utilities or boilerplate"
+      "   - Document this as 'Confirmed Clean Slate'"
+      ""
+      "3. **Document Technical Context**:"
+      "   Capture and confirm:"
+      "   - **Tech Stack**: Languages, frameworks, libraries"
+      "   - **Code Patterns**: Architecture patterns, naming conventions, file structure"
+      "   - **Files to Modify/Create**: Specific files that need changes or creation"
+      "   - **Test Patterns**: How tests are structured, test frameworks used"
+      ""
+      "4. **Check for project-context.md**:"
+      "   If exists, extract patterns and conventions"
+      ""
+      "Present findings as a structured summary with clear sections."
+      ""
+      "Output using transition:"
+      "{\"id\": [\"investigate-codebase\", \"generate-plan\"],"
+      " \"tech-stack\": [\"...\", \"...\"],"
+      " \"code-patterns\": [\"...\", \"...\"],"
+      " \"files-to-modify\": [\"...\", \"...\"],"
+      " \"test-patterns\": [\"...\", \"...\"]}"]}
 
     ;; ======================================================================
     ;; GENERATE PLAN: Create implementation tasks and acceptance criteria
     ;; ======================================================================
-    ;; Source: step-03-generate.md
-    {:id :generate-plan
-     :type :llm-state
-     :prompt (str barry-persona "\n\n"
-                  ready-for-dev-standard "\n\n"
-                  "**Step 3 of 4: Generate Implementation Plan**\n\n"
-                  "**Context:**\n"
-                  "- Title: {{title}}\n"
-                  "- Problem: {{problem-statement}}\n"
-                  "- Solution: {{solution}}\n"
-                  "- Tech Stack: {{tech-stack}}\n"
-                  "- Code Patterns: {{code-patterns}}\n"
-                  "- Files to Modify: {{files-to-modify}}\n"
-                  "- Test Patterns: {{test-patterns}}\n\n"
-                  "**Your Task:**\n\n"
-                  "Generate specific implementation tasks:\n\n"
-                  "1. **Task Breakdown**:\n"
-                  "   - Each task should be discrete, completable unit of work\n"
-                  "   - Order logically (dependencies first)\n"
-                  "   - Include specific files to modify in each task\n"
-                  "   - Be explicit about what changes to make\n\n"
-                  "   Format:\n"
-                  "   ```\n"
-                  "   - [ ] Task N: Clear action description\n"
-                  "     - File: `path/to/file.ext`\n"
-                  "     - Action: Specific change to make\n"
-                  "     - Notes: Any implementation details\n"
-                  "   ```\n\n"
-                  "2. **Acceptance Criteria** (Given/When/Then format):\n"
-                  "   ```\n"
-                  "   - [ ] AC N: Given [precondition], when [action], then [expected result]\n"
-                  "   ```\n\n"
-                  "   Cover:\n"
-                  "   - Happy path functionality\n"
-                  "   - Error handling\n"
-                  "   - Edge cases (if relevant)\n"
-                  "   - Integration points (if relevant)\n\n"
-                  "3. **Additional Context**:\n"
-                  "   - Dependencies (external libraries, services, etc.)\n"
-                  "   - Testing Strategy (unit tests, integration tests, manual testing)\n"
-                  "   - Notes (high-risk items, known limitations, future considerations)\n\n"
-                  "**Output Format:**\n"
-                  "Present the complete plan in a clear, structured format.\n"
-                  "Remember: This must meet the Ready for Development standard!")
-     :transitions
-     [{:to :review}]}
+    {"id" "generate-plan"
+     "action" "llm"
+     "prompts"
+     [ready-for-dev-standard
+      ""
+      "**Step 3 of 4: Generate Implementation Plan**"
+      ""
+      "**Context:**"
+      "- Title: {{title}}"
+      "- Problem: {{problem-statement}}"
+      "- Solution: {{solution}}"
+      "- Tech Stack: {{tech-stack}}"
+      "- Code Patterns: {{code-patterns}}"
+      "- Files to Modify: {{files-to-modify}}"
+      "- Test Patterns: {{test-patterns}}"
+      ""
+      "**Your Task:**"
+      ""
+      "Generate specific implementation tasks:"
+      ""
+      "1. **Task Breakdown**:"
+      "   - Each task should be discrete, completable unit of work"
+      "   - Order logically (dependencies first)"
+      "   - Include specific files to modify in each task"
+      "   - Be explicit about what changes to make"
+      ""
+      "   Format:"
+      "   ```"
+      "   - [ ] Task N: Clear action description"
+      "     - File: `path/to/file.ext`"
+      "     - Action: Specific change to make"
+      "     - Notes: Any implementation details"
+      "   ```"
+      ""
+      "2. **Acceptance Criteria** (Given/When/Then format):"
+      "   ```"
+      "   - [ ] AC N: Given [precondition], when [action], then [expected result]"
+      "   ```"
+      ""
+      "   Cover:"
+      "   - Happy path functionality"
+      "   - Error handling"
+      "   - Edge cases (if relevant)"
+      "   - Integration points (if relevant)"
+      ""
+      "3. **Additional Context**:"
+      "   - Dependencies (external libraries, services, etc.)"
+      "   - Testing Strategy (unit tests, integration tests, manual testing)"
+      "   - Notes (high-risk items, known limitations, future considerations)"
+      ""
+      "Present the complete plan in a clear, structured format."
+      "Remember: This must meet the Ready for Development standard!"
+      ""
+      "Output using transition:"
+      "{\"id\": [\"generate-plan\", \"review\"],"
+      " \"generated-spec\": \"...complete spec as markdown...\"}"]}
 
     ;; ======================================================================
     ;; REVIEW: Present spec, get feedback, verify standard
     ;; ======================================================================
-    ;; Source: step-04-review.md sections 1-2
-    {:id :review
-     :type :llm-state
-     :prompt (str barry-persona "\n\n"
-                  ready-for-dev-standard "\n\n"
-                  "**Step 4 of 4: Review & Finalize**\n\n"
-                  "**Complete Tech-Spec:**\n"
-                  "{{generated-spec}}\n\n"
-                  "**Your Task:**\n\n"
-                  "1. **Present the complete spec** to the user\n"
-                  "2. **Provide a quick summary**:\n"
-                  "   - Number of tasks\n"
-                  "   - Number of acceptance criteria\n"
-                  "   - Number of files to modify\n\n"
-                  "3. **Ask**: 'Does this capture your intent? Any changes needed?'\n\n"
-                  "4. **If changes requested**:\n"
-                  "   - Make the edits\n"
-                  "   - Re-present affected sections\n"
-                  "   - Loop until satisfied\n\n"
-                  "5. **Verify Ready for Development Standard**:\n"
-                  "   - If spec doesn't meet standard, point out gaps\n"
-                  "   - Propose improvements\n"
-                  "   - Make edits once user agrees\n\n"
-                  "**Output Format:**\n"
-                  "Natural dialogue with clear presentation of the spec and summary.")
-     :transitions
-     [{:to :complete}]}
+    {"id" "review"
+     "action" "llm"
+     "prompts"
+     [ready-for-dev-standard
+      ""
+      "**Step 4 of 4: Review & Finalize**"
+      ""
+      "**Complete Tech-Spec:**"
+      "{{generated-spec}}"
+      ""
+      "**Your Task:**"
+      ""
+      "1. **Present the complete spec** to the user"
+      "2. **Provide a quick summary**:"
+      "   - Number of tasks"
+      "   - Number of acceptance criteria"
+      "   - Number of files to modify"
+      ""
+      "3. **Ask**: 'Does this capture your intent? Any changes needed?'"
+      ""
+      "4. **If changes requested**:"
+      "   - Make the edits"
+      "   - Re-present affected sections"
+      "   - Loop until satisfied"
+      ""
+      "5. **Verify Ready for Development Standard**:"
+      "   - If spec doesn't meet standard, point out gaps"
+      "   - Propose improvements"
+      "   - Make edits once user agrees"
+      ""
+      "Use natural dialogue with clear presentation of the spec and summary."
+      ""
+      "When user confirms the spec is good, output using transition:"
+      "{\"id\": [\"review\", \"end\"],"
+      " \"final-spec-path\": \"/path/to/spec.md\","
+      " \"task-count\": N,"
+      " \"ac-count\": N,"
+      " \"files-count\": N}"]}
 
     ;; ======================================================================
-    ;; COMPLETE: Terminal state - success
+    ;; END: Terminal state - success
     ;; ======================================================================
-    ;; Source: step-04-review.md section 5
-    {:id :complete
-     :type :terminal-state
-     :prompt (str "**Tech-Spec Complete!**\n\n"
-                  "Saved to: {{final-spec-path}}\n\n"
-                  "**Summary:**\n"
-                  "- {{task-count}} implementation tasks\n"
-                  "- {{ac-count}} acceptance criteria\n"
-                  "- {{files-count}} files to modify\n\n"
-                  "**Next Steps:**\n"
-                  "The spec is ready for implementation. A fresh dev agent can now "
-                  "use this spec to implement the feature without needing context "
-                  "from this conversation.\n\n"
-                  "Ship it!")}]
+    {"id" "end"
+     "action" "end"}]
 
-   :initial-state :init
+   "xitions"
+   [;; Entry
+    {"id" ["start" "init"]
+     "schema" {"$ref" "#/$defs/entry"}}
 
-   :context-schema
-   {:user-request :string
-    :title :string
-    :problem-statement :string
-    :solution :string
-    :scope {:in-scope :string
-            :out-of-scope :string}
-    :tech-stack [:vector :string]
-    :code-patterns [:vector :string]
-    :files-to-modify [:vector :string]
-    :test-patterns [:vector :string]
-    :generated-spec :string
-    :final-spec-path :string
-    :task-count :int
-    :ac-count :int
-    :files-count :int}})
+    ;; Init → understand
+    {"id" ["init" "understand-requirements"]
+     "schema" {"$ref" "#/$defs/init-to-understand"}}
+
+    ;; Understand → investigate
+    {"id" ["understand-requirements" "investigate-codebase"]
+     "schema" {"$ref" "#/$defs/understand-to-investigate"}}
+
+    ;; Investigate → generate
+    {"id" ["investigate-codebase" "generate-plan"]
+     "schema" {"$ref" "#/$defs/investigate-to-generate"}}
+
+    ;; Generate → review
+    {"id" ["generate-plan" "review"]
+     "schema" {"$ref" "#/$defs/generate-to-review"}}
+
+    ;; Review → end
+    {"id" ["review" "end"]
+     "schema" {"$ref" "#/$defs/exit"}}]})
 
 ;; ============================================================================
-;; Validation
+;; Inspection
 ;; ============================================================================
-
-;; Note: Schema is defined for documentation purposes. 
-;; Malli validation is optional and not required for FSM execution.
 
 (comment
   ;; Inspect FSM
-  fsm
+  bmad-quick-spec-flow
 
   ;; Check states
-  (count (:states fsm))
-  (mapv :id (:states fsm))
+  (count (get bmad-quick-spec-flow "states"))
+  (mapv #(get % "id") (get bmad-quick-spec-flow "states"))
 
   ;; Check transitions
-  (->> (:states fsm)
-       (map (fn [s] [(:id s) (-> s :transitions first :to)]))
-       (into {})))
+  (->> (get bmad-quick-spec-flow "xitions")
+       (map #(get % "id"))))
