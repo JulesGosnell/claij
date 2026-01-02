@@ -22,7 +22,7 @@ An FSM that generates FSMs—specifically, an FSM that converts BMAD Method work
 
 ## FSM Architecture
 
-![BMAD Converter Meta-FSM Graph](http://localhost:8080/fsm/bmad-converter/graph.svg?hats=true)
+![BMAD Converter Meta-FSM Graph](bmad-converter.svg)
 
 ### States
 
