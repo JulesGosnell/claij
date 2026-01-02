@@ -13,6 +13,12 @@ This document captures the transformation patterns discovered during manual conv
 **Location:** `_bmad/bmm/workflows/bmad-quick-flow/create-tech-spec/`  
 **Result:** `src/claij/fsm/bmad_quick_spec_flow.clj`
 
+### FSM Architecture
+
+![BMAD Quick Spec Flow FSM](./bmad-quick-spec-flow.svg)
+
+The PoC conversion produced a 6-state FSM with linear flow: init → understand-requirements → investigate-codebase → generate-plan → review → end
+
 ## Transformation Patterns
 
 ### 1. Agent → Persona Constant
