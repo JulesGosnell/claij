@@ -10,9 +10,7 @@
   Agent: Barry (Quick Flow Solo Dev)
   From: _bmad/bmm/agents/quick-flow-solo-dev.md
   
-  Transformation patterns documented for meta-FSM builder (#158)."
-  (:require
-   [malli.core :as m]))
+  Transformation patterns documented for meta-FSM builder (#158).")
 
 ;; ============================================================================
 ;; BMAD Agent Persona (Extracted from quick-flow-solo-dev.md)
@@ -295,15 +293,18 @@
 ;; Validation
 ;; ============================================================================
 
-(defn validate-fsm
-  "Validate the FSM against schema."
-  []
-  (m/validate schema fsm))
+;; Note: Schema is defined for documentation purposes. 
+;; Malli validation is optional and not required for FSM execution.
 
 (comment
-  ;; Validate FSM structure
-  (validate-fsm)
-  ;; => true (if valid)
-
   ;; Inspect FSM
-  fsm)
+  fsm
+
+  ;; Check states
+  (count (:states fsm))
+  (mapv :id (:states fsm))
+
+  ;; Check transitions
+  (->> (:states fsm)
+       (map (fn [s] [(:id s) (-> s :transitions first :to)]))
+       (into {})))
