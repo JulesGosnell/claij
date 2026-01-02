@@ -48,3 +48,7 @@ node_modules/
 package-lock.json
 foo.clj
 POLYMARKE.txt
+
+# BMAD Method installation and output
+_bmad/
+_bmad-output/
