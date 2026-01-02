@@ -39,7 +39,7 @@ Step 3: Do Z                   State 3: LLM does Z
 
 ## FSM Architecture
 
-![BMAD Quick Spec Flow Graph](bmad-quick-spec-flow.svg)
+![BMAD Quick Spec Flow Graph](./bmad-quick-spec-flow.svg)
 
 ### States
 
