@@ -34,6 +34,8 @@
    [claij.fsm.code-review-fsm :refer [code-review-fsm]]
    [claij.fsm.bdd-fsm :as bdd]
    [claij.fsm.society-fsm :refer [society-fsm]]
+   [claij.fsm.bmad-quick-spec-flow :refer [bmad-quick-spec-flow]]
+   [claij.fsm.bmad-converter-fsm :refer [bmad-converter-fsm]]
    [claij.schema :as schema]
    [claij.actions :as actions]
    [claij.stt.whisper.multipart :refer [extract-bytes validate-audio]]
@@ -106,6 +108,8 @@
     (registry/register-fsm! "code-review-fsm" code-review-fsm)
     (registry/register-fsm! "bdd" bdd/bdd-fsm)
     (registry/register-fsm! "society" society-fsm)
+    (registry/register-fsm! "bmad-quick-spec-flow" bmad-quick-spec-flow)
+    (registry/register-fsm! "bmad-converter" bmad-converter-fsm)
     :initialized))
 
 ;; Backwards-compatible accessor (returns map of id -> definition)
