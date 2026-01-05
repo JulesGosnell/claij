@@ -1,6 +1,7 @@
 (ns claij.actions
   (:require
    [clojure.tools.logging :as log]
+   [clojure.core.async :as async]
    [claij.action :refer [def-action action? action-name action-config-schema]]
    [claij.llm :refer [call]]
    [claij.fsm :refer [start-fsm llm-action]]
@@ -36,79 +37,99 @@
     (when-let [p (:fsm/completion-promise context)]
       (deliver p [(dissoc context :fsm/completion-promise) trail]))))
 
-(def-action user-action
-  "FSM action that pauses execution and waits for user input via SSE.
+(defn make-user-action
+  "Create a user-action factory with FSM-specific adapter functions.
    
-   Creates a promise and stores it in context where the SSE endpoint can find it.
-   The SSE /resume/:id endpoint delivers user input to the promise.
+   This function creates a generic string-based user input action with adapters
+   to convert between FSM-specific types and strings. The coupling between
+   the action and FSM types happens in the context setup, not in the action itself.
    
-   Config schema:
-   - \"prompt\" (string) - Message to show the user
-   - \"timeout-ms\" (integer, optional) - Max wait time in ms (default: 300000 = 5 minutes)
-   - \"timeout-to\" (string) - State to transition to on timeout
-   - \"input-to\" (string) - State to transition to on successful input
+   Adapter functions:
+   - I->s: (fn [input-event] -> String) - Extract prompt from FSM input event
+   - s->S: (fn [input-event user-string] -> Success-event) - Convert user response to FSM success type
+   - ->F: (fn [input-event] -> Failure-event) - Generate FSM failure type on timeout
+   - no-socket->F: (fn [] -> Failure-event) - Generate FSM failure when socket missing
    
-   The action:
-   1. Creates an input-promise
-   2. Stores it in context under :user-action/input-promise
-   3. Stores prompt under :user-action/prompt
-   4. Waits (with timeout) for promise delivery
-   5. Transitions to timeout-to or input-to depending on result
+   The returned action:
+   1. Checks for :sse/socket in context (errors if missing)
+   2. Extracts prompt via I->s
+   3. Sends prompt via socket
+   4. Waits for response (with timeout)
+   5. On success: converts via s->S
+   6. On timeout: generates via ->F
+   7. On missing socket: generates via no-socket->F
    
-   SSE Integration:
-   - SSE endpoint checks for :user-action/input-promise in context
-   - If present, pushes prompt to client via SSE
-   - When client responds via /resume, delivers to promise
-   - Action wakes up and continues FSM
+   Example:
+   ```clojure
+   (def story-user-action
+     (make-user-action
+       ;; I->s: Extract prompt
+       (fn [input]
+         (str \"Story #\" (get input \"story-id\") \": \" (get input \"question\")))
+       
+       ;; s->S: Success conversion
+       (fn [input user-string]
+         {\"id\" [\"ask-user\" \"implement\"]
+          \"story-id\" (get input \"story-id\")
+          \"question\" (get input \"question\")
+          \"user-answer\" user-string})
+       
+       ;; ->F: Timeout conversion
+       (fn [input]
+         {\"id\" [\"ask-user\" \"timeout\"]
+          \"story-id\" (get input \"story-id\")
+          \"question\" (get input \"question\")
+          \"timeout\" true})
+       
+       ;; no-socket->F: Missing socket
+       (fn []
+         {\"id\" [\"ask-user\" \"end\"]
+          \"error\" \"no-socket\"})))
    
-   Example config:
-   {\"prompt\" \"What authentication method? (JWT/OAuth)\"
-    \"timeout-ms\" 300000
-    \"timeout-to\" \"timeout-state\"
-    \"input-to\" \"process-input\"}"
-  {:config {"type" "object"
-            "required" ["prompt" "timeout-to" "input-to"]
-            "properties" {"prompt" {"type" "string"}
-                          "timeout-ms" {"type" "integer"}
-                          "timeout-to" {"type" "string"}
-                          "input-to" {"type" "string"}}}
-   :input true
-   :output true}
-  [config _fsm _ix {state-id "id"}]
-  (fn [context event _trail handler]
-    (let [prompt (get config "prompt")
-          timeout-ms (get config "timeout-ms" 300000)
-          timeout-to (get config "timeout-to")
-          input-to (get config "input-to")
+   ;; Register in context
+   (assoc-in context [:id->action \"story-user\"] story-user-action)
+   ```"
+  [I->s s->S ->F no-socket->F]
+  ;; Return action factory matching def-action protocol
+  (fn [config _fsm _ix _state]
+    (let [timeout-ms (get config "timeout-ms" 300000)]
+      (fn [context event _trail handler]
+        ;; Check for SSE socket in context
+        (if-let [sse-socket (:sse/socket context)]
+          (let [;; Extract prompt string via I->s adapter
+                prompt (I->s event)
 
-          ;; Create promise for user input
-          input-promise (promise)
+                ;; Create promise for user input
+                input-promise (promise)
 
-          ;; Store in context for SSE endpoint to find
-          context' (assoc context
-                          :user-action/input-promise input-promise
-                          :user-action/prompt prompt
-                          :user-action/input-type (get event "input-type" "text"))]
+                ;; Store in context for socket delivery
+                context' (assoc context
+                                :user-action/input-promise input-promise
+                                :user-action/prompt prompt)]
 
-      (log/info (str "   [WAIT] User input required: " prompt))
-      (log/info (str "   Timeout: " timeout-ms "ms"))
+            (log/info (str "   [WAIT] User input required: " prompt))
+            (log/info (str "   Timeout: " timeout-ms "ms"))
 
-      ;; Wait asynchronously for input (don't block FSM thread)
-      (future
-        (let [result (deref input-promise timeout-ms ::timeout)]
-          (if (= result ::timeout)
-            ;; Timeout - transition to timeout state
-            (do
-              (log/warn (str "   [TIMEOUT] No user response after " timeout-ms "ms"))
-              (handler context' {"id" [state-id timeout-to]
-                                 "timeout" true
-                                 "prompt" prompt}))
-            ;; Got input - transition to input state
-            (do
-              (log/info "   [OK] User responded")
-              (handler context' {"id" [state-id input-to]
-                                 "user-input" result
-                                 "prompt" prompt}))))))))
+            ;; Send prompt via SSE socket
+            (async/>!! sse-socket {:type :prompt :content prompt})
+
+            ;; Wait asynchronously for input
+            (future
+              (let [user-string (deref input-promise timeout-ms ::timeout)]
+                (if (= user-string ::timeout)
+                  ;; Timeout - convert via ->F adapter
+                  (do
+                    (log/warn (str "   [TIMEOUT] No user response after " timeout-ms "ms"))
+                    (handler context' (->F event)))
+                  ;; Success - convert via s->S adapter
+                  (do
+                    (log/info (str "   [OK] User responded: " user-string))
+                    (handler context' (s->S event user-string)))))))
+
+          ;; No socket - log error and exit
+          (do
+            (log/error "   [ERROR] user-action requires :sse/socket in context")
+            (handler context (no-socket->F))))))))
 
 (def-action fork-action
   "Placeholder for FSM forking (NOT IMPLEMENTED)"
@@ -384,9 +405,10 @@
    Exception: fsm-action-factory is a value (not var) because it's
    created dynamically by make-fsm-action.
    
+   Note: 'user' action removed - use make-user-action with FSM-specific adapters.
+   
    This map can be extended or overridden via context at runtime."
   {"llm" #'llm-action
-   "user" #'user-action
    "triage" #'triage-action
    "reuse" #'reuse-action
    "fork" #'fork-action
