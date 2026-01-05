@@ -16,13 +16,16 @@
   "Major LLM models to test"
   [{:name "Claude Sonnet 4.5"
     :model "claude-sonnet-4-5-20250929"
-    :vendor :anthropic}
+    :vendor :anthropic
+    :service "anthropic"}
    {:name "Claude Opus 4.1"
     :model "claude-opus-4-1-20250514"
-    :vendor :anthropic}
+    :vendor :anthropic
+    :service "anthropic"}
    {:name "Claude Haiku 4.5"
     :model "claude-haiku-4-5-20251001"
-    :vendor :anthropic}])
+    :vendor :anthropic
+    :service "anthropic"}])
 
 (def read-file-tool
   "Simple read_file tool for testing"
@@ -145,10 +148,16 @@
     (try
       ;; Call LLM and get back the raw response map
       (llm/call-llm-sync llm/default-registry
-                         "anthropic"
+                         (or (:service model) "anthropic")
                          (:model model)
                          messages
                          {:tools [read-file-tool]})
+      (catch clojure.lang.ExceptionInfo e
+        ;; Extract error details from clj-http exception
+        (let [data (ex-data e)
+              body (some-> data :body)]
+          {:error (str "HTTP " (:status data) ": " (.getMessage e))
+           :error-body body}))
       (catch Exception e
         {:error (.getMessage e)}))))
 
