@@ -3,8 +3,8 @@
    
    Tests whether we can prompt major LLMs to include custom execution
    metadata as siblings to the content field in their responses."
-  (:require [claij.anthropic-client :as client]
-            [claij.json :as json]
+  (:require [claij.llm.service :as llm]
+            [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]))
 
@@ -26,12 +26,13 @@
 
 (def read-file-tool
   "Simple read_file tool for testing"
-  {:name "read_file"
-   :description "Read a file from the filesystem"
-   :input_schema {:type "object"
-                  :properties {:path {:type "string"
-                                      :description "Path to the file"}}
-                  :required ["path"]}})
+  {"type" "function"
+   "function" {"name" "read_file"
+               "description" "Read a file from the filesystem"
+               "parameters" {"type" "object"
+                             "properties" {"path" {"type" "string"
+                                                   "description" "Path to the file"}}
+                             "required" ["path"]}}})
 
 ;; =============================================================================
 ;; Prompting Strategies
@@ -134,41 +135,40 @@
   [model strategy]
   (let [messages (cond-> []
                    (:system-prompt strategy)
-                   (conj {:role "user"
-                          :content (:system-prompt strategy)})
+                   (conj {"role" "system"
+                          "content" (:system-prompt strategy)})
 
                    true
-                   (conj {:role "user"
-                          :content (:user-prompt strategy)}))
-
-        request {:model (:model model)
-                 :max_tokens 2000
-                 :messages messages
-                 :tools [read-file-tool]}]
+                   (conj {"role" "user"
+                          "content" (:user-prompt strategy)}))]
 
     (try
-      (client/messages request)
+      ;; Call LLM and get back the raw response map
+      (llm/call-llm-sync llm/default-registry
+                         "anthropic"
+                         (:model model)
+                         messages
+                         {:tools [read-file-tool]})
       (catch Exception e
         {:error (.getMessage e)}))))
 
 (defn has-execution-field?
   "Check if response has custom execution field at top level"
   [response]
-  (contains? response :execution))
+  (or (contains? response "execution")
+      (contains? response :execution)))
 
 (defn has-execution-in-content?
   "Check if any content block has execution metadata"
   [response]
-  (when-let [content (:content response)]
-    (some #(contains? % :execution) content)))
+  ;; For Anthropic responses parsed by llm/service, we don't get raw content blocks
+  ;; We'd need the raw response to check this
+  false)
 
 (defn count-tool-calls
   "Count number of tool_use blocks in response"
   [response]
-  (when-let [content (:content response)]
-    (->> content
-         (filter #(= "tool_use" (:type %)))
-         count)))
+  (count (get response "tool_calls")))
 
 (defn analyze-response
   "Analyze response for execution metadata"
@@ -176,7 +176,7 @@
   {:has-top-level-execution? (has-execution-field? response)
    :has-execution-in-content? (has-execution-in-content? response)
    :tool-call-count (count-tool-calls response)
-   :stop-reason (:stop_reason response)
+   :stop-reason (get response "stop_reason")
    :error (when (:error response) (:error response))})
 
 ;; =============================================================================
