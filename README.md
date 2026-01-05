@@ -61,33 +61,70 @@
 
 ### The Problem with "Plan Mode" and "Sub-Agents"
 
-Claude Code, Auto-Claude, and similar tools implement agent coordination through what appears to be a sophisticated multi-agent system. Under the hood, it's a simpler mechanism: a client-side enum that switches between prompt sets via MCP.
+Claude Code, Auto-Claude, and similar tools implement agent coordination through what appears to be a sophisticated multi-agent system. Under the hood, it's a simpler mechanism that combines client-side state management with fresh context isolation.
 
-Here's how it works:
+**How Anthropic's Sub-Agents Work:**
 
-1. **Single-Level State**: The client maintains a flag (e.g., `"normal"`, `"planning"`, `"coding"`) that controls which prompt is injected
-2. **Sub-Agent Pattern**: When an LLM needs specialized behavior, it requests a flag change via MCP
-3. **Implicit Return**: Each "sub-agent" knows to reset the flag back to default on completion
-4. **Nesting Limitation**: Because state is a single enum, you can only nest one level deep
-5. **Vendor Lock-In**: "Sub-agents" are just different prompts to the same Claude model
+1. **State Flag**: Client maintains an enum (`"normal"`, `"planning"`, `"coding"`) that controls which prompt is injected
+2. **Fresh Context**: Each sub-agent starts with a **clean slate**—no conversation history from the parent
+3. **Context Isolation**: Sub-agents "return only the relevant findings" to prevent parent context pollution
+4. **Single-Level Nesting**: Sub-agents cannot spawn other sub-agents (prevents infinite nesting)
+5. **Implicit Return**: Sub-agents know to return control to parent on completion
+6. **Tool-Based Control Flow**: State transitions triggered via MCP tool calls (`Task`, `EnterPlanMode`)
 
-This creates the *illusion* of nested agents while remaining fundamentally flat.
+**What This Achieves:**
+- **Context Management**: Fresh contexts prevent token overflow during long-running tasks
+- **Specialization**: Different prompts + tool restrictions per sub-agent type
+- **Efficiency**: Haiku-powered sub-agents for exploration (cheaper than Opus/Sonnet throughout)
+
+**Limitations:**
+- **No Deep Nesting**: Can't compose sub-agents recursively
+- **No Context Stack**: Parent context not accessible to child, child context discarded except for return value
+- **Same Vendor**: All sub-agents use Claude models
+- **Tool Overloading**: MCP tools repurposed for control flow, not just external actions
 
 **The Tool Overloading Problem**: Claude Code repurposes MCP tools—designed for external actions with side effects—as control flow signals. `EnterPlanMode` doesn't read a file or call an API; it does literally nothing except tell the client to inject different prompts. Tools have become a hammer, and everything—including state transitions—has become a nail. CLAIJ separates concerns: tools are for actions, FSMs are for control flow.
 
 ### CLAIJ's Approach: True Composable Intelligence
 
-CLAIJ provides what Anthropic's system hints at but cannot deliver—truly composable, nested agent workflows:
+CLAIJ provides what industry approaches hint at but cannot fully deliver—truly composable, nested agent workflows with explicit control over both prompts and context flow.
 
-| Feature | Anthropic Sub-Agents | CLAIJ FSMs |
-|---------|---------------------|-----------|
-| **Nesting Depth** | 1 level (enum limitation) | Arbitrary depth (sub-FSMs) |
-| **State Management** | Implicit flag reset | Explicit state transitions |
-| **Vendor Choice** | Same LLM, different prompts | Any LLM per state |
-| **Context Preservation** | Fresh context per sub-agent, no stack | Full context stack through nested sub-FSMs |
-| **Self-Determination** | LLM requests enum change | LLM fully controls FSM execution |
-| **Extensibility** | Enum values hardcoded by Anthropic | User-defined states and transitions |
-| **Visibility** | Black-box enum switching | FSM graphs, state trails, full observability |
+#### Industry Comparison
+
+| Feature | Anthropic Sub-Agents | OpenAI Handoffs | LangGraph State | CLAIJ FSMs |
+|---------|---------------------|-----------------|-----------------|-----------|
+| **Nesting Depth** | 1 level only | Arbitrary | Arbitrary | Arbitrary |
+| **Context Flow** | Fresh (clean slate) | Full history passed | Explicit state object | **Configurable** (NYI) |
+| **Prompt Control** | Hardcoded types | Agent-specific | Middleware-based | **User-defined per state** |
+| **Vendor Lock-In** | Claude only | OpenAI preferred | Provider-agnostic | **Any LLM per state** |
+| **State Management** | Implicit enum | Session-based | Graph state object | **Explicit FSM transitions** |
+| **Tool Access** | Per-type restrictions | Per-agent config | Per-node tools | **Hat system** |
+| **Visibility** | Black-box | API logs | Graph visualization | **FSM graphs + trails** |
+| **Self-Determination** | LLM requests enum | LLM triggers handoff | LLM navigates graph | **LLM selects transitions via schema** |
+
+**How They Differ:**
+
+- **Anthropic**: Optimized for context management via fresh contexts, but limited to single-level delegation
+- **OpenAI**: Flexible handoffs with full context passing, but less structured than FSMs
+- **LangGraph**: Explicit state machines with sophisticated graph semantics, but requires learning graph concepts
+- **CLAIJ**: Schema-driven FSMs with **user-defined prompt control** and planned **LLM-driven context control**
+
+#### CLAIJ's Current State & Roadmap
+
+**Implemented:**
+- ✅ User-defined prompts per FSM state
+- ✅ Multi-vendor LLM selection per state
+- ✅ Schema-driven state transitions (LLM chooses path via output)
+- ✅ Arbitrary-depth sub-FSM composition (planned)
+- ✅ Explicit state management via FSM transitions
+
+**Not Yet Implemented (NYI):**
+- ⏳ **Fine-grained context control**: LLM-driven decisions about what context to pass to next state/sub-FSM
+- ⏳ Context transformation operators (filter, summarize, merge, fresh)
+- ⏳ Sub-FSM context isolation patterns (à la Anthropic)
+- ⏳ Context stack visualization and debugging
+
+See [Issue #TBD] for the full context control roadmap.
 
 ### Example: Multi-Vendor Agent Composition
 
