@@ -297,6 +297,136 @@ This keeps the FSM definition clean while providing powerful tooling capabilitie
 
 ---
 
+## QA-as-FSM: Automated Testing That Understands Your Project
+
+**What if your QA system could read your issue tracker, PR discussions, and development conversations—then generate comprehensive test plans that target actual risks, not generic checklists?**
+
+CLAIJ's QA-FSM is automated testing with genuine understanding. It combines LLM-driven exploratory testing with deep project context to find bugs that traditional QA misses.
+
+### The Problem: QA Is Expensive and Incomplete
+
+Modern applications need testing across multiple dimensions:
+- **Functional**: Does it work?
+- **Accessibility**: WCAG compliance, screen readers
+- **Performance**: Load times, N+1 queries, bundle sizes
+- **Security**: XSS, SQL injection, authentication flaws
+- **Visual**: Cross-browser rendering, responsive design
+- **Mobile**: Touch gestures, offline mode, platform-specific bugs
+- **API**: Contract compliance, error handling, rate limits
+
+**Traditional approach**:
+- Manual QA team: £50k-80k per tester × 3-5 people = **£150k-400k/year**
+- Test automation engineers: Fixed scripts that break on UI changes
+- Slow feedback: Days to run full suite, then manual triage
+- Coverage gaps: Some tests skipped due to time/cost
+- Context loss: QA team only sees specs, not the "why" behind features
+
+### The CLAIJ Solution: Context-Aware QA
+
+The QA-FSM orchestrates 7 specialist testing agents (functional, accessibility, performance, security, visual, mobile, API) that run in parallel via MCP-connected tools (Playwright, axe-core, Lighthouse, OWASP ZAP, Appium).
+
+**But here's the killer feature**: Before generating tests, QA-FSM reads your entire development history via GitHub MCP:
+
+```clojure
+{"id" "ingest-context"
+ "action" "llm"
+ "hats" ["mcp-github"]
+ "prompts" ["Read all issues, PRs, and development conversations.
+             Extract: feature intentions, edge cases discussed,
+             performance concerns, security risks, known limitations.
+             Build a comprehensive test plan targeting actual risks."]}
+```
+
+**What this means**:
+
+| Traditional QA Gets | QA-FSM Gets |
+|---------------------|-------------|
+| "Add policy upload feature" | **WHY**: "CQC inspections require proof staff read policies" |
+| "Users can upload PDFs" | **EDGE CASE**: "What if carer doesn't sign but gets assigned a shift?" |
+| *Acceptance criteria only* | **CONCERN**: "PDF rendering might fail on mobile Safari" (from PR discussion) |
+|  | **DECISION**: "Warn, don't block, with logged overrides" (from issue thread) |
+|  | **RISK**: "Large PDFs >10MB might timeout" (from dev conversation) |
+|  | **TECH DEBT**: "Simple versioning; may need refactor at 1000+ policies" |
+
+The test plan is **informed by what developers actually worried about**, not generic "does it work?" scenarios.
+
+### Development Workflow Integration
+
+QA-FSM gets smarter when integrated with your development process. When closing a story, the development LLM adds structured QA hints:
+
+```markdown
+## QA Hints (Auto-Generated)
+
+### Edge Cases to Test
+- Large file uploads (>10MB) - timeout risk identified in PR #142
+- Concurrent policy updates - last-write-wins, no conflict resolution
+
+### Known Limitations  
+- Policy list not paginated - may be slow with 1000+ policies
+
+### Performance Risks
+- N+1 query in policy list endpoint - monitor in production
+```
+
+Takes 30 seconds per story. Feeds QA-FSM with developer domain knowledge. Documents technical decisions for future engineers.
+
+### Real-World Impact
+
+**Scenario**: A care management app with medication tracking, shift scheduling, compliance reporting.
+
+**Traditional QA** (3 testers, 2 weeks):
+- Test happy paths from specs
+- Miss edge case: "What if carer logs medication for wrong client?"
+- Miss performance issue: "Shift list with 1000+ carers loads slowly"
+- Miss security flaw: "Admin cookies not marked HttpOnly"
+- **Cost**: £15k for 2 weeks, incomplete coverage
+
+**QA-FSM** (2 hours, fully automated):
+- Reads 50 closed issues, 30 merged PRs, development conversation logs
+- Generates targeted test plan for all identified risks
+- Executes 7 specialist test suites in parallel
+- **Finds the edge cases**: Tests medication logging with wrong client (discussed in issue #87)
+- **Finds the performance issue**: Tests shift list with 1500 carers (concern raised in PR #45)
+- **Finds the security flaw**: Security audit catches cookie flags (OWASP ZAP check)
+- **Cost**: ~£50 in LLM + compute costs
+
+**Savings**: £15k → £50 per release cycle. **300× cost reduction.**
+
+### Why This Is Genuinely Novel
+
+| Capability | Traditional QA | Cypress/Selenium | BrowserStack | QA-FSM |
+|------------|----------------|------------------|--------------|---------|
+| **Functional testing** | ✓ Manual | ✓ Fixed scripts | ✓ Manual | ✓ LLM-driven exploration |
+| **Multi-dimensional** | ✓ Separate teams | ✗ | ✓ Manual | ✓ Parallel specialists |
+| **Adapts to changes** | ✓ Humans flexible | ✗ Scripts break | ✓ Manual | ✓ LLM re-explores |
+| **Context awareness** | Limited | None | None | **Full project history** |
+| **Cost per run** | £1,000-5,000 | Low | £100-500 | £20-100 |
+| **Time to results** | 2-5 days | Hours | 1-2 days | 2 hours |
+
+No other automated QA tool **reads your development conversations to understand what could go wrong**. QA-FSM catches bugs that humans discussed but forgot to test.
+
+### Product Vision
+
+This isn't just a CLAIJ feature—it's a shrink-wrapped product:
+
+```bash
+claij run qa-fsm --config qa-config.edn
+# → Full QA report in 2 hours, all dimensions tested
+```
+
+**Business model**:
+- **Free tier**: Functional testing only
+- **Pro tier** (£500/month): All 7 test dimensions + context ingestion
+- **Enterprise** (£5k/month): Custom FSMs, on-prem, dev workflow integration
+
+**Target market**: Any software team spending >£100k/year on QA. SaaS companies, agencies, enterprise dev teams.
+
+**The pitch**: *"Automated QA that thinks like a human tester, executes like a machine, understands your project like your best engineer—for 1% of the cost of a QA team."*
+
+**📖 [Full Technical Details: Issue #163 →](https://github.com/JulesGosnell/claij/issues/163)**
+
+---
+
 ## Roadmap
 
 ### The FSM-FSM (In Progress)
