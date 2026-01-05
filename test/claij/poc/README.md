@@ -1,212 +1,115 @@
-# PoC: LLM Response to Custom Tool Flags
+# PoC: Batch Execution Flags
 
-**Issue:** [#165](https://github.com/JulesGosnell/claij/issues/165)  
-**Status:** Preliminary findings documented  
-**Date:** 2026-01-05
+**Goal:** Test if we can persuade LLMs to output custom batch-level execution flags.
 
-## Question
+## Quick Start
 
-Will LLMs (Claude, GPT-4, etc.) voluntarily use CLAIJ-proprietary tool execution flags (`parallel`, `failFast`, `atomic`) when offered in tool definitions?
+```clojure
+;; From REPL
+(require '[claij.poc.batch-execution-flags :as poc])
+(poc/run-poc)
+```
 
-## Answer (Preliminary)
+This will:
+1. Test 3 Claude models × 4 prompting strategies = 12 tests
+2. Save raw JSON responses to `test/claij/poc/results/`
+3. Generate results table in `test/claij/poc/results/RESULTS.md`
+4. Print summary to console
 
-**No.** LLMs do not meaningfully process custom schema flags without explicit prompting.
+## What We're Testing
 
-## Key Findings
-
-### ❌ Schema Flags Don't Work
-
-Adding custom fields to tool schemas:
+Can we prompt LLMs to output:
 ```json
 {
-  "name": "edit_file",
-  "claij:parallel": true,  // ← LLM ignores this
-  "claij:failFast": false,
-  "claij:atomic": false
+  "content": [...tool calls...],
+  "execution": {           // ← Custom top-level field
+    "parallel": true,      // ← Execution hint
+    "failFast": false
+  }
 }
 ```
 
-**Result:** LLMs treat these as unrecognized metadata (like comments) and ignore them.
+## Models Tested
 
-### ✅ Explicit Prompting Works
+- Claude Sonnet 4.5
+- Claude Opus 4.1
+- Claude Haiku 4.5
 
-Including execution hints in prompts:
+## Prompting Strategies
+
+1. **Explicit Instructions** - Detailed system prompt explaining format
+2. **Example-Driven** - Show examples of desired output
+3. **Imperative Command** - Direct command to include metadata
+4. **Minimal** - No hints, test natural behavior
+
+## Expected Output
+
+### Results Table
 ```
-"These file edits are independent and can be done in parallel. 
-The edit_file tool supports parallel execution."
-```
-
-**Result:** LLMs respond to explicit instructions and adjust behavior accordingly.
-
-## Implications for CLAIJ
-
-### DON'T: Add Custom Flags to Tool Schemas
-
-**Reason:** LLMs don't process them.
-
-**What was proposed:**
-```clojure
-{"name" "github:apply-patch"
- "claij:parallel" true   ; ← Won't influence LLM
- "claij:atomic" true}    ; ← LLM won't care
+| Model | Strategy | Tool Calls | Top-Level Exec? | Content Exec? | Stop Reason | Error |
+|-------|----------|------------|-----------------|---------------|-------------|-------|
+| ...   | ...      | ...        | ✅/❌           | ✅/❌         | ...         | ...   |
 ```
 
-### DO: Use These Alternatives
+### Summary Statistics
+- Total success rate
+- By model breakdown
+- By strategy breakdown
 
-#### 1. Prompt Engineering
+## Interpreting Results
 
-Include execution hints in FSM prompts:
-```clojure
-{"action" "llm"
- "prompts" ["These operations are independent - do them in parallel for efficiency."
-            "Available tools: edit_file (parallel-safe), run_test (sequential)."]}
-```
+**✅ Top-Level Exec** = Model outputted `execution` as sibling to `content`  
+→ **PLAN A WORKS!** LLM can be prompted to output custom fields
 
-#### 2. Tool Design
+**❌ Top-Level Exec** = No execution field found  
+→ Either:
+- LLM refuses to output non-standard fields
+- Anthropic's API strips them before returning
+- Check raw JSON files to confirm
 
-Build inherent properties into tools:
-```clojure
-{"name" "github:apply-patch"
- "description" "Apply unified diff atomically via git apply. All changes succeed or all fail."
- ;; Atomicity comes from git apply, not from schema flag
-}
-```
-
-#### 3. CLAIJ-Level Metadata
-
-Add execution hints at FSM level, not tool level:
-```clojure
-{"action" "llm"
- "tools" ["edit_file"]
- "execution" {              ; For CLAIJ executor, not LLM
-   "parallel" true
-   "fail-fast" false}}
-```
-
-CLAIJ's executor reads this metadata and decides how to orchestrate tool calls.
-
-## Test Harness
-
-**File:** `test/claij/poc/tool_flags.clj` (336 lines)
-
-**Structure:**
-- Tool definitions (with and without flags)
-- Test prompts (implicit vs. explicit)
-- Analysis functions
-- Automated test suite
-- Results logging
-
-**To run:**
-```bash
-clojure -M:test -n claij.poc.tool-flags
-```
-
-**Note:** Currently uses mock responses. Replace `simulate-llm-response` with actual API calls for real experiments.
-
-## Experiments Designed
-
-### Phase 1: Baseline
-Test behavior without any flags.
-
-### Phase 2: Implicit
-Flags in schema, not mentioned in prompt.
-
-### Phase 3: Explicit
-Flags in schema + prompt mentions them.
-
-### Phase 4: Conflict
-Prompt contradicts schema flag.
-
-### Phase 5: Multi-Vendor
-Test across Claude, GPT-4, Gemini.
-
-## Self-Analysis
-
-**File:** `test/claij/poc/claude_self_analysis.md`
-
-Claude (me) analyzed my own likely behavior with these flags:
-
-### Predicted Behavior
-
-**Parallel calls:**
-- Schema only → Sequential (default)
-- Explicit prompt → Parallel (already supported)
-
-**FailFast:**
-- Schema only → No acknowledgment
-- Explicit prompt → Acknowledge and plan sequentially
-
-**Atomic:**
-- Schema only → No special treatment
-- Explicit prompt → Acknowledge transactional semantics
-
-**Conclusion:** All behavior is prompt-driven, not schema-driven.
-
-## Confidence Levels
-
-| Claim | Confidence |
-|-------|-----------|
-| Schema flags don't influence Claude | 90% |
-| Schema flags don't influence GPT-4/Gemini | 85% |
-| Explicit prompts do work | 95% |
-| Tool design for atomicity works | 95% |
+**✅ Content Exec** = Model put execution metadata inside content blocks  
+→ LLM tried but misunderstood format
 
 ## Next Steps
 
-1. ✅ Test harness implemented
-2. ✅ Self-analysis documented
-3. ⏳ Run experiments with actual API calls
-4. ⏳ Test other vendors (GPT-4, Gemini)
-5. ⏳ Document final results
-6. ⏳ Update Issue #162 with recommendations
+### If ✅ (Success)
+- Implement in CLAIJ immediately
+- Document best prompting strategy
+- Build executor that reads flags
 
-## Impact on Issue #162
+### If ❌ (Failure)
+- Check raw JSON: Is field present but stripped?
+- If stripped: File Anthropic feature request
+- If not present: Fall back to Plan B (per-call flags)
 
-**Original proposal:** Use `parallel`/`failFast`/`atomic` flags in tool schemas.
+## Files Created
 
-**PoC finding:** This won't work.
+- `batch_execution_flags.clj` - Test harness
+- `results/` - Raw JSON responses
+- `results/RESULTS.md` - Results table and summary
 
-**Recommended alternative:**
-1. Design `github:apply-patch` tool to be inherently atomic (via `git apply`)
-2. Use prompt engineering to guide LLM behavior
-3. Add execution metadata at CLAIJ FSM level for orchestration
+## Adding More Models
 
-**Example revised approach:**
+To test GPT-4, Gemini, etc:
+
 ```clojure
-;; In FSM definition
-{"action" "llm"
- "prompts" ["Generate a unified diff patch for all changes. This will be applied atomically."]
- "tools" [{"name" "github:apply-patch"
-           "description" "Apply unified diff patch. Uses git apply for atomic all-or-nothing semantics."}]
- "execution" {
-   "validate-patch" true  ; CLAIJ validates before applying
-   "dry-run-first" true}} ; CLAIJ does dry run
+(def models-to-test
+  [...
+   {:name "GPT-4"
+    :model "gpt-4-turbo"
+    :vendor :openai}])
 ```
 
-## Files in This PoC
+(Requires implementing OpenAI client)
 
+## Manual Inspection
+
+Raw responses saved as:
 ```
-test/claij/poc/
-├── README.md                     # This file
-├── tool_flags.clj                # Test harness (336 lines)
-├── experiment_log.md             # Experiment design
-├── claude_self_analysis.md       # Detailed findings
-└── results/                      # Test results (created at runtime)
+test/claij/poc/results/
+  Claude_Sonnet_4.5_Strategy_1_Explicit_Instructions.json
+  Claude_Sonnet_4.5_Strategy_2_Example-Driven.json
+  ...
 ```
 
-## Related Issues
-
-- [#165](https://github.com/JulesGosnell/claij/issues/165) - This PoC
-- [#162](https://github.com/JulesGosnell/claij/issues/162) - Atomic Multi-File Changesets
-
-## Conclusion
-
-**The PoC answers the core question:** Custom tool schema flags (`claij:parallel`, `claij:failFast`, `claij:atomic`) **do not** meaningfully influence LLM behavior.
-
-**For CLAIJ development:**
-- Don't pollute tool schemas with unrecognized fields
-- Use prompt engineering for LLM behavior guidance
-- Design tools with inherent properties (atomicity via `git apply`)
-- Add execution metadata at FSM level for CLAIJ's orchestration
-
-**Status:** Preliminary findings based on self-analysis. Actual experiments with real API calls will validate these predictions.
+Inspect these to see exactly what the API returns.
