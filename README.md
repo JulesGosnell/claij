@@ -73,6 +73,8 @@ Here's how it works:
 
 This creates the *illusion* of nested agents while remaining fundamentally flat.
 
+**The Tool Overloading Problem**: Claude Code repurposes MCP tools—designed for external actions with side effects—as control flow signals. `EnterPlanMode` doesn't read a file or call an API; it does literally nothing except tell the client to inject different prompts. Tools have become a hammer, and everything—including state transitions—has become a nail. CLAIJ separates concerns: tools are for actions, FSMs are for control flow.
+
 ### CLAIJ's Approach: True Composable Intelligence
 
 CLAIJ provides what Anthropic's system hints at but cannot deliver—truly composable, nested agent workflows:
@@ -82,7 +84,7 @@ CLAIJ provides what Anthropic's system hints at but cannot deliver—truly compo
 | **Nesting Depth** | 1 level (enum limitation) | Arbitrary depth (sub-FSMs) |
 | **State Management** | Implicit flag reset | Explicit state transitions |
 | **Vendor Choice** | Same LLM, different prompts | Any LLM per state |
-| **Context Preservation** | Single conversation | Full context thread through sub-FSMs |
+| **Context Preservation** | Fresh context per sub-agent, no stack | Full context stack through nested sub-FSMs |
 | **Self-Determination** | LLM requests enum change | LLM fully controls FSM execution |
 | **Extensibility** | Enum values hardcoded by Anthropic | User-defined states and transitions |
 | **Visibility** | Black-box enum switching | FSM graphs, state trails, full observability |
