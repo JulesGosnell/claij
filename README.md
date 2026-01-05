@@ -57,6 +57,73 @@
 
 ---
 
+## CLAIJ vs. Industry Agent Systems
+
+### The Problem with "Plan Mode" and "Sub-Agents"
+
+Claude Code, Auto-Claude, and similar tools implement agent coordination through what appears to be a sophisticated multi-agent system. Under the hood, it's a simpler mechanism: a client-side enum that switches between prompt sets via MCP.
+
+Here's how it works:
+
+1. **Single-Level State**: The client maintains a flag (e.g., `"normal"`, `"planning"`, `"coding"`) that controls which prompt is injected
+2. **Sub-Agent Pattern**: When an LLM needs specialized behavior, it requests a flag change via MCP
+3. **Implicit Return**: Each "sub-agent" knows to reset the flag back to default on completion
+4. **Nesting Limitation**: Because state is a single enum, you can only nest one level deep
+5. **Vendor Lock-In**: "Sub-agents" are just different prompts to the same Claude model
+
+This creates the *illusion* of nested agents while remaining fundamentally flat.
+
+### CLAIJ's Approach: True Composable Intelligence
+
+CLAIJ provides what Anthropic's system hints at but cannot deliver—truly composable, nested agent workflows:
+
+| Feature | Anthropic Sub-Agents | CLAIJ FSMs |
+|---------|---------------------|-----------|
+| **Nesting Depth** | 1 level (enum limitation) | Arbitrary depth (sub-FSMs) |
+| **State Management** | Implicit flag reset | Explicit state transitions |
+| **Vendor Choice** | Same LLM, different prompts | Any LLM per state |
+| **Context Preservation** | Single conversation | Full context thread through sub-FSMs |
+| **Self-Determination** | LLM requests enum change | LLM fully controls FSM execution |
+| **Extensibility** | Enum values hardcoded by Anthropic | User-defined states and transitions |
+| **Visibility** | Black-box enum switching | FSM graphs, state trails, full observability |
+
+### Example: Multi-Vendor Agent Composition
+
+In CLAIJ, an FSM can delegate to a sub-FSM that uses a completely different LLM:
+
+```clojure
+{"id" "architect"
+ "action" "llm"
+ "service" "openai:gpt-4"    ;; Strategic planning with GPT-4
+ "transitions" [{"target" "implement"
+                 "schema" {"$ref" "#/$defs/implementation-plan"}}]}
+
+{"id" "implement"
+ "action" "sub-fsm"
+ "fsm-id" "specialist-coder"  ;; Delegates to Claude Sonnet
+ "transitions" [...]}
+```
+
+The `specialist-coder` sub-FSM might use Claude Sonnet for code generation, then return results to the parent FSM where GPT-4 continues strategic decision-making. **Full conversational context flows down into the sub-FSM and results flow back up.** You can nest these arbitrarily—an FSM that calls an FSM that calls an FSM—each with the optimal LLM for that concern.
+
+Try doing that with Anthropic's single-enum approach.
+
+### Why This Matters
+
+1. **Vendor Flexibility**: Not locked into a single provider. Use Claude for reasoning, GPT for instruction-following, Gemini for multimodal, Grok for real-time data—all in one workflow.
+
+2. **Cost Optimization**: Route expensive tasks to powerful models, routine tasks to cheaper ones—within the same FSM execution.
+
+3. **True Composability**: Build FSM libraries. A "code review" FSM becomes a reusable component in a "release preparation" FSM. Composition at any depth.
+
+4. **User-Defined Intelligence**: Anthropic decides what "plan mode" means. With CLAIJ, *you* define what your agents do—their prompts, their constraints, their coordination patterns.
+
+5. **Transparent Orchestration**: The FSM *is* the documentation. States, transitions, schemas—all visible, all versioned, all improvable by the system itself.
+
+Anthropic's approach is a clever hack—a pragmatic way to add agent-like behavior to a chat interface. CLAIJ is an architecture—a foundation for systems where LLMs coordinate, specialize, and improve themselves. The difference matters when you're building something that needs to scale beyond "planning mode" and actually orchestrate multiple intelligences toward a goal.
+
+---
+
 ## The Philosophy
 
 **For a system to improve itself, it must first understand itself.**
