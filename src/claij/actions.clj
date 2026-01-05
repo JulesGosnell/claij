@@ -36,6 +36,80 @@
     (when-let [p (:fsm/completion-promise context)]
       (deliver p [(dissoc context :fsm/completion-promise) trail]))))
 
+(def-action user-action
+  "FSM action that pauses execution and waits for user input via SSE.
+   
+   Creates a promise and stores it in context where the SSE endpoint can find it.
+   The SSE /resume/:id endpoint delivers user input to the promise.
+   
+   Config schema:
+   - \"prompt\" (string) - Message to show the user
+   - \"timeout-ms\" (integer, optional) - Max wait time in ms (default: 300000 = 5 minutes)
+   - \"timeout-to\" (string) - State to transition to on timeout
+   - \"input-to\" (string) - State to transition to on successful input
+   
+   The action:
+   1. Creates an input-promise
+   2. Stores it in context under :user-action/input-promise
+   3. Stores prompt under :user-action/prompt
+   4. Waits (with timeout) for promise delivery
+   5. Transitions to timeout-to or input-to depending on result
+   
+   SSE Integration:
+   - SSE endpoint checks for :user-action/input-promise in context
+   - If present, pushes prompt to client via SSE
+   - When client responds via /resume, delivers to promise
+   - Action wakes up and continues FSM
+   
+   Example config:
+   {\"prompt\" \"What authentication method? (JWT/OAuth)\"
+    \"timeout-ms\" 300000
+    \"timeout-to\" \"timeout-state\"
+    \"input-to\" \"process-input\"}"
+  {:config {"type" "object"
+            "required" ["prompt" "timeout-to" "input-to"]
+            "properties" {"prompt" {"type" "string"}
+                          "timeout-ms" {"type" "integer"}
+                          "timeout-to" {"type" "string"}
+                          "input-to" {"type" "string"}}}
+   :input true
+   :output true}
+  [config _fsm _ix {state-id "id"}]
+  (fn [context event _trail handler]
+    (let [prompt (get config "prompt")
+          timeout-ms (get config "timeout-ms" 300000)
+          timeout-to (get config "timeout-to")
+          input-to (get config "input-to")
+
+          ;; Create promise for user input
+          input-promise (promise)
+
+          ;; Store in context for SSE endpoint to find
+          context' (assoc context
+                          :user-action/input-promise input-promise
+                          :user-action/prompt prompt
+                          :user-action/input-type (get event "input-type" "text"))]
+
+      (log/info (str "   [WAIT] User input required: " prompt))
+      (log/info (str "   Timeout: " timeout-ms "ms"))
+
+      ;; Wait asynchronously for input (don't block FSM thread)
+      (future
+        (let [result (deref input-promise timeout-ms ::timeout)]
+          (if (= result ::timeout)
+            ;; Timeout - transition to timeout state
+            (do
+              (log/warn (str "   [TIMEOUT] No user response after " timeout-ms "ms"))
+              (handler context' {"id" [state-id timeout-to]
+                                 "timeout" true
+                                 "prompt" prompt}))
+            ;; Got input - transition to input state
+            (do
+              (log/info "   [OK] User responded")
+              (handler context' {"id" [state-id input-to]
+                                 "user-input" result
+                                 "prompt" prompt}))))))))
+
 (def-action fork-action
   "Placeholder for FSM forking (NOT IMPLEMENTED)"
   {"type" "object"}
@@ -312,6 +386,7 @@
    
    This map can be extended or overridden via context at runtime."
   {"llm" #'llm-action
+   "user" #'user-action
    "triage" #'triage-action
    "reuse" #'reuse-action
    "fork" #'fork-action
