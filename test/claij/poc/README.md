@@ -2,12 +2,26 @@
 
 **Goal:** Test if we can persuade LLMs to output custom batch-level execution flags.
 
+**Status:** ⚠️ **DISABLED** - Requires API credits (see Issue #165)
+
 ## Quick Start
 
+⚠️ **This test is disabled by default** because it requires API credits.
+
+To enable:
+```bash
+# Set environment variable
+export ENABLE_POC_TESTS=true
+
+# Then run from REPL
+clj -M -e "(require '[claij.poc.batch-execution-flags :as poc]) (poc/run-poc)"
+```
+
+Or from Clojure:
 ```clojure
 ;; From REPL
 (require '[claij.poc.batch-execution-flags :as poc])
-(poc/run-poc)
+(poc/run-poc)  ; Will print warning if ENABLE_POC_TESTS not set
 ```
 
 This will:

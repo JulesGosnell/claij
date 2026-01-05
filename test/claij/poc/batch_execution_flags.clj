@@ -305,13 +305,20 @@
 ;; =============================================================================
 
 (defn run-poc
-  "Run the complete PoC and generate results"
+  "Run the complete PoC and generate results
+   
+   NOTE: This test requires API credits and is DISABLED by default.
+   To run, set environment variable: ENABLE_POC_TESTS=true"
   []
-  (let [results (doall (run-all-tests))]
-    (save-results results)
-    (println (generate-results-table results))
-    (println (generate-summary results))
-    results))
+  (if (System/getenv "ENABLE_POC_TESTS")
+    (let [results (doall (run-all-tests))]
+      (save-results results)
+      (println (generate-results-table results))
+      (println (generate-summary results))
+      results)
+    (println "\n⚠️  PoC DISABLED: This test requires API credits."
+             "\n   To enable, set: ENABLE_POC_TESTS=true"
+             "\n   See Issue #165 for details.\n")))
 
 (comment
   ;; Run the full PoC
