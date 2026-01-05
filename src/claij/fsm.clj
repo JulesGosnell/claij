@@ -15,6 +15,33 @@
    [claij.mcp.schema :as mcp-schema]))
 
 ;;------------------------------------------------------------------------------
+;; CLAIJ Terminology
+;;------------------------------------------------------------------------------
+;;
+;; CLAIJ uses specific terms for core concepts to avoid collisions with external
+;; LLM terminology. See Issue #164 for detailed discussion.
+;;
+;; - TRAIL: The complete execution record of an FSM traversal, containing:
+;;   * Events (LLM request/response pairs, tool calls, etc.)
+;;   * FSM metadata (state transitions, validation results)
+;;   Richer than just "conversation messages" - it's the audit log.
+;;   External equivalent: "context" (Anthropic), "messages" (OpenAI).
+;;
+;; - PROMPTS: System instructions defined per FSM state.
+;;   External equivalent: "system prompt", "instructions".
+;;
+;; - CONTEXT (name TBD): Internal data structure passed between FSM states.
+;;   *** NAMING COLLISION: The external LLM world uses "context" to mean
+;;   conversation history (our "trail"), but CLAIJ uses "context" for the
+;;   internal FSM data bag. A better name is needed.
+;;   Candidates considered: state (collides with FSM state), session (wrong scope),
+;;   traversal/xversal (collides with xition in parameter names: xversal/xition).
+;;   External equivalent: "state" (LangGraph), "runtime context", "session".
+;;   Status: Awaiting bath-time inspiration.
+;;
+;; See https://github.com/JulesGosnell/claij/issues/164 for full rationale.
+
+;;------------------------------------------------------------------------------
 ;; Action Dispatch Helpers
 ;;------------------------------------------------------------------------------
 
